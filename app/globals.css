@@ -1,26 +1,108 @@
 @import "tailwindcss";
 
+/* ---------------------------------------------------------------------------
+   Pit Wall — editorial white & F1-red theme (fixed light, no system dark)
+--------------------------------------------------------------------------- */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --paper: #ffffff;
+  --panel: #f6f6f7;
+  --panel-2: #efeff1;
+  --ink: #0b0b0c;
+  --ink-soft: #3f3f46;
+  --muted: #8a8a92;
+  --line: #e3e3e6;
+  --line-strong: #cfcfd4;
+
+  --red: #e10600;
+  --red-dark: #b00500;
+  --red-tint: #fdecea;
+
+  --carbon: #111114;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-paper: var(--paper);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-red: var(--red);
+  --color-red-dark: var(--red-dark);
+  --color-red-tint: var(--red-tint);
+  --color-carbon: var(--carbon);
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-display);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  border-color: var(--line);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Editorial display headings */
+.font-display {
+  font-family: var(--font-display), Georgia, "Times New Roman", serif;
+}
+
+/* Tabular figures for all timing / points numbers */
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* Thin uppercase eyebrow labels */
+.eyebrow {
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+/* Subtle carbon-fibre texture for dark panels */
+.carbon-bg {
+  background-color: var(--carbon);
+  background-image:
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.03) 0 1px, transparent 1px 6px),
+    repeating-linear-gradient(-45deg, rgba(255, 255, 255, 0.03) 0 1px, transparent 1px 6px);
+}
+
+/* Blinking "live" dot */
+@keyframes pulse-live {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.82); }
+}
+.live-dot {
+  animation: pulse-live 1.1s ease-in-out infinite;
+}
+
+/* Car markers glide continuously across the whole poll interval so motion looks
+   smooth instead of "snap then freeze". Duration matches F1_LIVE.pollMs (2.5s). */
+.car-dot {
+  transition: transform 2.5s linear;
+}
+
+/* News-ticker marquee — the track holds the sequence twice and slides one copy
+   width (-50%) so it loops seamlessly. Pauses on hover. */
+@keyframes ticker-roll {
+  to {
+    transform: translateX(-50%);
+  }
+}
+.ticker-track {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  animation: ticker-roll linear infinite;
+  will-change: transform;
+}
+.ticker-track:hover {
+  animation-play-state: paused;
 }

@@ -1,36 +1,47 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Pit Wall — F1 Live Dashboard
 
-## Getting Started
+An editorial (white & F1-red) Formula 1 dashboard built with **Next.js + TypeScript**:
 
-First, run the development server:
+- **Drivers' Championship** & **Constructors' Cup** standings — live from the API
+- **Season calendar** (all rounds, highlights the next race)
+- **Countdown** to the next race ("lights out in…")
+- **Live driver tracking** during a session: a **track map** with moving car dots
+  *and* a **live timing board** (positions, gaps/intervals, tyre compound)
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## Data sources (free, no API key)
+
+| Data | Source |
+| --- | --- |
+| Standings, calendar, next race | [Jolpica-F1](https://github.com/jolpica/jolpica-f1) (Ergast successor) — `lib/jolpica.ts` |
+| Live positions, intervals, tyres, car GPS | [OpenF1](https://openf1.org/) — `lib/openf1.ts` |
+
+Standings/calendar are fetched server-side and cached for 1h (ISR). Live data is
+polled client-side from OpenF1 every few seconds while a session is running.
+
+## Live vs. replay demo
+
+Live tracking only has data while cars are on track. To let you **see it working any
+time**, the app ships in **replay mode**: it replays a real past 2026 session against a
+virtual clock, so the dots move and the board updates exactly as they would live.
+
+Toggle in [`lib/liveConfig.ts`](lib/liveConfig.ts):
+
+```ts
+replay: { enabled: true, ... }   // demo: replays a real past session
+replay: { enabled: false, ... }  // production: auto-detect a genuinely live session
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+With `enabled: false`, the dashboard auto-detects a live practice/qualifying/race and
+shows it in real time; otherwise the live panel shows "next session in…".
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Run
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm install
+npm run dev      # http://localhost:3000
+npm run build && npm start   # production
+```
 
-## Learn More
+Deploy free on Vercel (`vercel`) or any Node host — no backend or database required.
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Not affiliated with Formula 1. Data © their respective providers.

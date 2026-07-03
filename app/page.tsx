@@ -1,65 +1,84 @@
-import Image from "next/image";
+import {
+  getConstructorStandings,
+  getDriverStandings,
+  getNextRace,
+  getSchedule,
+} from "@/lib/jolpica";
+import { getPaddockIntel } from "@/lib/news";
+import Hero from "./components/Hero";
+import Section from "./components/Section";
+import DriversTable from "./components/DriversTable";
+import ConstructorsTable from "./components/ConstructorsTable";
+import Calendar from "./components/Calendar";
+import PaddockIntel from "./components/PaddockIntel";
+import LiveSection from "./components/live/LiveSection";
 
-export default function Home() {
+// Rebuild standings/calendar hourly (they only change after a race weekend).
+export const revalidate = 1800;
+
+export default async function Page() {
+  const [nextRace, drivers, constructors, schedule, intel] = await Promise.all([
+    getNextRace(),
+    getDriverStandings().catch(() => []),
+    getConstructorStandings().catch(() => []),
+    getSchedule().catch(() => []),
+    getPaddockIntel().catch(() => []),
+  ]);
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <main className="mx-auto w-full max-w-350 px-4 py-6 sm:px-8 sm:py-8">
+      {/* Masthead */}
+      <header className="mb-6 flex flex-wrap items-center justify-between gap-3 border-b-4 border-ink pb-3">
+        <h1 className="font-display text-3xl leading-none sm:text-5xl">
+          <span className="text-ink">Krishna Shravan&apos;s </span>
+          <span className="text-red">Pit Wall</span>
+        </h1>
+        <span className="flex items-center gap-2 rounded-sm border border-red px-2 py-1">
+          <span className="live-dot h-2 w-2 rounded-full bg-red" />
+          <span className="eyebrow text-[0.6rem] text-red">Live Edition</span>
+        </span>
+      </header>
+
+      <div className="flex flex-col gap-10">
+        {/* Current weekend + calendar strip directly beneath it */}
+        <div className="flex flex-col gap-4">
+          <Hero race={nextRace} />
+          {schedule.length > 0 && (
+            <Calendar races={schedule} nextRound={nextRace?.round} />
+          )}
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        <LiveSection />
+
+        {/* Wide 3-column row: standings + paddock intel use the side space */}
+        <div className="grid gap-10 lg:grid-cols-3">
+          <Section title="Drivers'" emphasis="Championship" hint="2026 · latest round">
+            {drivers.length ? (
+              <DriversTable standings={drivers} />
+            ) : (
+              <p className="text-sm text-muted">Standings unavailable right now.</p>
+            )}
+          </Section>
+
+          <Section title="Constructors'" emphasis="Championship" hint="2026 season">
+            {constructors.length ? (
+              <ConstructorsTable standings={constructors} />
+            ) : (
+              <p className="text-sm text-muted">Standings unavailable right now.</p>
+            )}
+          </Section>
+
+          <Section title="Paddock" emphasis="Intel" hint="Latest F1 news">
+            <PaddockIntel items={intel} />
+          </Section>
         </div>
-      </main>
-    </div>
+      </div>
+
+      <footer className="mt-12 border-t border-line pt-5 text-center">
+        <p className="font-display text-lg italic">
+          For the fans, <span className="text-red">from a fan</span>.
+        </p>
+      </footer>
+    </main>
   );
 }
