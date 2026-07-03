@@ -69,8 +69,8 @@ export default function SessionResults() {
         </span>
       </div>
 
-      {/* Line 2: rolling results */}
-      <div className="relative overflow-hidden pl-6 sm:pl-8">
+      {/* Line 2: rolling results (edge-to-edge, fades both sides) */}
+      <div className="relative overflow-hidden">
         <div className="ticker-track" style={{ animationDuration: `${duration}s` }}>
           {[0, 1].map((copy) => (
             <span key={copy} className="inline-flex shrink-0" aria-hidden={copy === 1}>
@@ -80,7 +80,8 @@ export default function SessionResults() {
             </span>
           ))}
         </div>
-        {/* Soft fade at the right edge into the card */}
+        {/* Soft fade at both edges into the card */}
+        <div className="pointer-events-none absolute inset-y-0 left-0 w-10 bg-linear-to-r from-carbon to-transparent" />
         <div className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-linear-to-l from-carbon to-transparent" />
       </div>
     </div>
