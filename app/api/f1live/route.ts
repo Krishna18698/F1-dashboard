@@ -31,12 +31,15 @@ export async function GET() {
       });
     }
 
-    // 1) Real-time via the viewer's F1 TV token.
+    // 1) Real-time via the viewer's F1 TV token. This is AUTHORITATIVE — it knows the
+    //    true session status (pre-show / green / ended), so if it says "not live" we
+    //    minimize rather than falling back to the time-window static feed.
     if (process.env.F1_TV_TOKEN?.trim()) {
       const relay = await getRelayState();
       if (relay && relay.drivers.length > 0) {
         return Response.json({ status: "live", replay: false, ...relay });
       }
+      return Response.json({ status: "idle" });
     }
 
     const live = await resolveLiveSession();

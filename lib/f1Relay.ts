@@ -40,6 +40,7 @@ export interface PosFrame {
 /* ------------------------------ module state ------------------------------ */
 let conn: signalR.HubConnection | null = null;
 let starting: Promise<void> | null = null;
+let lastRefresh = 0;
 
 let timing: Record<string, Dict> = {};
 let app: Record<string, Dict> = {};
@@ -177,6 +178,7 @@ async function ensureConnection(): Promise<boolean> {
     await c.start();
     conn = c;
     applySnapshot((await c.invoke("Subscribe", TOPICS)) as Record<string, unknown>);
+    lastRefresh = Date.now();
   })();
   try {
     await starting;
@@ -186,6 +188,20 @@ async function ensureConnection(): Promise<boolean> {
     return false;
   } finally {
     starting = null;
+  }
+}
+
+/**
+ * Re-Subscribe periodically to refresh SessionInfo/SessionStatus. The continuous
+ * feed can miss the end-of-session transition, leaving state stale ("still live");
+ * this pulls a fresh snapshot every few seconds so pre/post-session is caught.
+ */
+async function refreshIfStale() {
+  if (conn?.state === signalR.HubConnectionState.Connected && Date.now() - lastRefresh > 4000) {
+    lastRefresh = Date.now();
+    try {
+      applySnapshot((await conn.invoke("Subscribe", TOPICS)) as Record<string, unknown>);
+    } catch {}
   }
 }
 
@@ -279,7 +295,9 @@ function classify() {
 }
 
 export async function getRelayState(): Promise<F1LiveState | null> {
-  if (!(await ensureConnection()) || !sessionInfo) return null;
+  if (!(await ensureConnection())) return null;
+  await refreshIfStale();
+  if (!sessionInfo) return null;
 
   const status = (sessionStatus?.Status ?? "").toLowerCase();
   const ended = sessionInfo.ArchiveStatus?.Status === "Complete" || ENDED.has(status);
@@ -314,7 +332,9 @@ export async function getRelayState(): Promise<F1LiveState | null> {
 }
 
 export async function getRelayResults(): Promise<SessionResult | null> {
-  if (!(await ensureConnection()) || !sessionInfo) return null;
+  if (!(await ensureConnection())) return null;
+  await refreshIfStale();
+  if (!sessionInfo) return null;
   const { nums, mode, rows, order } = classify();
   if (!nums.length) return null;
   const complete = sessionInfo.ArchiveStatus?.Status === "Complete" || ENDED.has((sessionStatus?.Status ?? "").toLowerCase());
