@@ -3,6 +3,7 @@ import {
   getDriverStandings,
   getNextRace,
   getSchedule,
+  getStandingsRound,
   weekendSessions,
 } from "@/lib/jolpica";
 import { getPaddockIntel } from "@/lib/news";
@@ -20,12 +21,13 @@ import LiveSection from "./components/live/LiveSection";
 export const revalidate = 600;
 
 export default async function Page() {
-  const [nextRace, drivers, constructors, schedule, intel] = await Promise.all([
+  const [nextRace, drivers, constructors, schedule, intel, standingsRound] = await Promise.all([
     getNextRace(),
     getDriverStandings().catch(() => []),
     getConstructorStandings().catch(() => []),
     getSchedule().catch(() => []),
     getPaddockIntel().catch(() => []),
+    getStandingsRound().catch(() => 0),
   ]);
 
   return (
@@ -62,7 +64,7 @@ export default async function Page() {
         <div className="grid gap-10 lg:grid-cols-3">
           <Section title="Drivers'" emphasis="Championship" hint="2026 · latest round">
             {drivers.length ? (
-              <DriversTable standings={drivers} />
+              <DriversTable standings={drivers} round={standingsRound} />
             ) : (
               <p className="text-sm text-muted">Standings unavailable right now.</p>
             )}
@@ -70,7 +72,7 @@ export default async function Page() {
 
           <Section title="Constructors'" emphasis="Championship" hint="2026 season">
             {constructors.length ? (
-              <ConstructorsTable standings={constructors} />
+              <ConstructorsTable standings={constructors} round={standingsRound} />
             ) : (
               <p className="text-sm text-muted">Standings unavailable right now.</p>
             )}

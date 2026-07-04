@@ -104,6 +104,19 @@ export async function getConstructorStandings(): Promise<ConstructorStanding[]> 
   return d.MRData.StandingsTable.StandingsLists[0]?.ConstructorStandings ?? [];
 }
 
+/** The round the standings are current through — used to know if the live projection is ahead. */
+export async function getStandingsRound(): Promise<number> {
+  try {
+    const d = await get<{ MRData: { StandingsTable: { round?: string; StandingsLists: { round?: string }[] } } }>(
+      `/${SEASON}/driverstandings/`,
+    );
+    const t = d.MRData.StandingsTable;
+    return Number(t.StandingsLists[0]?.round ?? t.round ?? 0);
+  } catch {
+    return 0;
+  }
+}
+
 export async function getSchedule(): Promise<Race[]> {
   const d = await get<{ MRData: { RaceTable: { Races: Race[] } } }>(`/${SEASON}/`);
   return d.MRData.RaceTable.Races ?? [];

@@ -20,7 +20,7 @@ const g = globalThis as unknown as { WebSocket?: unknown };
 if (typeof g.WebSocket === "undefined") g.WebSocket = WsImpl;
 
 const HUB = "https://livetiming.formula1.com/signalrcore";
-const TOPICS = ["DriverList", "TimingData", "TimingAppData", "Position.z", "SessionInfo", "SessionStatus"];
+const TOPICS = ["DriverList", "TimingData", "TimingAppData", "Position.z", "SessionInfo", "SessionStatus", "ChampionshipPrediction"];
 const ENDED = new Set(["finished", "finalised", "ends"]);
 const BUFFER_MS = 45_000; // keep ~45s of position frames (covers a 20s playback delay)
 
@@ -52,10 +52,16 @@ let sessionInfo: {
   StartDate?: string;
   GmtOffset?: string;
   ArchiveStatus?: { Status?: string };
-  Meeting?: { Name?: string; Location?: string; Circuit?: { ShortName?: string; Key?: number } };
+  Meeting?: { Name?: string; Number?: number; Location?: string; Circuit?: { ShortName?: string; Key?: number } };
 } | null = null;
 let sessionStatus: { Status?: string } | null = null;
 let frameBuffer: PosFrame[] = [];
+// Live championship projection — PERSISTS across sessions (not reset by resetOnNewSession),
+// so post-race points survive after the feed clears the topic, until Jolpica catches up.
+let championship: {
+  Drivers?: Record<string, { PredictedPoints?: number }>;
+  Teams?: Record<string, { TeamName?: string; PredictedPoints?: number }>;
+} | null = null;
 
 function resetOnNewSession(info: NonNullable<typeof sessionInfo>) {
   if (sessionInfo?.Key && info?.Key && info.Key !== sessionInfo.Key) {
@@ -137,6 +143,19 @@ function applyFeed(topic: string, data: unknown) {
     resetOnNewSession(data as NonNullable<typeof sessionInfo>);
   } else if (topic === "SessionStatus") {
     sessionStatus = data as typeof sessionStatus;
+  } else if (topic === "ChampionshipPrediction") {
+    const d = data as NonNullable<typeof championship>;
+    if (Object.keys(d?.Drivers ?? {}).length || Object.keys(d?.Teams ?? {}).length) {
+      championship ??= {};
+      if (d.Drivers) {
+        championship.Drivers ??= {};
+        for (const [k, v] of Object.entries(d.Drivers)) deepMerge((championship.Drivers[k] ??= {}), v as Dict);
+      }
+      if (d.Teams) {
+        championship.Teams ??= {};
+        for (const [k, v] of Object.entries(d.Teams)) deepMerge((championship.Teams[k] ??= {}), v as Dict);
+      }
+    }
   } else if (topic === "Position.z") {
     pushFrames(data as string);
   }
@@ -146,6 +165,7 @@ function applySnapshot(snap: Record<string, unknown>) {
   if (!snap) return;
   if (snap.SessionInfo) resetOnNewSession(snap.SessionInfo as NonNullable<typeof sessionInfo>);
   if (snap.SessionStatus) sessionStatus = snap.SessionStatus as typeof sessionStatus;
+  if (snap.ChampionshipPrediction) applyFeed("ChampionshipPrediction", snap.ChampionshipPrediction);
   if (snap.DriverList) applyFeed("DriverList", snap.DriverList);
   if (snap.TimingData) applyFeed("TimingData", snap.TimingData);
   if (snap.TimingAppData) applyFeed("TimingAppData", snap.TimingAppData);
@@ -338,6 +358,34 @@ export async function getRelayState(): Promise<F1LiveState | null> {
     rows,
     frames: frameBuffer.slice(-150), // ~45s window (covers the 20s delay + jitter)
   };
+}
+
+/**
+ * Live championship projection from the feed — instant updated points during/right
+ * after a Sprint or Race, keyed by driver TLA and constructor name. `round` is the
+ * meeting number so the client can prefer Jolpica once it has caught up.
+ */
+export async function getChampionship(): Promise<{
+  available: boolean;
+  round?: number;
+  driverPoints?: Record<string, number>;
+  constructorPoints?: Record<string, number>;
+}> {
+  if (!(await ensureConnection())) return { available: false };
+  await refreshIfStale();
+  if (!championship?.Drivers) return { available: false };
+
+  const driverPoints: Record<string, number> = {};
+  for (const [num, d] of Object.entries(championship.Drivers)) {
+    const tla = drivers[num]?.Tla;
+    if (tla && d.PredictedPoints != null) driverPoints[tla] = d.PredictedPoints;
+  }
+  const constructorPoints: Record<string, number> = {};
+  for (const t of Object.values(championship.Teams ?? {})) {
+    if (t.TeamName && t.PredictedPoints != null) constructorPoints[t.TeamName] = t.PredictedPoints;
+  }
+  if (!Object.keys(driverPoints).length) return { available: false };
+  return { available: true, round: sessionInfo?.Meeting?.Number ?? 0, driverPoints, constructorPoints };
 }
 
 /** Lightweight "is a session live and which one" — for the hero + schedule. */
