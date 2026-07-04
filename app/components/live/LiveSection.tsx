@@ -64,6 +64,7 @@ export default function LiveSection() {
           frames={s.frames}
           drivers={s.drivers}
           leaderNum={leaderNum}
+          inPit={s.inPit}
         />
         <TimingBoard
           mode={s.mode}

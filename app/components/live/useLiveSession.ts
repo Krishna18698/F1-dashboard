@@ -46,6 +46,7 @@ export interface LiveState {
   intervals: Map<number, IntervalRow>;
   stints: Map<number, StintRow>;
   tyreLaps?: Map<number, number>; // laps on current tyre, per driver
+  inPit?: Set<number>; // drivers currently in the pit lane
   locations: Map<number, LocationRow>;
   frames?: PosFrame[]; // recent position window for smooth playback
   laps: Map<number, LapSummary>;

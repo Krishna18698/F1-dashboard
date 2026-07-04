@@ -32,13 +32,14 @@ export default function TyreTracker({
   return (
     <div className="carbon-bg rounded-lg p-3 ring-1 ring-white/10 sm:p-4">
       <span className="eyebrow text-[0.6rem] text-white/45">Tyre Tracker</span>
-      <div className="mt-2 grid grid-cols-1 gap-x-8 gap-y-1.5 sm:grid-cols-2">
+      {/* Column-major: fills top-to-bottom in column 1, then column 2. */}
+      <div className="mt-2 columns-1 gap-x-8 sm:columns-2">
         {order.map((num, i) => {
           const d = drivers.get(num);
           const laps = tyreLaps?.get(num) ?? 0;
           const pos = positions.get(num) ?? i + 1;
           return (
-            <div key={num} className="flex items-center gap-2.5">
+            <div key={num} className="flex items-center gap-2.5 break-inside-avoid py-0.75">
               <span className="tnum w-5 shrink-0 text-right font-mono text-xs text-white/35">{pos}</span>
               <span className="w-10 shrink-0 text-sm font-semibold text-white">{d?.name_acronym ?? num}</span>
               <div

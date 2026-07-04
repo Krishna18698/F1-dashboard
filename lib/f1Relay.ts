@@ -223,6 +223,7 @@ export interface F1LiveRow {
   laps: number;
   compound: string;
   tyre_laps: number;
+  in_pit: boolean;
 }
 export interface F1LiveState {
   mode: "race" | "quali" | "practice";
@@ -263,6 +264,22 @@ function sessionName(): string {
   return `${m?.Name ?? ""} · ${sessionInfo?.Name ?? ""}`.replace(/^ · /, "");
 }
 
+/**
+ * Is a session on track right now? Live from 1 min before its scheduled start until
+ * it ends — so Q1/Q2/Q3 (and any red-flag) breaks stay "live", but pre-show and
+ * post-show are skipped. Falls back to SessionStatus if no scheduled start is known.
+ */
+function liveNow(): boolean {
+  if (!sessionInfo) return false;
+  const status = (sessionStatus?.Status ?? "").toLowerCase();
+  if (sessionInfo.ArchiveStatus?.Status === "Complete" || ENDED.has(status)) return false;
+  if (sessionInfo.StartDate) {
+    const startMs = Date.parse(sessionInfo.StartDate + "Z") - offsetMs(sessionInfo.GmtOffset);
+    return Number.isFinite(startMs) && Date.now() >= startMs - 60_000;
+  }
+  return status === "started" || status === "aborted";
+}
+
 function classify() {
   const nums = Object.keys(timing).filter((k) => /^\d+$/.test(k) && Object.keys(timing[k]).length);
   const mode = modeOf(sessionInfo?.Type);
@@ -276,6 +293,7 @@ function classify() {
       BestLapTime?: { Value?: string };
       LastLapTime?: { Value?: string };
       NumberOfLaps?: number;
+      InPit?: boolean;
     };
     const stint = currentStint(n);
     rows[+n] = {
@@ -288,6 +306,7 @@ function classify() {
       laps: +(t.NumberOfLaps ?? 0),
       compound: stint.compound,
       tyre_laps: stint.laps,
+      in_pit: Boolean(t.InPit),
     };
   }
   const order = nums.map(Number).sort((a, b) => (mode === "race" ? rows[a].position - rows[b].position : (rows[a].best ?? Infinity) - (rows[b].best ?? Infinity)));
@@ -297,17 +316,7 @@ function classify() {
 export async function getRelayState(): Promise<F1LiveState | null> {
   if (!(await ensureConnection())) return null;
   await refreshIfStale();
-  if (!sessionInfo) return null;
-
-  const status = (sessionStatus?.Status ?? "").toLowerCase();
-  const ended = sessionInfo.ArchiveStatus?.Status === "Complete" || ENDED.has(status);
-  const active = status === "started" || status === "aborted";
-  let nearStart = false;
-  if (sessionInfo.StartDate) {
-    const startMs = Date.parse(sessionInfo.StartDate + "Z") - offsetMs(sessionInfo.GmtOffset);
-    nearStart = Number.isFinite(startMs) && Date.now() >= startMs - 60_000;
-  }
-  if (ended || (!active && !nearStart)) return null;
+  if (!sessionInfo || !liveNow()) return null;
 
   const { nums, mode, rows, order } = classify();
   if (!nums.length) return null;
@@ -329,6 +338,14 @@ export async function getRelayState(): Promise<F1LiveState | null> {
     rows,
     frames: frameBuffer.slice(-100), // ~30s window (covers the 10s delay + jitter)
   };
+}
+
+/** Lightweight "is a session live and which one" — for the hero + schedule. */
+export async function getLiveStatus(): Promise<{ live: boolean; name?: string; type?: string }> {
+  if (!(await ensureConnection())) return { live: false };
+  await refreshIfStale();
+  if (!sessionInfo) return { live: false };
+  return { live: liveNow(), name: sessionName(), type: sessionInfo.Type };
 }
 
 export async function getRelayResults(): Promise<SessionResult | null> {

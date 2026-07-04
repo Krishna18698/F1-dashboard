@@ -3,9 +3,11 @@ import {
   getDriverStandings,
   getNextRace,
   getSchedule,
+  weekendSessions,
 } from "@/lib/jolpica";
 import { getPaddockIntel } from "@/lib/news";
 import Hero from "./components/Hero";
+import WeekendSchedule from "./components/WeekendSchedule";
 import Section from "./components/Section";
 import DriversTable from "./components/DriversTable";
 import ConstructorsTable from "./components/ConstructorsTable";
@@ -50,6 +52,8 @@ export default async function Page() {
             <Calendar races={schedule} nextRound={nextRace?.round} />
           )}
         </div>
+
+        {nextRace && <WeekendSchedule sessions={weekendSessions(nextRace)} />}
 
         <LiveSection />
 

@@ -15,6 +15,7 @@ interface ApiRow {
   laps: number;
   compound: string;
   tyre_laps: number;
+  in_pit: boolean;
 }
 interface ApiDriver {
   driver_number: number;
@@ -66,11 +67,13 @@ function toState(r: ApiResponse): LiveState {
   const intervals = new Map<number, IntervalRow>();
   const stints = new Map<number, StintRow>();
   const tyreLaps = new Map<number, number>();
+  const inPit = new Set<number>();
   const laps = new Map<number, LapSummary>();
   for (const [numStr, row] of Object.entries(r.rows ?? {})) {
     const num = +numStr;
     positions.set(num, row.position);
     tyreLaps.set(num, row.tyre_laps ?? 0);
+    if (row.in_pit) inPit.add(num);
     intervals.set(num, {
       date: "",
       driver_number: num,
@@ -103,6 +106,7 @@ function toState(r: ApiResponse): LiveState {
     intervals,
     stints,
     tyreLaps,
+    inPit,
     locations: new Map(),
     laps,
     trace: [],

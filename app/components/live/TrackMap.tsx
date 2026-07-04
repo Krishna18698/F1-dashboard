@@ -21,11 +21,13 @@ export default function TrackMap({
   frames,
   drivers,
   leaderNum,
+  inPit,
 }: {
   circuitKey?: number;
   frames?: PosFrame[];
   drivers: Map<number, Driver>;
   leaderNum?: number;
+  inPit?: Set<number>;
 }) {
   const [circuit, setCircuit] = useState<Circuit | null>(null);
 
@@ -65,16 +67,43 @@ export default function TrackMap({
     return rotate(circuit.corners, rot).map((c) => ({ n: c.number, ...project(c.x, c.y, bounds, SIZE) }));
   }, [circuit, rot, bounds]);
 
-  // Keep bounds/rot in refs so the animation loop always reads current values.
-  const boundsRef = useRef<Bounds | null>(null);
-  const rotRef = useRef(0);
+  // Precompute rotation + projection scalars once (updated when the circuit changes),
+  // so the 60fps loop does pure scalar math with ZERO allocations → no GC stutter.
+  const projRef = useRef<{
+    cos: number;
+    sin: number;
+    scale: number;
+    offX: number;
+    offY: number;
+    minX: number;
+    minY: number;
+  } | null>(null);
   useEffect(() => {
-    boundsRef.current = bounds;
-    rotRef.current = rot;
+    if (!bounds) {
+      projRef.current = null;
+      return;
+    }
+    const w = bounds.maxX - bounds.minX || 1;
+    const h = bounds.maxY - bounds.minY || 1;
+    const scale = Math.min(SIZE / w, SIZE / h);
+    const r = (rot * Math.PI) / 180;
+    projRef.current = {
+      cos: Math.cos(r),
+      sin: Math.sin(r),
+      scale,
+      offX: (SIZE - w * scale) / 2,
+      offY: (SIZE - h * scale) / 2,
+      minX: bounds.minX,
+      minY: bounds.minY,
+    };
   }, [bounds, rot]);
 
-  // Positions are updated IMPERATIVELY (no React re-render per frame). One container
-  // ref; each dot carries data-num so the loop can address it.
+  const inPitRef = useRef<Set<number> | undefined>(undefined);
+  useEffect(() => {
+    inPitRef.current = inPit;
+  }, [inPit]);
+
+  // Positions are updated IMPERATIVELY (no React re-render per frame).
   const dotsGroupRef = useRef<SVGGElement>(null);
   const dataAnchor = useRef<number | null>(null);
   const realAnchor = useRef(0);
@@ -83,9 +112,9 @@ export default function TrackMap({
     let raf = 0;
     const loop = () => {
       const buf = bufRef.current;
-      const b = boundsRef.current;
+      const proj = projRef.current;
       const group = dotsGroupRef.current;
-      if (buf.length >= 2 && b && group) {
+      if (buf.length >= 2 && proj && group) {
         const latest = buf[buf.length - 1].t;
         const now = performance.now();
         if (dataAnchor.current === null) {
@@ -105,21 +134,26 @@ export default function TrackMap({
         const a = buf[i];
         const c = buf[Math.min(i + 1, buf.length - 1)];
         const frac = c.t > a.t ? Math.max(0, Math.min(1, (pt - a.t) / (c.t - a.t))) : 0;
+        const { cos, sin, scale, offX, offY, minX, minY } = proj;
+        const pits = inPitRef.current;
 
-        for (const child of Array.from(group.children) as SVGGElement[]) {
-          const num = Number(child.dataset.num);
-          const el = child;
+        const kids = group.children;
+        for (let k = 0; k < kids.length; k++) {
+          const el = kids[k] as SVGGElement;
+          const num = +el.dataset.num!;
           const pa = a.c[num];
-          const pb = c.c[num] ?? pa;
-          if (!pa) {
+          if (!pa || pits?.has(num)) {
             el.style.visibility = "hidden";
             continue;
           }
-          const x = pb ? pa[0] + (pb[0] - pa[0]) * frac : pa[0];
-          const y = pb ? pa[1] + (pb[1] - pa[1]) * frac : pa[1];
-          const rp = rotate([{ x, y }], rotRef.current)[0];
-          const p = project(rp.x, rp.y, b, SIZE);
-          el.setAttribute("transform", `translate(${p.cx.toFixed(1)} ${p.cy.toFixed(1)})`);
+          const pb = c.c[num] ?? pa;
+          const x = pa[0] + (pb[0] - pa[0]) * frac;
+          const y = pa[1] + (pb[1] - pa[1]) * frac;
+          const rx = x * cos - y * sin;
+          const ry = x * sin + y * cos;
+          const cx = offX + (rx - minX) * scale;
+          const cy = SIZE - (offY + (ry - minY) * scale);
+          el.setAttribute("transform", `translate(${cx.toFixed(1)} ${cy.toFixed(1)})`);
           el.style.visibility = "visible";
         }
       }

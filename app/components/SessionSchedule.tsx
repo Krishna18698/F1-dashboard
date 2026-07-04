@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { WeekendSession } from "@/lib/jolpica";
+import { useLiveStatus } from "./useLiveStatus";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
@@ -16,26 +17,43 @@ function delta(ms: number) {
 }
 
 /**
- * Weekend sessions on the race card: counts down to the next one and names it.
- * Renders a deterministic placeholder until mounted (same on server + client) so
- * there's no hydration mismatch or layout shift; then swaps to live values.
+ * Hero timing: if a session is live now, show "LIVE" (no timer); otherwise count
+ * down to the next session and name it. Renders a stable placeholder until mounted.
  */
 export default function SessionSchedule({ sessions }: { sessions: WeekendSession[] }) {
   const [now, setNow] = useState<number | null>(null);
   useEffect(() => {
     const tick = () => setNow(Date.now());
-    const raf = requestAnimationFrame(tick); // first paint after mount, avoids SSR mismatch
+    const raf = requestAnimationFrame(tick);
     const id = setInterval(tick, 1000);
     return () => {
       cancelAnimationFrame(raf);
       clearInterval(id);
     };
   }, []);
+  const { live, name } = useLiveStatus();
 
   const ready = now !== null;
+  // Identify the live session by the feed's name (e.g. "… · Qualifying") — robust.
+  const liveLabel = live && name ? name.split("·").pop()?.trim() : null;
+  const liveSession = ready && liveLabel ? (sessions.find((s) => s.label === liveLabel) ?? null) : null;
   const nextIdx = ready ? sessions.findIndex((s) => Date.parse(s.iso) > now!) : -1;
   const next = nextIdx >= 0 ? sessions[nextIdx] : null;
-  const t = ready && next ? delta(Date.parse(next.iso) - now!) : null;
+  const t = ready && !liveSession && next ? delta(Date.parse(next.iso) - now!) : null;
+
+  if (liveSession) {
+    return (
+      <div>
+        <p className="eyebrow mb-2 text-[0.65rem] text-white/45">On track now</p>
+        <div className="inline-flex items-center gap-2.5 rounded-md bg-red px-4 py-2.5">
+          <span className="live-dot h-2.5 w-2.5 rounded-full bg-white" />
+          <span className="font-display text-xl italic text-white">
+            {liveSession.label} · Live
+          </span>
+        </div>
+      </div>
+    );
+  }
 
   const cells: [string, string][] = [
     ["Days", t ? pad(t.d) : "––"],
@@ -47,10 +65,8 @@ export default function SessionSchedule({ sessions }: { sessions: WeekendSession
   return (
     <div>
       <p className="eyebrow mb-2 text-[0.65rem] text-white/45">
-        {!ready ? "Next session" : next ? `Next · ${next.label} in` : "Race weekend complete"}
+        {!ready ? "Next session" : next ? `Next · ${next.label} in` : "Weekend complete"}
       </p>
-
-      {/* Countdown boxes are always rendered (fixed size) → no shift. */}
       <div className="flex gap-2 sm:gap-3 lg:justify-end">
         {cells.map(([label, val]) => (
           <div
@@ -63,28 +79,6 @@ export default function SessionSchedule({ sessions }: { sessions: WeekendSession
             <span className="eyebrow mt-1 text-[0.6rem] text-white/55">{label}</span>
           </div>
         ))}
-      </div>
-
-      {/* Weekend chips — neutral until mounted, then done ✓ / next highlighting. */}
-      <div className="mt-4 flex flex-wrap gap-1.5 lg:justify-end">
-        {sessions.map((sess, i) => {
-          const done = ready && Date.parse(sess.iso) <= now! && i !== nextIdx;
-          const isNext = ready && i === nextIdx;
-          return (
-            <span
-              key={sess.label}
-              title={sess.label}
-              className={[
-                "rounded px-2 py-1 text-[0.6rem] font-semibold tracking-wide",
-                isNext ? "bg-red text-white" : done ? "bg-white/5 text-white/35" : "bg-white/10 text-white/70",
-              ].join(" ")}
-            >
-              {sess.short}
-              {/* fixed-width mark slot so the chip never changes size (no reflow) */}
-              <span className="ml-0.5 inline-block w-2 text-center">{done ? "✓" : ""}</span>
-            </span>
-          );
-        })}
       </div>
     </div>
   );
