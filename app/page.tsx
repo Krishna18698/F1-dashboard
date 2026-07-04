@@ -16,8 +16,8 @@ import PaddockIntel from "./components/PaddockIntel";
 import TokenBanner from "./components/TokenBanner";
 import LiveSection from "./components/live/LiveSection";
 
-// Rebuild standings/calendar hourly (they only change after a race weekend).
-export const revalidate = 1800;
+// Revalidate every 10 min so standings/news refresh soon after they change.
+export const revalidate = 600;
 
 export default async function Page() {
   const [nextRace, drivers, constructors, schedule, intel] = await Promise.all([

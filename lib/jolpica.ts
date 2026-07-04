@@ -7,8 +7,9 @@
 const BASE = "https://api.jolpi.ca/ergast/f1";
 export const SEASON = "2026";
 
-// Revalidate hourly — this data only changes after a race weekend.
-const REVALIDATE = 3600;
+// Revalidate every 10 min so we reflect Jolpica's updates soon after it processes a
+// session (its own lag aside). Standings change only a few times per weekend.
+const REVALIDATE = 600;
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
