@@ -50,7 +50,11 @@ export default async function Page() {
         {/* This weekend's sessions (local time) — above the season calendar */}
         {nextRace && <WeekendSchedule sessions={weekendSessions(nextRace)} />}
 
-        {schedule.length > 0 && <Calendar races={schedule} nextRound={nextRace?.round} />}
+        {schedule.length > 0 && (
+          <Section title="Season" emphasis="Calendar" hint="2026 · 22 rounds">
+            <Calendar races={schedule} nextRound={nextRace?.round} />
+          </Section>
+        )}
 
         <LiveSection />
 
