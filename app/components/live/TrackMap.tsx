@@ -7,7 +7,7 @@ import { hex } from "@/lib/format";
 import { PosFrame } from "./useLiveSession";
 
 const SIZE = 1000;
-const DELAY_MS = 7000; // play back this far behind the latest data → smooth, F1-TV-style
+const DELAY_MS = 10000; // play back this far behind the latest data → smooth, F1-TV-style
 
 interface Circuit {
   x: number[];
@@ -51,13 +51,15 @@ export default function TrackMap({
     const seen = new Set(buf.map((f) => f.t));
     for (const f of frames) if (!seen.has(f.t)) buf.push(f);
     buf.sort((a, b) => a.t - b.t);
-    const cutoff = (buf.at(-1)?.t ?? 0) - 25_000;
+    const cutoff = (buf.at(-1)?.t ?? 0) - 30_000;
     bufRef.current = buf.filter((f) => f.t >= cutoff);
   }, [frames]);
 
-  // Playback loop: advance a clock DELAY behind the latest frame, interpolate.
-  const playT = useRef<number | null>(null);
-  const lastReal = useRef(0);
+  // Free-running playback clock: playT = dataAnchor + (real elapsed). It advances at
+  // exactly 1× real time (perfectly smooth, no speed-up), and the DELAY buffer absorbs
+  // the 3s poll jitter. We only re-anchor if the buffer starves or drifts way out.
+  const dataAnchor = useRef<number | null>(null);
+  const realAnchor = useRef(0);
   useEffect(() => {
     let raf = 0;
     const loop = () => {
@@ -65,17 +67,18 @@ export default function TrackMap({
       if (buf.length >= 2) {
         const latest = buf[buf.length - 1].t;
         const now = performance.now();
-        const target = latest - DELAY_MS;
-        if (playT.current === null) {
-          playT.current = target;
-        } else {
-          playT.current += now - lastReal.current;
-          // resync if we ran past the buffer or fell too far behind
-          if (playT.current > latest || playT.current < target - 3000) playT.current = target;
+        if (dataAnchor.current === null) {
+          dataAnchor.current = latest - DELAY_MS;
+          realAnchor.current = now;
         }
-        lastReal.current = now;
-
-        const pt = playT.current;
+        let pt = dataAnchor.current + (now - realAnchor.current);
+        const behind = latest - pt;
+        if (behind < 2000 || behind > DELAY_MS + 8000) {
+          // buffer starving or fell far behind → re-anchor (rare)
+          dataAnchor.current = latest - DELAY_MS;
+          realAnchor.current = now;
+          pt = dataAnchor.current;
+        }
         let i = 0;
         while (i < buf.length - 1 && buf[i + 1].t <= pt) i++;
         const a = buf[i];

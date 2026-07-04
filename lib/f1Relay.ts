@@ -22,7 +22,7 @@ if (typeof g.WebSocket === "undefined") g.WebSocket = WsImpl;
 const HUB = "https://livetiming.formula1.com/signalrcore";
 const TOPICS = ["DriverList", "TimingData", "TimingAppData", "Position.z", "SessionInfo", "SessionStatus"];
 const ENDED = new Set(["finished", "finalised", "ends"]);
-const BUFFER_MS = 30_000; // keep ~30s of position frames
+const BUFFER_MS = 35_000; // keep ~35s of position frames (covers a 10s playback delay)
 
 type Dict = Record<string, unknown>;
 interface RawDriver {
@@ -110,7 +110,26 @@ function applyFeed(topic: string, data: unknown) {
   if (topic === "TimingData") {
     for (const [n, u] of Object.entries((data as { Lines?: Record<string, Dict> }).Lines ?? {})) deepMerge((timing[n] ??= {}), u);
   } else if (topic === "TimingAppData") {
-    for (const [n, u] of Object.entries((data as { Lines?: Record<string, Dict> }).Lines ?? {})) deepMerge((app[n] ??= {}), u);
+    for (const [n, u] of Object.entries((data as { Lines?: Record<string, Dict> }).Lines ?? {})) {
+      const cur = (app[n] ??= {});
+      for (const [k, v] of Object.entries(u)) {
+        if (k === "Stints") {
+          // Normalize array/object stints to an index-keyed store and merge by index,
+          // so a lap-count update never wipes the compound set at stint start.
+          const store = (cur.Stints ??= {}) as Record<string, Dict>;
+          const entries = Array.isArray(v)
+            ? (v as unknown[]).map((s, i) => [String(i), s] as [string, unknown])
+            : Object.entries(v as Dict);
+          for (const [idx, s] of entries) {
+            if (s && typeof s === "object") deepMerge((store[idx] ??= {}), s as Dict);
+          }
+        } else if (v && typeof v === "object" && !Array.isArray(v)) {
+          deepMerge((cur[k] ??= {}) as Dict, v as Dict);
+        } else {
+          cur[k] = v;
+        }
+      }
+    }
   } else if (topic === "DriverList") {
     for (const [k, v] of Object.entries(data as Dict)) if (/^\d+$/.test(k)) deepMerge((drivers[k] ??= {}) as unknown as Dict, v as Dict);
   } else if (topic === "SessionInfo") {
@@ -290,7 +309,7 @@ export async function getRelayState(): Promise<F1LiveState | null> {
     drivers: driverList,
     order,
     rows,
-    frames: frameBuffer.slice(-60), // ~18s window
+    frames: frameBuffer.slice(-100), // ~30s window (covers the 10s delay + jitter)
   };
 }
 
