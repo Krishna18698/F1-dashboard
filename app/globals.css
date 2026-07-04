@@ -84,10 +84,11 @@ body {
   animation: pulse-live 1.1s ease-in-out infinite;
 }
 
-/* Car markers glide continuously across the whole poll interval so motion looks
-   smooth instead of "snap then freeze". Duration matches F1_LIVE.pollMs (2.5s). */
+/* Car markers glide continuously. The glide is a touch LONGER than the poll
+   interval so a new target always arrives before the dot stops → non-stop motion
+   (a ~1s buffer/lag is the trade-off, which keeps it smooth). */
 .car-dot {
-  transition: transform 2.5s linear;
+  transition: transform 4s linear;
 }
 
 /* News-ticker marquee — the track holds the sequence twice and slides one copy

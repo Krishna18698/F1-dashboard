@@ -17,7 +17,7 @@ export const F1_LIVE = {
   // When replaying a completed session, skip the pre-session build-up and start the
   // virtual clock this far into the session (fraction of its total length).
   replayAnchorFrac: 0.45,
-  pollMs: 2500,
+  pollMs: 3000, // paired with the ~4s car-dot glide for continuous, non-stop motion
   base: "https://livetiming.formula1.com/static",
 
   /**
