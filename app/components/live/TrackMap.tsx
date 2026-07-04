@@ -162,14 +162,14 @@ export default function TrackMap({
 
   if (!bounds) {
     return (
-      <div className="flex aspect-square items-center justify-center rounded-lg carbon-bg text-sm text-white/40">
+      <div className="flex aspect-square items-center justify-center self-start rounded-lg carbon-bg text-sm text-white/40">
         Loading circuit…
       </div>
     );
   }
 
   return (
-    <div className="carbon-bg overflow-hidden rounded-lg ring-1 ring-white/10">
+    <div className="aspect-square self-start overflow-hidden rounded-lg carbon-bg ring-1 ring-white/10">
       <svg viewBox={`0 0 ${SIZE} ${SIZE}`} className="h-full w-full">
         {path && (
           <path d={path} fill="none" stroke="#f4f4f6" strokeWidth={12} strokeLinejoin="round" strokeLinecap="round" />

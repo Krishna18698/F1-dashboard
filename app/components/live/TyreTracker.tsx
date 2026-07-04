@@ -1,9 +1,21 @@
 "use client";
 
 import { Driver, StintRow } from "@/lib/openf1";
-import { hex, tyre } from "@/lib/format";
 
-/** Per-driver current tyre + laps on it, ordered by position — mirrors the grid. */
+// Tyre compound → line colour (red soft, yellow medium, white hard, …).
+const LINE: Record<string, string> = {
+  SOFT: "#e10600",
+  MEDIUM: "#f5c518",
+  HARD: "#ffffff",
+  INTERMEDIATE: "#3fa34d",
+  WET: "#1e6bd6",
+  UNKNOWN: "#5a5a62",
+};
+function lineColor(c?: string): string {
+  return LINE[c ?? "UNKNOWN"] ?? LINE.UNKNOWN;
+}
+
+/** Each driver as a straight line coloured by current tyre, in position order. */
 export default function TyreTracker({
   order,
   drivers,
@@ -18,41 +30,22 @@ export default function TyreTracker({
   tyreLaps?: Map<number, number>;
 }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-line">
-      <div className="border-b border-line bg-panel px-3 py-2">
-        <span className="eyebrow text-[0.6rem] font-bold text-muted">Tyre Tracker</span>
-      </div>
-      <div className="grid grid-cols-2 gap-1.5 p-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+    <div className="carbon-bg rounded-lg p-3 ring-1 ring-white/10 sm:p-4">
+      <span className="eyebrow text-[0.6rem] text-white/45">Tyre Tracker</span>
+      <div className="mt-2 grid grid-cols-1 gap-x-8 gap-y-1.5 sm:grid-cols-2">
         {order.map((num, i) => {
           const d = drivers.get(num);
-          const t = tyre(stints.get(num)?.compound);
           const laps = tyreLaps?.get(num) ?? 0;
           const pos = positions.get(num) ?? i + 1;
           return (
-            <div
-              key={num}
-              className="flex items-center gap-2 rounded-md bg-panel/60 px-2 py-1.5"
-            >
-              <span className="tnum w-4 shrink-0 text-right font-mono text-xs text-muted">
-                {pos}
-              </span>
-              <span
-                className="h-4 w-1 shrink-0 rounded-full"
-                style={{ backgroundColor: hex(d?.team_colour) }}
+            <div key={num} className="flex items-center gap-2.5">
+              <span className="tnum w-5 shrink-0 text-right font-mono text-xs text-white/35">{pos}</span>
+              <span className="w-10 shrink-0 text-sm font-semibold text-white">{d?.name_acronym ?? num}</span>
+              <div
+                className="h-1.5 flex-1 rounded-full"
+                style={{ backgroundColor: lineColor(stints.get(num)?.compound) }}
               />
-              <span className="flex-1 truncate text-sm font-semibold">
-                {d?.name_acronym ?? num}
-              </span>
-              <span
-                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[0.55rem] font-bold ring-1 ring-black/10"
-                style={{ backgroundColor: t.color, color: t.short === "M" ? "#111" : "#fff" }}
-                title={stints.get(num)?.compound ?? "Unknown"}
-              >
-                {t.short}
-              </span>
-              <span className="tnum w-7 shrink-0 text-right font-mono text-xs text-ink-soft">
-                {laps}L
-              </span>
+              <span className="tnum w-8 shrink-0 text-right font-mono text-xs text-white/50">{laps}L</span>
             </div>
           );
         })}
