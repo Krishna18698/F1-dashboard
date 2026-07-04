@@ -80,7 +80,8 @@ export default function SessionSchedule({ sessions }: { sessions: WeekendSession
               ].join(" ")}
             >
               {sess.short}
-              {done ? " ✓" : ""}
+              {/* fixed-width mark slot so the chip never changes size (no reflow) */}
+              <span className="ml-0.5 inline-block w-2 text-center">{done ? "✓" : ""}</span>
             </span>
           );
         })}
