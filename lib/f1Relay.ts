@@ -41,6 +41,8 @@ interface Raw {
     Key?: number;
     Type?: string;
     Name?: string;
+    StartDate?: string;
+    GmtOffset?: string;
     ArchiveStatus?: { Status?: string };
     Meeting?: { Name?: string; Location?: string; Circuit?: { ShortName?: string; Key?: number } };
   } | null;
@@ -51,6 +53,13 @@ interface Raw {
 /* --------------------------------- helpers -------------------------------- */
 function decodeZ(payload: string): { Position?: { Entries: Record<string, { X: number; Y: number }> }[] } {
   return JSON.parse(zlib.inflateRawSync(Buffer.from(payload, "base64")).toString("utf8"));
+}
+
+function offsetMs(gmt?: string): number {
+  const m = gmt?.match(/(-?\d{1,2}):(\d{2}):(\d{2})/);
+  if (!m) return 0;
+  const sign = m[1].startsWith("-") ? -1 : 1;
+  return sign * (Math.abs(+m[1]) * 3600 + +m[2] * 60 + +m[3]) * 1000;
 }
 
 function framesFromZ(payload: string): PosFrame[] {
@@ -235,7 +244,13 @@ export async function getRelayState(): Promise<F1LiveState | null> {
   const status = (raw.sessionStatus?.Status ?? "").toLowerCase();
   const ended = raw.sessionInfo.ArchiveStatus?.Status === "Complete" || ENDED.has(status);
   const active = status === "started" || status === "aborted";
-  if (ended || (raw.sessionStatus != null && !active)) return null;
+  // Also go live from 1 minute before the scheduled start, so lights-out is never missed.
+  let nearStart = false;
+  if (raw.sessionInfo.StartDate) {
+    const startMs = Date.parse(raw.sessionInfo.StartDate + "Z") - offsetMs(raw.sessionInfo.GmtOffset);
+    nearStart = Number.isFinite(startMs) && Date.now() >= startMs - 60_000;
+  }
+  if (ended || (!active && !nearStart)) return null;
 
   const { nums, mode, rows, order } = classify(raw);
   if (!nums.length) return null;
