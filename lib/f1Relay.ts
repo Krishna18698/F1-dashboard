@@ -1,10 +1,12 @@
 /**
- * Real-time relay to F1's official live-timing feed (SignalR Core),
- * authenticated with the viewer's own F1 TV subscription token (F1_TV_TOKEN).
+ * Relay to F1's official live-timing feed (SignalR Core), authenticated with the
+ * viewer's own F1 TV subscription token (F1_TV_TOKEN). Server-only.
  *
- * Server-only. Holds ONE long-lived connection as a module singleton, keeps the
- * merged live state in memory, and exposes it in the same shape the dashboard uses.
- * This is the same feed F1 TV / MultiViewer use — free beyond the subscription.
+ * STATELESS by design so it runs on serverless (Vercel free): each call opens a
+ * short-lived connection, `Subscribe` returns the FULL current state, then it closes.
+ * A tiny module cache (2s) dedupes bursts on a warm instance, and a best-effort
+ * frames buffer builds the track outline over successive polls when the instance
+ * stays warm. Exposes state in the shape the dashboard already consumes.
  */
 import "server-only";
 import * as signalR from "@microsoft/signalr";
@@ -12,16 +14,15 @@ import WsImpl from "ws";
 import zlib from "zlib";
 import { parseLapTime } from "./f1feed";
 
-// SignalR needs a global WebSocket. Node 22+ has one; polyfill with `ws` otherwise.
 const g = globalThis as unknown as { WebSocket?: unknown };
 if (typeof g.WebSocket === "undefined") g.WebSocket = WsImpl;
 
 const HUB = "https://livetiming.formula1.com/signalrcore";
-const TOPICS = ["Heartbeat", "DriverList", "TimingData", "TimingAppData", "Position.z", "SessionInfo", "SessionStatus", "TrackStatus"];
-// SessionStatus values that mean the session is over → dashboard should minimize.
+const TOPICS = ["DriverList", "TimingData", "TimingAppData", "Position.z", "SessionInfo", "SessionStatus"];
 const ENDED = new Set(["finished", "finalised", "ends"]);
-const MAX_FRAMES = 500; // rolling car-position history for the track outline
+const MAX_FRAMES = 500;
 
+type Dict = Record<string, unknown>;
 interface RawDriver {
   RacingNumber?: string;
   Tla?: string;
@@ -29,176 +30,149 @@ interface RawDriver {
   TeamName?: string;
   TeamColour?: string;
 }
-type Dict = Record<string, unknown>;
-
-/* ------------------------------ module state ------------------------------ */
-let conn: signalR.HubConnection | null = null;
-let starting: Promise<void> | null = null;
-let lastRefresh = 0;
-
-let timing: Record<string, Dict> = {};
-let app: Record<string, Dict> = {};
-let driverMap: Record<string, RawDriver> = {};
-let sessionInfo: {
-  Key?: number;
-  Type?: string;
-  Name?: string;
-  ArchiveStatus?: { Status?: string };
-  Meeting?: { Name?: string; Location?: string; Circuit?: { ShortName?: string } };
-} | null = null;
-let sessionStatus: { Status?: string } | null = null;
-let frames: { cars: Record<string, [number, number]> }[] = [];
-
-/** Reset all per-session state when the feed switches to a new session. */
-function setSessionInfo(info: NonNullable<typeof sessionInfo>) {
-  if (sessionInfo?.Key && info?.Key && info.Key !== sessionInfo.Key) {
-    timing = {};
-    app = {};
-    driverMap = {};
-    frames = [];
-    sessionStatus = null;
-  }
-  sessionInfo = info;
+interface PosFrame {
+  cars: Record<string, [number, number]>;
+}
+interface Raw {
+  timing: Record<string, Dict>;
+  app: Record<string, Dict>;
+  drivers: Record<string, RawDriver>;
+  sessionInfo: {
+    Key?: number;
+    Type?: string;
+    Name?: string;
+    ArchiveStatus?: { Status?: string };
+    Meeting?: { Name?: string; Location?: string; Circuit?: { ShortName?: string } };
+  } | null;
+  sessionStatus: { Status?: string } | null;
+  frames: PosFrame[]; // latest snapshot's frames (for car dots)
 }
 
-/* ------------------------------- helpers --------------------------------- */
-function deepMerge(target: Dict, src: Dict) {
-  for (const [k, v] of Object.entries(src)) {
-    const cur = target[k];
-    if (v && typeof v === "object" && !Array.isArray(v) && cur && typeof cur === "object" && !Array.isArray(cur)) {
-      deepMerge(cur as Dict, v as Dict);
-    } else {
-      target[k] = v;
-    }
-  }
-}
-
+/* --------------------------------- helpers -------------------------------- */
 function decodeZ(payload: string): { Position?: { Entries: Record<string, { X: number; Y: number }> }[] } {
   return JSON.parse(zlib.inflateRawSync(Buffer.from(payload, "base64")).toString("utf8"));
 }
 
-function applyPositionZ(payload: string) {
+function framesFromZ(payload: string): PosFrame[] {
+  const out: PosFrame[] = [];
   try {
-    const dec = decodeZ(payload);
-    for (const f of dec.Position ?? []) {
+    for (const f of decodeZ(payload).Position ?? []) {
       const cars: Record<string, [number, number]> = {};
       for (const [n, p] of Object.entries(f.Entries)) if (p.X || p.Y) cars[n] = [p.X, p.Y];
-      if (Object.keys(cars).length) frames.push({ cars });
+      if (Object.keys(cars).length) out.push({ cars });
     }
-    if (frames.length > MAX_FRAMES) frames = frames.slice(-MAX_FRAMES);
   } catch {}
+  return out;
 }
 
-function applyFeed(topic: string, data: unknown) {
-  if (!data) return;
-  if (topic === "TimingData") {
-    const lines = (data as { Lines?: Record<string, Dict> }).Lines ?? {};
-    for (const [n, u] of Object.entries(lines)) deepMerge((timing[n] ??= {}), u);
-  } else if (topic === "TimingAppData") {
-    const lines = (data as { Lines?: Record<string, Dict> }).Lines ?? {};
-    for (const [n, u] of Object.entries(lines)) deepMerge((app[n] ??= {}), u);
-  } else if (topic === "DriverList") {
-    for (const [k, v] of Object.entries(data as Dict)) {
-      if (/^\d+$/.test(k)) deepMerge((driverMap[k] ??= {}) as unknown as Dict, v as Dict);
-    }
-  } else if (topic === "SessionInfo") {
-    setSessionInfo(data as NonNullable<typeof sessionInfo>);
-  } else if (topic === "SessionStatus") {
-    sessionStatus = data as typeof sessionStatus;
-  } else if (topic === "Position.z") {
-    applyPositionZ(data as string);
+/** Build fresh state from a `Subscribe` snapshot (which is already fully merged). */
+function buildRaw(snap: Record<string, unknown>): Raw {
+  const raw: Raw = { timing: {}, app: {}, drivers: {}, sessionInfo: null, sessionStatus: null, frames: [] };
+  for (const [k, v] of Object.entries((snap.DriverList as Dict) ?? {})) {
+    if (/^\d+$/.test(k)) raw.drivers[k] = v as RawDriver;
+  }
+  raw.sessionInfo = (snap.SessionInfo as Raw["sessionInfo"]) ?? null;
+  raw.sessionStatus = (snap.SessionStatus as Raw["sessionStatus"]) ?? null;
+  for (const [n, u] of Object.entries((snap.TimingData as { Lines?: Record<string, Dict> })?.Lines ?? {})) {
+    raw.timing[n] = u;
+  }
+  for (const [n, u] of Object.entries((snap.TimingAppData as { Lines?: Record<string, Dict> })?.Lines ?? {})) {
+    raw.app[n] = u;
+  }
+  if (snap["Position.z"]) raw.frames = framesFromZ(snap["Position.z"] as string);
+  return raw;
+}
+
+async function connectAndSubscribe(token: string): Promise<Record<string, unknown>> {
+  const conn = new signalR.HubConnectionBuilder()
+    .withUrl(HUB, {
+      accessTokenFactory: () => token,
+      transport: signalR.HttpTransportType.WebSockets,
+      headers: { "User-Agent": "BestHTTP" },
+    })
+    .build();
+  await conn.start();
+  try {
+    return (await conn.invoke("Subscribe", TOPICS)) as Record<string, unknown>;
+  } finally {
+    conn.stop().catch(() => {});
   }
 }
 
-function applySnapshot(snap: Record<string, unknown>) {
-  if (!snap) return;
-  // SessionInfo first (it may reset state on a new session), then the rest.
-  if (snap.SessionInfo) setSessionInfo(snap.SessionInfo as NonNullable<typeof sessionInfo>);
-  if (snap.SessionStatus) sessionStatus = snap.SessionStatus as typeof sessionStatus;
-  if (snap.DriverList) applyFeed("DriverList", snap.DriverList);
-  if (snap.TimingData) applyFeed("TimingData", snap.TimingData);
-  if (snap.TimingAppData) applyFeed("TimingAppData", snap.TimingAppData);
-  if (snap["Position.z"]) applyPositionZ(snap["Position.z"] as string);
-}
+/* ------------------------------ module cache ------------------------------ */
+let cache: { at: number; raw: Raw } | null = null;
+let framesBuffer: PosFrame[] = [];
+let lastKey: number | undefined;
 
-/* ---------------------------- connection mgmt ---------------------------- */
-async function ensureConnection(): Promise<boolean> {
+async function getRaw(): Promise<Raw | null> {
   const token = process.env.F1_TV_TOKEN?.trim();
-  if (!token) return false;
-  if (conn && conn.state === signalR.HubConnectionState.Connected) return true;
-  if (starting) {
-    await starting.catch(() => {});
-    return conn?.state === signalR.HubConnectionState.Connected;
-  }
-
-  starting = (async () => {
-    const c = new signalR.HubConnectionBuilder()
-      .withUrl(HUB, {
-        accessTokenFactory: () => token,
-        transport: signalR.HttpTransportType.WebSockets,
-        headers: { "User-Agent": "BestHTTP" },
-      })
-      .withAutomaticReconnect()
-      .build();
-
-    c.on("feed", (topic: string, data: unknown) => {
-      try {
-        applyFeed(topic, data);
-      } catch {}
-    });
-    c.onreconnected(async () => {
-      try {
-        applySnapshot((await c.invoke("Subscribe", TOPICS)) as Record<string, unknown>);
-      } catch {}
-    });
-
-    await c.start();
-    conn = c;
-    applySnapshot((await c.invoke("Subscribe", TOPICS)) as Record<string, unknown>);
-    lastRefresh = Date.now();
-  })();
+  if (!token) return null;
+  if (cache && Date.now() - cache.at < 2000) return cache.raw;
 
   try {
-    await starting;
-    return true;
+    const raw = buildRaw(await connectAndSubscribe(token));
+
+    // Track-outline buffer: reset on a new session, accumulate while warm.
+    const key = raw.sessionInfo?.Key;
+    if (key !== lastKey) {
+      framesBuffer = [];
+      lastKey = key;
+    }
+    if (raw.frames.length) {
+      framesBuffer.push(...raw.frames);
+      if (framesBuffer.length > MAX_FRAMES) framesBuffer = framesBuffer.slice(-MAX_FRAMES);
+    }
+
+    cache = { at: Date.now(), raw };
+    return raw;
   } catch {
-    conn = null;
-    return false;
-  } finally {
-    starting = null;
+    return cache?.raw ?? null;
   }
 }
 
-/** Re-Subscribe periodically so state stays fresh even when deltas are quiet. */
-async function maybeRefresh() {
-  if (conn?.state === signalR.HubConnectionState.Connected && Date.now() - lastRefresh > 2500) {
-    lastRefresh = Date.now();
-    try {
-      applySnapshot((await conn.invoke("Subscribe", TOPICS)) as Record<string, unknown>);
-    } catch {}
-  }
+/* ------------------------------- derivation ------------------------------- */
+export interface F1LiveDriver {
+  driver_number: number;
+  name_acronym: string;
+  team_colour: string;
+  team_name: string;
+  full_name: string;
 }
-
-/* ------------------------------ derive state ----------------------------- */
-export interface RelayState {
+export interface F1LiveRow {
+  driver_number: number;
+  position: number;
+  gap_to_leader: string;
+  interval: string;
+  best: number | null;
+  last: number | null;
+  laps: number;
+  compound: string;
+}
+export interface F1LiveState {
   mode: "race" | "quali" | "practice";
   session: { location: string; session_name: string };
-  drivers: { driver_number: number; name_acronym: string; team_colour: string; team_name: string; full_name: string }[];
+  drivers: F1LiveDriver[];
   order: number[];
-  rows: Record<number, { driver_number: number; position: number; gap_to_leader: string; interval: string; best: number | null; last: number | null; laps: number; compound: string }>;
+  rows: Record<number, F1LiveRow>;
   cars: { driver_number: number; x: number; y: number }[];
   trace: { x: number; y: number }[];
 }
+export interface SessionResult {
+  session_name: string;
+  mode: "race" | "quali" | "practice";
+  complete: boolean;
+  top: { pos: number; tla: string; team_colour: string; best: number | null; gap: string }[];
+}
 
-function modeOf(type?: string): RelayState["mode"] {
+function modeOf(type?: string): F1LiveState["mode"] {
   const t = (type ?? "").toLowerCase();
   if (t.includes("qual")) return "quali";
   if (t.includes("practice")) return "practice";
   return "race";
 }
 
-function compoundOf(numStr: string): string {
-  const st = app[numStr]?.Stints as unknown;
+function compoundOf(raw: Raw, numStr: string): string {
+  const st = raw.app[numStr]?.Stints as unknown;
   if (Array.isArray(st) && st.length) return (st[st.length - 1] as { Compound?: string })?.Compound ?? "UNKNOWN";
   if (st && typeof st === "object") {
     const ks = Object.keys(st as Dict).map(Number).sort((a, b) => a - b);
@@ -207,32 +181,17 @@ function compoundOf(numStr: string): string {
   return "UNKNOWN";
 }
 
-export async function getRelayState(): Promise<RelayState | null> {
-  if (!(await ensureConnection())) return null;
-  await maybeRefresh();
+function sessionName(raw: Raw): string {
+  const m = raw.sessionInfo?.Meeting;
+  return `${m?.Name ?? ""} · ${raw.sessionInfo?.Name ?? ""}`.replace(/^ · /, "");
+}
 
-  // Minimize once the session has ended (feed keeps final data until the next one).
-  const ended =
-    sessionInfo?.ArchiveStatus?.Status === "Complete" ||
-    ENDED.has((sessionStatus?.Status ?? "").toLowerCase());
-  if (ended) return null;
-
-  const nums = Object.keys(timing).filter((k) => /^\d+$/.test(k) && Object.keys(timing[k]).length);
-  if (!nums.length || !sessionInfo) return null;
-
-  const driverList = Object.entries(driverMap)
-    .filter(([k]) => /^\d+$/.test(k))
-    .map(([k, d]) => ({
-      driver_number: +k,
-      name_acronym: d.Tla ?? String(k),
-      team_colour: d.TeamColour ?? "",
-      team_name: d.TeamName ?? "",
-      full_name: d.FullName ?? "",
-    }));
-
-  const rows: RelayState["rows"] = {};
+function classify(raw: Raw) {
+  const nums = Object.keys(raw.timing).filter((k) => /^\d+$/.test(k) && Object.keys(raw.timing[k]).length);
+  const mode = modeOf(raw.sessionInfo?.Type);
+  const rows: Record<number, F1LiveRow> = {};
   for (const n of nums) {
-    const t = timing[n] as {
+    const t = raw.timing[n] as {
       Position?: string | number;
       Line?: number;
       GapToLeader?: string;
@@ -250,91 +209,71 @@ export async function getRelayState(): Promise<RelayState | null> {
       best: parseLapTime(t.BestLapTime?.Value),
       last: parseLapTime(t.LastLapTime?.Value),
       laps: +(t.NumberOfLaps ?? 0),
-      compound: compoundOf(n),
+      compound: compoundOf(raw, n),
     };
   }
-
-  const mode = modeOf(sessionInfo.Type);
   const order = nums
     .map(Number)
-    .sort((a, b) => {
-      if (mode === "race") return rows[a].position - rows[b].position;
-      return (rows[a].best ?? Infinity) - (rows[b].best ?? Infinity);
-    });
+    .sort((a, b) => (mode === "race" ? rows[a].position - rows[b].position : (rows[a].best ?? Infinity) - (rows[b].best ?? Infinity)));
+  return { nums, mode, rows, order };
+}
 
-  const lastFrame = frames[frames.length - 1];
-  const cars = lastFrame
-    ? Object.entries(lastFrame.cars).map(([n, [x, y]]) => ({ driver_number: +n, x, y }))
+export async function getRelayState(): Promise<F1LiveState | null> {
+  const raw = await getRaw();
+  if (!raw || !raw.sessionInfo) return null;
+
+  // Minimize once the session has ended.
+  const ended =
+    raw.sessionInfo.ArchiveStatus?.Status === "Complete" ||
+    ENDED.has((raw.sessionStatus?.Status ?? "").toLowerCase());
+  if (ended) return null;
+
+  const { nums, mode, rows, order } = classify(raw);
+  if (!nums.length) return null;
+
+  const drivers: F1LiveDriver[] = Object.entries(raw.drivers).map(([k, d]) => ({
+    driver_number: +k,
+    name_acronym: d.Tla ?? String(k),
+    team_colour: d.TeamColour ?? "",
+    team_name: d.TeamName ?? "",
+    full_name: d.FullName ?? "",
+  }));
+
+  const latest = raw.frames[raw.frames.length - 1];
+  const cars = latest
+    ? Object.entries(latest.cars).map(([n, [x, y]]) => ({ driver_number: +n, x, y }))
     : [];
 
   const leader = order[0];
   const trace: { x: number; y: number }[] = [];
-  for (const f of frames) {
+  for (const f of framesBuffer) {
     const p = f.cars[String(leader)];
     if (p) trace.push({ x: p[0], y: p[1] });
   }
 
-  const m = sessionInfo.Meeting;
-  return {
-    mode,
-    session: {
-      location: m?.Location ?? m?.Circuit?.ShortName ?? m?.Name ?? "F1",
-      session_name: `${m?.Name ?? ""} · ${sessionInfo.Name ?? ""}`.replace(/^ · /, ""),
-    },
-    drivers: driverList,
-    order,
-    rows,
-    cars,
-    trace,
-  };
+  return { mode, session: { location: raw.sessionInfo.Meeting?.Location ?? raw.sessionInfo.Meeting?.Circuit?.ShortName ?? "F1", session_name: sessionName(raw) }, drivers, order, rows, cars, trace };
 }
 
-/* ------------------------------ session result ---------------------------- */
-export interface SessionResult {
-  session_name: string;
-  mode: "race" | "quali" | "practice";
-  complete: boolean;
-  top: { pos: number; tla: string; team_colour: string; best: number | null; gap: string }[];
-}
-
-/**
- * Top-5 classification of the current OR most-recently-completed session.
- * Unlike getRelayState this ignores the ended-guard, so finished sessions
- * (Sprint Qualifying, Sprint, Qualifying, Race …) still surface their result.
- */
 export async function getRelayResults(): Promise<SessionResult | null> {
-  if (!(await ensureConnection())) return null;
-  await maybeRefresh();
-
-  const nums = Object.keys(timing).filter((k) => /^\d+$/.test(k) && Object.keys(timing[k]).length);
-  if (!nums.length || !sessionInfo) return null;
-
-  const mode = modeOf(sessionInfo.Type);
-  const arr = nums.map((n) => {
-    const t = timing[n] as {
-      Position?: string | number;
-      Line?: number;
-      GapToLeader?: string;
-      BestLapTime?: { Value?: string };
-    };
-    return {
-      pos: +(t.Position ?? t.Line ?? 99),
-      tla: driverMap[n]?.Tla ?? String(n),
-      team_colour: driverMap[n]?.TeamColour ?? "",
-      best: parseLapTime(t.BestLapTime?.Value),
-      gap: t.GapToLeader ?? "",
-    };
-  });
-  arr.sort((a, b) => (mode === "race" ? a.pos - b.pos : (a.best ?? Infinity) - (b.best ?? Infinity)));
+  const raw = await getRaw();
+  if (!raw || !raw.sessionInfo) return null;
+  const { nums, mode, rows, order } = classify(raw);
+  if (!nums.length) return null;
 
   const complete =
-    sessionInfo?.ArchiveStatus?.Status === "Complete" ||
-    ENDED.has((sessionStatus?.Status ?? "").toLowerCase());
+    raw.sessionInfo.ArchiveStatus?.Status === "Complete" ||
+    ENDED.has((raw.sessionStatus?.Status ?? "").toLowerCase());
 
   return {
-    session_name: `${sessionInfo.Meeting?.Name ?? ""} · ${sessionInfo.Name ?? ""}`.replace(/^ · /, ""),
+    session_name: sessionName(raw),
     mode,
     complete,
-    top: arr, // full classification — the hero ticker rolls through all of them
+    top: order.map((n) => ({
+      pos: rows[n].position,
+      tla: raw.drivers[n]?.Tla ?? String(n),
+      team_colour: raw.drivers[n]?.TeamColour ?? "",
+      best: rows[n].best,
+      gap: rows[n].gap_to_leader,
+    })),
   };
 }

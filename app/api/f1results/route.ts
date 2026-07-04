@@ -2,6 +2,7 @@ import { getRelayResults } from "@/lib/f1Relay";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 20;
 
 /** Top-5 of the current / most-recently-completed session (needs F1_TV_TOKEN). */
 export async function GET() {

@@ -4,6 +4,7 @@ import { F1_LIVE } from "@/lib/f1liveConfig";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 20; // allow time to connect+subscribe on serverless
 
 /**
  * Serves live map + timing.
