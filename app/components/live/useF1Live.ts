@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { startTransition, useEffect, useRef, useState } from "react";
 import { Driver, IntervalRow, LapSummary, StintRow } from "@/lib/openf1";
 import { F1_LIVE } from "@/lib/f1liveConfig";
 import type { LiveState } from "./useLiveSession";
@@ -135,7 +135,9 @@ export function useF1Live(): LiveState {
         if (data.status === "idle" || data.status === "error") {
           setState((s) => ({ ...s, status: data.status }));
         } else {
-          setState(toState(data));
+          // Non-urgent: lets React yield to the 60fps map animation instead of
+          // blocking it while the board/tyre tracker re-render every poll.
+          startTransition(() => setState(toState(data)));
         }
       } catch {
         if (!cancelled.current) setState((s) => ({ ...s, status: "error" }));
