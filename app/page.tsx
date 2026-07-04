@@ -11,6 +11,7 @@ import DriversTable from "./components/DriversTable";
 import ConstructorsTable from "./components/ConstructorsTable";
 import Calendar from "./components/Calendar";
 import PaddockIntel from "./components/PaddockIntel";
+import TokenBanner from "./components/TokenBanner";
 import LiveSection from "./components/live/LiveSection";
 
 // Rebuild standings/calendar hourly (they only change after a race weekend).
@@ -38,6 +39,8 @@ export default async function Page() {
           <span className="eyebrow text-[0.6rem] text-red">Live Edition</span>
         </span>
       </header>
+
+      <TokenBanner />
 
       <div className="flex flex-col gap-10">
         {/* Current weekend + calendar strip directly beneath it */}
