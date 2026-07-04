@@ -31,6 +31,7 @@ export interface LiveState {
   status: LiveStatus;
   mode: SessionMode;
   replay?: boolean; // true when showing a past session (nothing live right now)
+  circuitKey?: number;
   session?: Session;
   clockISO?: string;
   drivers: Map<number, Driver>;
@@ -38,6 +39,7 @@ export interface LiveState {
   positions: Map<number, number>;
   intervals: Map<number, IntervalRow>;
   stints: Map<number, StintRow>;
+  tyreLaps?: Map<number, number>; // laps on current tyre, per driver
   locations: Map<number, LocationRow>;
   laps: Map<number, LapSummary>;
   trace: { x: number; y: number }[]; // one lap, for the track outline

@@ -42,7 +42,7 @@ interface Raw {
     Type?: string;
     Name?: string;
     ArchiveStatus?: { Status?: string };
-    Meeting?: { Name?: string; Location?: string; Circuit?: { ShortName?: string } };
+    Meeting?: { Name?: string; Location?: string; Circuit?: { ShortName?: string; Key?: number } };
   } | null;
   sessionStatus: { Status?: string } | null;
   frames: PosFrame[]; // latest snapshot's frames (for car dots)
@@ -147,10 +147,12 @@ export interface F1LiveRow {
   last: number | null;
   laps: number;
   compound: string;
+  tyre_laps: number; // laps on the current tyre
 }
 export interface F1LiveState {
   mode: "race" | "quali" | "practice";
   session: { location: string; session_name: string };
+  circuitKey?: number;
   drivers: F1LiveDriver[];
   order: number[];
   rows: Record<number, F1LiveRow>;
@@ -171,14 +173,17 @@ function modeOf(type?: string): F1LiveState["mode"] {
   return "race";
 }
 
-function compoundOf(raw: Raw, numStr: string): string {
+/** Current (latest) stint → compound + laps done on that tyre. */
+function currentStint(raw: Raw, numStr: string): { compound: string; laps: number } {
   const st = raw.app[numStr]?.Stints as unknown;
-  if (Array.isArray(st) && st.length) return (st[st.length - 1] as { Compound?: string })?.Compound ?? "UNKNOWN";
-  if (st && typeof st === "object") {
+  let stint: { Compound?: string; TotalLaps?: number } | undefined;
+  if (Array.isArray(st) && st.length) {
+    stint = st[st.length - 1] as { Compound?: string; TotalLaps?: number };
+  } else if (st && typeof st === "object") {
     const ks = Object.keys(st as Dict).map(Number).sort((a, b) => a - b);
-    if (ks.length) return ((st as Dict)[ks[ks.length - 1]] as { Compound?: string })?.Compound ?? "UNKNOWN";
+    if (ks.length) stint = (st as Dict)[ks[ks.length - 1]] as { Compound?: string; TotalLaps?: number };
   }
-  return "UNKNOWN";
+  return { compound: stint?.Compound ?? "UNKNOWN", laps: Number(stint?.TotalLaps ?? 0) };
 }
 
 function sessionName(raw: Raw): string {
@@ -201,6 +206,7 @@ function classify(raw: Raw) {
       NumberOfLaps?: number;
     };
     const num = +n;
+    const stint = currentStint(raw, n);
     rows[num] = {
       driver_number: num,
       position: +(t.Position ?? t.Line ?? 99),
@@ -209,7 +215,8 @@ function classify(raw: Raw) {
       best: parseLapTime(t.BestLapTime?.Value),
       last: parseLapTime(t.LastLapTime?.Value),
       laps: +(t.NumberOfLaps ?? 0),
-      compound: compoundOf(raw, n),
+      compound: stint.compound,
+      tyre_laps: stint.laps,
     };
   }
   const order = nums
@@ -222,11 +229,13 @@ export async function getRelayState(): Promise<F1LiveState | null> {
   const raw = await getRaw();
   if (!raw || !raw.sessionInfo) return null;
 
-  // Minimize once the session has ended.
-  const ended =
-    raw.sessionInfo.ArchiveStatus?.Status === "Complete" ||
-    ENDED.has((raw.sessionStatus?.Status ?? "").toLowerCase());
-  if (ended) return null;
+  // Only show while the session is actually GREEN (cars running). This skips the
+  // pre-session build-up ("just people talking" = Inactive) and the post-session
+  // period (Finished/Finalised/Ends). Red-flag ("Aborted") still counts as live.
+  const status = (raw.sessionStatus?.Status ?? "").toLowerCase();
+  const ended = raw.sessionInfo.ArchiveStatus?.Status === "Complete" || ENDED.has(status);
+  const active = status === "started" || status === "aborted";
+  if (ended || (raw.sessionStatus != null && !active)) return null;
 
   const { nums, mode, rows, order } = classify(raw);
   if (!nums.length) return null;
@@ -251,7 +260,16 @@ export async function getRelayState(): Promise<F1LiveState | null> {
     if (p) trace.push({ x: p[0], y: p[1] });
   }
 
-  return { mode, session: { location: raw.sessionInfo.Meeting?.Location ?? raw.sessionInfo.Meeting?.Circuit?.ShortName ?? "F1", session_name: sessionName(raw) }, drivers, order, rows, cars, trace };
+  return {
+    mode,
+    session: { location: raw.sessionInfo.Meeting?.Location ?? raw.sessionInfo.Meeting?.Circuit?.ShortName ?? "F1", session_name: sessionName(raw) },
+    circuitKey: raw.sessionInfo.Meeting?.Circuit?.Key,
+    drivers,
+    order,
+    rows,
+    cars,
+    trace,
+  };
 }
 
 export async function getRelayResults(): Promise<SessionResult | null> {

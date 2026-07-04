@@ -7,6 +7,14 @@ export interface Bounds {
   maxY: number;
 }
 
+/** Rotate points about the origin by `deg` degrees (F1 circuit data ships a rotation). */
+export function rotate<T extends { x: number; y: number }>(pts: T[], deg: number): T[] {
+  const r = (deg * Math.PI) / 180;
+  const cos = Math.cos(r);
+  const sin = Math.sin(r);
+  return pts.map((p) => ({ ...p, x: p.x * cos - p.y * sin, y: p.x * sin + p.y * cos }));
+}
+
 export function computeBounds(pts: { x: number; y: number }[], padRatio = 0.06): Bounds {
   const xs = pts.map((p) => p.x);
   const ys = pts.map((p) => p.y);

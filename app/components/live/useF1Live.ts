@@ -14,6 +14,7 @@ interface ApiRow {
   last: number | null;
   laps: number;
   compound: string;
+  tyre_laps: number;
 }
 interface ApiDriver {
   driver_number: number;
@@ -26,6 +27,7 @@ interface ApiResponse {
   status: "live" | "idle" | "error";
   replay?: boolean;
   mode?: LiveState["mode"];
+  circuitKey?: number;
   session?: { location: string; session_name: string };
   drivers?: ApiDriver[];
   order?: number[];
@@ -64,10 +66,12 @@ function toState(r: ApiResponse): LiveState {
   const positions = new Map<number, number>();
   const intervals = new Map<number, IntervalRow>();
   const stints = new Map<number, StintRow>();
+  const tyreLaps = new Map<number, number>();
   const laps = new Map<number, LapSummary>();
   for (const [numStr, row] of Object.entries(r.rows ?? {})) {
     const num = +numStr;
     positions.set(num, row.position);
+    tyreLaps.set(num, row.tyre_laps ?? 0);
     intervals.set(num, {
       date: "",
       driver_number: num,
@@ -93,6 +97,7 @@ function toState(r: ApiResponse): LiveState {
   return {
     status: "live",
     replay: r.replay,
+    circuitKey: r.circuitKey,
     mode: r.mode ?? "race",
     session: r.session
       ? ({ location: r.session.location, session_name: r.session.session_name } as unknown as LiveState["session"])
@@ -102,6 +107,7 @@ function toState(r: ApiResponse): LiveState {
     positions,
     intervals,
     stints,
+    tyreLaps,
     locations,
     laps,
     trace: r.trace ?? [],

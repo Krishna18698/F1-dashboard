@@ -75,7 +75,9 @@ export default function SessionResults() {
     };
   }, []);
 
-  if (!r || r.status === "off" || !r.top?.length) return null;
+  // No token → no ticker at all. Still loading → reserve height so nothing shifts.
+  if (r?.status === "off") return null;
+  if (!r || !r.top?.length) return <div className="min-h-19 border-t border-white/10" aria-hidden />;
   const isRace = r.mode === "race";
   // Slower for longer grids; one full loop ≈ 2.4s per entry.
   const duration = Math.max(20, r.top.length * 2.4);

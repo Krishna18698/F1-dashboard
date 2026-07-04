@@ -16,67 +16,67 @@ function delta(ms: number) {
 }
 
 /**
- * Shows the weekend's sessions on the race card, counts down to the *next* one,
- * and names it (FP1 / Sprint Qualifying / Qualifying / Race …).
+ * Weekend sessions on the race card: counts down to the next one and names it.
+ * Renders a deterministic placeholder until mounted (same on server + client) so
+ * there's no hydration mismatch or layout shift; then swaps to live values.
  */
 export default function SessionSchedule({ sessions }: { sessions: WeekendSession[] }) {
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState<number | null>(null);
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
+    const tick = () => setNow(Date.now());
+    const raf = requestAnimationFrame(tick); // first paint after mount, avoids SSR mismatch
+    const id = setInterval(tick, 1000);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearInterval(id);
+    };
   }, []);
 
-  const nextIdx = sessions.findIndex((s) => Date.parse(s.iso) > now);
+  const ready = now !== null;
+  const nextIdx = ready ? sessions.findIndex((s) => Date.parse(s.iso) > now!) : -1;
   const next = nextIdx >= 0 ? sessions[nextIdx] : null;
-  const t = next ? delta(Date.parse(next.iso) - now) : null;
+  const t = ready && next ? delta(Date.parse(next.iso) - now!) : null;
 
-  const cells: [string, number][] = t
-    ? [
-        ["Days", t.d],
-        ["Hrs", t.h],
-        ["Min", t.m],
-        ["Sec", t.s],
-      ]
-    : [];
+  const cells: [string, string][] = [
+    ["Days", t ? pad(t.d) : "––"],
+    ["Hrs", t ? pad(t.h) : "––"],
+    ["Min", t ? pad(t.m) : "––"],
+    ["Sec", t ? pad(t.s) : "––"],
+  ];
 
   return (
     <div>
       <p className="eyebrow mb-2 text-[0.65rem] text-white/45">
-        {next ? `Next · ${next.label} in` : "Race weekend complete"}
+        {!ready ? "Next session" : next ? `Next · ${next.label} in` : "Race weekend complete"}
       </p>
 
-      {t && (
-        <div className="flex gap-2 sm:gap-3 lg:justify-end">
-          {cells.map(([label, val]) => (
-            <div
-              key={label}
-              className="flex min-w-[3.4rem] flex-col items-center rounded-md bg-white/10 px-3 py-2 ring-1 ring-white/15 sm:min-w-16"
-            >
-              <span className="tnum font-mono text-2xl font-bold leading-none text-white sm:text-3xl">
-                {pad(val)}
-              </span>
-              <span className="eyebrow mt-1 text-[0.6rem] text-white/55">{label}</span>
-            </div>
-          ))}
-        </div>
-      )}
+      {/* Countdown boxes are always rendered (fixed size) → no shift. */}
+      <div className="flex gap-2 sm:gap-3 lg:justify-end">
+        {cells.map(([label, val]) => (
+          <div
+            key={label}
+            className="flex min-w-[3.4rem] flex-col items-center rounded-md bg-white/10 px-3 py-2 ring-1 ring-white/15 sm:min-w-16"
+          >
+            <span className="tnum font-mono text-2xl font-bold leading-none text-white sm:text-3xl">
+              {val}
+            </span>
+            <span className="eyebrow mt-1 text-[0.6rem] text-white/55">{label}</span>
+          </div>
+        ))}
+      </div>
 
-      {/* Weekend session chips: done ✓ · next (red) · upcoming */}
+      {/* Weekend chips — neutral until mounted, then done ✓ / next highlighting. */}
       <div className="mt-4 flex flex-wrap gap-1.5 lg:justify-end">
         {sessions.map((sess, i) => {
-          const done = Date.parse(sess.iso) <= now && i !== nextIdx;
-          const isNext = i === nextIdx;
+          const done = ready && Date.parse(sess.iso) <= now! && i !== nextIdx;
+          const isNext = ready && i === nextIdx;
           return (
             <span
               key={sess.label}
               title={sess.label}
               className={[
                 "rounded px-2 py-1 text-[0.6rem] font-semibold tracking-wide",
-                isNext
-                  ? "bg-red text-white"
-                  : done
-                    ? "bg-white/5 text-white/35"
-                    : "bg-white/10 text-white/70",
+                isNext ? "bg-red text-white" : done ? "bg-white/5 text-white/35" : "bg-white/10 text-white/70",
               ].join(" ")}
             >
               {sess.short}
