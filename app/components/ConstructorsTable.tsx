@@ -1,24 +1,11 @@
 import { ConstructorStanding } from "@/lib/jolpica";
-
-// Fallback brand colours keyed by constructorId (OpenF1 colours are per-session).
-const TEAM_COLOR: Record<string, string> = {
-  mercedes: "#00d2be",
-  ferrari: "#e10600",
-  red_bull: "#3671c6",
-  mclaren: "#ff8000",
-  aston_martin: "#229971",
-  alpine: "#0093cc",
-  williams: "#64c4ff",
-  rb: "#6692ff",
-  sauber: "#52e252",
-  haas: "#b6babd",
-};
+import { teamColor } from "@/lib/teamColors";
 
 export default function ConstructorsTable({ standings }: { standings: ConstructorStanding[] }) {
   return (
     <ol className="divide-y divide-line">
       {standings.map((s, i) => {
-        const color = TEAM_COLOR[s.Constructor.constructorId] ?? "#8a8a92";
+        const color = teamColor(s.Constructor.constructorId);
         return (
           <li
             key={s.Constructor.constructorId}

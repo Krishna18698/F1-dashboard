@@ -1,4 +1,5 @@
 import { DriverStanding } from "@/lib/jolpica";
+import { teamColor } from "@/lib/teamColors";
 
 export default function DriversTable({ standings }: { standings: DriverStanding[] }) {
   return (
@@ -16,7 +17,11 @@ export default function DriversTable({ standings }: { standings: DriverStanding[
             {String(i + 1).padStart(2, "0")}
           </span>
 
-          <div className="flex min-w-0 items-center gap-1.5">
+          <div className="flex min-w-0 items-center gap-2">
+            <span
+              className="h-4 w-1 shrink-0 rounded-full"
+              style={{ backgroundColor: teamColor(s.Constructors[0]?.constructorId) }}
+            />
             <span className="truncate text-sm font-semibold">
               {s.Driver.givenName} {s.Driver.familyName}
             </span>

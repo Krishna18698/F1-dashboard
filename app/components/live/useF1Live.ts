@@ -114,25 +114,36 @@ export function useF1Live(): LiveState {
 
   useEffect(() => {
     cancelled.current = false;
+    let timer: ReturnType<typeof setTimeout>;
+
+    // Poll fast only while a session is live; back off hard when idle so we're not
+    // hammering the feed when nothing is happening.
+    const IDLE_MS = 30_000;
 
     async function poll() {
+      let status: ApiResponse["status"] = "idle";
       try {
         const res = await fetch("/api/f1live", { cache: "no-store" });
         const data = (await res.json()) as ApiResponse;
         if (cancelled.current) return;
-        if (data.status === "idle") return setState((s) => ({ ...s, status: "idle" }));
-        if (data.status === "error") return setState((s) => ({ ...s, status: "error" }));
-        setState(toState(data));
+        status = data.status;
+        if (data.status === "idle" || data.status === "error") {
+          setState((s) => ({ ...s, status: data.status }));
+        } else {
+          setState(toState(data));
+        }
       } catch {
         if (!cancelled.current) setState((s) => ({ ...s, status: "error" }));
+      }
+      if (!cancelled.current) {
+        timer = setTimeout(poll, status === "live" ? F1_LIVE.pollMs : IDLE_MS);
       }
     }
 
     poll();
-    const timer = setInterval(poll, F1_LIVE.pollMs);
     return () => {
       cancelled.current = true;
-      clearInterval(timer);
+      clearTimeout(timer);
     };
   }, []);
 

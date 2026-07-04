@@ -26,10 +26,10 @@ export default async function Page() {
   ]);
 
   return (
-    <main className="mx-auto w-full max-w-350 px-4 py-6 sm:px-8 sm:py-8">
+    <main className="mx-auto w-full max-w-350 overflow-x-hidden px-4 py-6 sm:px-8 sm:py-8">
       {/* Masthead */}
       <header className="mb-6 flex flex-wrap items-center justify-between gap-3 border-b-4 border-ink pb-3">
-        <h1 className="font-display text-3xl leading-none sm:text-5xl">
+        <h1 className="font-display text-2xl leading-none sm:text-4xl lg:text-5xl">
           <span className="text-ink">Krishna Shravan&apos;s </span>
           <span className="text-red">Pit Wall</span>
         </h1>

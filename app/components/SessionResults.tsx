@@ -32,26 +32,50 @@ function Item({ d, isRace }: { d: Row; isRace: boolean }) {
 }
 
 /** Rolling news-ticker of the latest session's standings on the hero card. */
+const CACHE_KEY = "pitwall:lastResult";
+
 export default function SessionResults() {
   const [r, setR] = useState<Res | null>(null);
 
   useEffect(() => {
     let on = true;
+    let hydrated = false;
+    let timer: ReturnType<typeof setTimeout>;
+
     const poll = async () => {
+      // On first run, show the last known result instantly (persists across reloads).
+      if (!hydrated) {
+        hydrated = true;
+        try {
+          const cached = localStorage.getItem(CACHE_KEY);
+          if (cached && on) setR(JSON.parse(cached));
+        } catch {}
+      }
+      let complete = true;
       try {
         const d = (await (await fetch("/api/f1results", { cache: "no-store" })).json()) as Res;
-        if (on) setR(d);
+        if (!on) return;
+        if (d.status === "ok" && d.top?.length) {
+          complete = d.complete ?? true;
+          setR(d);
+          try {
+            localStorage.setItem(CACHE_KEY, JSON.stringify(d));
+          } catch {}
+        }
+        // status "none"/"off" → keep showing the stored result, don't clear.
       } catch {}
+      // Live session → refresh often; finished/idle → back off.
+      if (on) timer = setTimeout(poll, complete ? 60_000 : 15_000);
     };
     poll();
-    const id = setInterval(poll, 20000);
+
     return () => {
       on = false;
-      clearInterval(id);
+      clearTimeout(timer);
     };
   }, []);
 
-  if (!r || r.status !== "ok" || !r.top?.length) return null;
+  if (!r || r.status === "off" || !r.top?.length) return null;
   const isRace = r.mode === "race";
   // Slower for longer grids; one full loop ≈ 2.4s per entry.
   const duration = Math.max(20, r.top.length * 2.4);
