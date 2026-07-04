@@ -7,7 +7,7 @@ import { hex } from "@/lib/format";
 import { PosFrame } from "./useLiveSession";
 
 const SIZE = 1000;
-const DELAY_MS = 15000; // play back this far behind the latest data → smooth, F1-TV-style
+const DELAY_MS = 20000; // play back this far behind the latest data → smooth, F1-TV-style
 
 interface Circuit {
   x: number[];
@@ -51,7 +51,7 @@ export default function TrackMap({
     const seen = new Set(buf.map((f) => f.t));
     for (const f of frames) if (!seen.has(f.t)) buf.push(f);
     buf.sort((a, b) => a.t - b.t);
-    const cutoff = (buf.at(-1)?.t ?? 0) - 30_000;
+    const cutoff = (buf.at(-1)?.t ?? 0) - 40_000;
     bufRef.current = buf.filter((f) => f.t >= cutoff);
   }, [frames]);
 

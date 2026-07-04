@@ -22,7 +22,7 @@ if (typeof g.WebSocket === "undefined") g.WebSocket = WsImpl;
 const HUB = "https://livetiming.formula1.com/signalrcore";
 const TOPICS = ["DriverList", "TimingData", "TimingAppData", "Position.z", "SessionInfo", "SessionStatus"];
 const ENDED = new Set(["finished", "finalised", "ends"]);
-const BUFFER_MS = 35_000; // keep ~35s of position frames (covers a 10s playback delay)
+const BUFFER_MS = 45_000; // keep ~45s of position frames (covers a 20s playback delay)
 
 type Dict = Record<string, unknown>;
 interface RawDriver {
@@ -336,7 +336,7 @@ export async function getRelayState(): Promise<F1LiveState | null> {
     drivers: driverList,
     order,
     rows,
-    frames: frameBuffer.slice(-100), // ~30s window (covers the 10s delay + jitter)
+    frames: frameBuffer.slice(-150), // ~45s window (covers the 20s delay + jitter)
   };
 }
 
