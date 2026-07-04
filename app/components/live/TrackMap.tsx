@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Driver, LocationRow } from "@/lib/openf1";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Driver } from "@/lib/openf1";
 import { Bounds, computeBounds, project, rotate, tracePath } from "@/lib/geo";
 import { hex } from "@/lib/format";
+import { PosFrame } from "./useLiveSession";
 
 const SIZE = 1000;
+const DELAY_MS = 5000; // play back this far behind the latest data → smooth, F1-TV-style
 
 interface Circuit {
   x: number[];
@@ -16,20 +18,19 @@ interface Circuit {
 
 export default function TrackMap({
   circuitKey,
-  trace,
-  locations,
+  frames,
   drivers,
   leaderNum,
 }: {
   circuitKey?: number;
-  trace: { x: number; y: number }[];
-  locations: Map<number, LocationRow>;
+  frames?: PosFrame[];
   drivers: Map<number, Driver>;
   leaderNum?: number;
 }) {
   const [circuit, setCircuit] = useState<Circuit | null>(null);
+  const [positions, setPositions] = useState<Record<string, [number, number]>>({});
 
-  // Fetch the real circuit outline once per circuit (cached server-side).
+  // Fetch the real circuit outline once per circuit.
   useEffect(() => {
     if (!circuitKey) return;
     let on = true;
@@ -42,25 +43,67 @@ export default function TrackMap({
     };
   }, [circuitKey]);
 
-  const cars = [...locations.values()].filter((c) => c.x !== 0 || c.y !== 0);
+  // Rolling buffer of timestamped frames (deduped, ~25s kept).
+  const bufRef = useRef<PosFrame[]>([]);
+  useEffect(() => {
+    if (!frames?.length) return;
+    const buf = bufRef.current;
+    const seen = new Set(buf.map((f) => f.t));
+    for (const f of frames) if (!seen.has(f.t)) buf.push(f);
+    buf.sort((a, b) => a.t - b.t);
+    const cutoff = (buf.at(-1)?.t ?? 0) - 25_000;
+    bufRef.current = buf.filter((f) => f.t >= cutoff);
+  }, [frames]);
+
+  // Playback loop: advance a clock DELAY behind the latest frame, interpolate.
+  const playT = useRef<number | null>(null);
+  const lastReal = useRef(0);
+  useEffect(() => {
+    let raf = 0;
+    const loop = () => {
+      const buf = bufRef.current;
+      if (buf.length >= 2) {
+        const latest = buf[buf.length - 1].t;
+        const now = performance.now();
+        const target = latest - DELAY_MS;
+        if (playT.current === null) {
+          playT.current = target;
+        } else {
+          playT.current += now - lastReal.current;
+          // resync if we ran past the buffer or fell too far behind
+          if (playT.current > latest || playT.current < target - 3000) playT.current = target;
+        }
+        lastReal.current = now;
+
+        const pt = playT.current;
+        let i = 0;
+        while (i < buf.length - 1 && buf[i + 1].t <= pt) i++;
+        const a = buf[i];
+        const b = buf[Math.min(i + 1, buf.length - 1)];
+        const frac = b.t > a.t ? Math.max(0, Math.min(1, (pt - a.t) / (b.t - a.t))) : 0;
+
+        const pos: Record<string, [number, number]> = {};
+        for (const n of new Set([...Object.keys(a.c), ...Object.keys(b.c)])) {
+          const pa = a.c[n];
+          const pb = b.c[n] ?? pa;
+          if (pa && pb) pos[n] = [pa[0] + (pb[0] - pa[0]) * frac, pa[1] + (pb[1] - pa[1]) * frac];
+          else if (pa) pos[n] = pa;
+        }
+        setPositions(pos);
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
   const rot = circuit?.rotation ?? 0;
-
-  // Outline points (rotated to the canonical orientation the circuit data ships with).
-  const outline = useMemo(() => {
-    if (circuit) return rotate(circuit.x.map((x, i) => ({ x, y: circuit.y[i] })), rot);
-    return trace; // fallback: derived path until the circuit loads
-  }, [circuit, rot, trace]);
-
-  const bounds: Bounds | null = useMemo(() => {
-    const pts = outline.length ? outline : cars.map((c) => ({ x: c.x, y: c.y }));
-    return pts.length ? computeBounds(pts) : null;
-  }, [outline, cars]);
-
-  const path = useMemo(
-    () => (bounds && outline.length ? tracePath(outline, bounds, SIZE) + (circuit ? " Z" : "") : ""),
-    [bounds, outline, circuit],
+  const outline = useMemo(
+    () => (circuit ? rotate(circuit.x.map((x, i) => ({ x, y: circuit.y[i] })), rot) : []),
+    [circuit, rot],
   );
-
+  const bounds: Bounds | null = useMemo(() => (outline.length ? computeBounds(outline) : null), [outline]);
+  const path = useMemo(() => (bounds ? tracePath(outline, bounds, SIZE) + " Z" : ""), [bounds, outline]);
   const cornerMarks = useMemo(() => {
     if (!circuit || !bounds) return [];
     return rotate(circuit.corners, rot).map((c) => ({ n: c.number, ...project(c.x, c.y, bounds, SIZE) }));
@@ -69,7 +112,7 @@ export default function TrackMap({
   if (!bounds) {
     return (
       <div className="flex aspect-square items-center justify-center rounded-lg carbon-bg text-sm text-white/40">
-        Acquiring track map…
+        Loading circuit…
       </div>
     );
   }
@@ -85,32 +128,21 @@ export default function TrackMap({
           </>
         )}
 
-        {/* Corner numbers */}
         {cornerMarks.map((c) => (
-          <text
-            key={c.n}
-            x={c.cx}
-            y={c.cy}
-            textAnchor="middle"
-            dominantBaseline="middle"
-            fontSize={13}
-            fontWeight={700}
-            fill="rgba(255,255,255,0.35)"
-          >
+          <text key={c.n} x={c.cx} y={c.cy} textAnchor="middle" dominantBaseline="middle" fontSize={13} fontWeight={700} fill="rgba(255,255,255,0.35)">
             {c.n}
           </text>
         ))}
 
-        {/* Cars */}
-        {cars.map((c) => {
-          const rp = rotate([{ x: c.x, y: c.y }], rot)[0];
+        {Object.entries(positions).map(([num, [x, y]]) => {
+          const rp = rotate([{ x, y }], rot)[0];
           const { cx, cy } = project(rp.x, rp.y, bounds, SIZE);
-          const d = drivers.get(c.driver_number);
-          const isLeader = c.driver_number === leaderNum;
+          const d = drivers.get(+num);
+          const isLeader = +num === leaderNum;
           const color = hex(d?.team_colour);
-          const tla = d?.name_acronym ?? String(c.driver_number);
+          const tla = d?.name_acronym ?? num;
           return (
-            <g key={c.driver_number} className="car-dot" style={{ transform: `translate(${cx}px, ${cy}px)` }}>
+            <g key={num} style={{ transform: `translate(${cx}px, ${cy}px)` }}>
               {isLeader && <circle r={20} fill={color} opacity={0.25} />}
               <circle r={isLeader ? 15 : 12} fill={color} stroke="#fff" strokeWidth={isLeader ? 3.5 : 2.5} />
               <g transform="translate(0, -30)">

@@ -27,6 +27,12 @@ import { LIVE_CONFIG } from "@/lib/liveConfig";
 export type LiveStatus = "loading" | "live" | "idle" | "error" | "restricted";
 export type SessionMode = "race" | "quali" | "practice";
 
+/** A timestamped position frame — the client plays these back smoothly on a delay. */
+export interface PosFrame {
+  t: number; // epoch ms
+  c: Record<string, [number, number]>; // driver_number → [x, y]
+}
+
 export interface LiveState {
   status: LiveStatus;
   mode: SessionMode;
@@ -41,6 +47,7 @@ export interface LiveState {
   stints: Map<number, StintRow>;
   tyreLaps?: Map<number, number>; // laps on current tyre, per driver
   locations: Map<number, LocationRow>;
+  frames?: PosFrame[]; // recent position window for smooth playback
   laps: Map<number, LapSummary>;
   trace: { x: number; y: number }[]; // one lap, for the track outline
   nextInfo?: { name: string; startISO: string };

@@ -61,8 +61,7 @@ export default function LiveSection() {
       <div className="grid gap-4 lg:grid-cols-2">
         <TrackMap
           circuitKey={s.circuitKey}
-          trace={s.trace}
-          locations={s.locations}
+          frames={s.frames}
           drivers={s.drivers}
           leaderNum={leaderNum}
         />

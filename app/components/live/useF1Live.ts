@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Driver, IntervalRow, LapSummary, LocationRow, StintRow } from "@/lib/openf1";
+import { Driver, IntervalRow, LapSummary, StintRow } from "@/lib/openf1";
 import { F1_LIVE } from "@/lib/f1liveConfig";
 import type { LiveState } from "./useLiveSession";
 
@@ -32,8 +32,7 @@ interface ApiResponse {
   drivers?: ApiDriver[];
   order?: number[];
   rows?: Record<number, ApiRow>;
-  cars?: { driver_number: number; x: number; y: number }[];
-  trace?: { x: number; y: number }[];
+  frames?: { t: number; c: Record<string, [number, number]> }[];
 }
 
 const empty: LiveState = {
@@ -89,15 +88,11 @@ function toState(r: ApiResponse): LiveState {
     laps.set(num, { best: row.best, last: row.last, count: row.laps, bestS1: null, bestS2: null, bestS3: null });
   }
 
-  const locations = new Map<number, LocationRow>();
-  for (const c of r.cars ?? []) {
-    locations.set(c.driver_number, { date: "", driver_number: c.driver_number, x: c.x, y: c.y, z: 0 });
-  }
-
   return {
     status: "live",
     replay: r.replay,
     circuitKey: r.circuitKey,
+    frames: r.frames ?? [],
     mode: r.mode ?? "race",
     session: r.session
       ? ({ location: r.session.location, session_name: r.session.session_name } as unknown as LiveState["session"])
@@ -108,9 +103,9 @@ function toState(r: ApiResponse): LiveState {
     intervals,
     stints,
     tyreLaps,
-    locations,
+    locations: new Map(),
     laps,
-    trace: r.trace ?? [],
+    trace: [],
   };
 }
 

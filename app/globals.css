@@ -84,11 +84,10 @@ body {
   animation: pulse-live 1.1s ease-in-out infinite;
 }
 
-/* Car markers glide continuously. The glide is a touch LONGER than the poll
-   interval so a new target always arrives before the dot stops → non-stop motion
-   (a ~1s buffer/lag is the trade-off, which keeps it smooth). */
+/* Car motion is now driven by client-side playback (rAF interpolation of the
+   buffered ~3.3Hz position stream), so no CSS transition is needed. */
 .car-dot {
-  transition: transform 4s linear;
+  transition: none;
 }
 
 /* News-ticker marquee — the track holds the sequence twice and slides one copy
