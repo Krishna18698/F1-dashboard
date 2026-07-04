@@ -19,4 +19,19 @@ export const F1_LIVE = {
   replayAnchorFrac: 0.45,
   pollMs: 2500,
   base: "https://livetiming.formula1.com/static",
+
+  /**
+   * TEST replay: when enabled, the live panel replays this past session against a
+   * real-time virtual clock — so you can verify the map/board/tyres/ticker work
+   * before a genuine session. Set enabled:false for normal live behaviour.
+   */
+  replay: {
+    enabled: false,
+    sessionPath: "2026/2026-06-28_Austrian_Grand_Prix/2026-06-28_Race/",
+    sessionType: "Race",
+    circuitKey: 19, // Red Bull Ring (Spielberg)
+    location: "Spielberg",
+    name: "Austrian Grand Prix · Race (test replay)",
+    anchorFrac: 0.45,
+  },
 } as const;

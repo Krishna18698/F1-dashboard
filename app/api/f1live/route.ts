@@ -14,6 +14,23 @@ export const maxDuration = 20; // allow time to connect+subscribe on serverless
  */
 export async function GET() {
   try {
+    // 0) TEST replay — advance a past session against a real-time virtual clock.
+    if (F1_LIVE.replay.enabled) {
+      const r = F1_LIVE.replay;
+      const dur = await getSessionDuration(r.sessionPath, false);
+      const anchor = Math.floor(dur * r.anchorFrac);
+      const span = Math.max(1, dur - anchor);
+      const upto = anchor + (Date.now() % span);
+      const state = await getF1LiveState(r.sessionPath, r.sessionType, upto, false);
+      return Response.json({
+        status: "live",
+        replay: true,
+        circuitKey: r.circuitKey,
+        session: { location: r.location, session_name: r.name },
+        ...state,
+      });
+    }
+
     // 1) Real-time via the viewer's F1 TV token.
     if (process.env.F1_TV_TOKEN?.trim()) {
       const relay = await getRelayState();

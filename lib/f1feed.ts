@@ -249,6 +249,7 @@ export interface F1LiveRow {
   last: number | null;
   laps: number;
   compound: string;
+  tyre_laps: number;
 }
 export interface F1LiveDriver {
   driver_number: number;
@@ -309,9 +310,12 @@ export async function getF1LiveState(
     const bt = t.BestLapTime as { Value?: string } | undefined;
     const lt = t.LastLapTime as { Value?: string } | undefined;
     const iv = t.IntervalToPositionAhead as { Value?: string } | undefined;
-    const stints = (appState[numStr]?.Stints ?? {}) as Record<string, { Compound?: string }>;
+    const stints = (appState[numStr]?.Stints ?? {}) as Record<
+      string,
+      { Compound?: string; TotalLaps?: number }
+    >;
     const keys = Object.keys(stints).map(Number).sort((a, b) => a - b);
-    const compound = keys.length ? (stints[keys[keys.length - 1]]?.Compound ?? "UNKNOWN") : "UNKNOWN";
+    const cur = keys.length ? stints[keys[keys.length - 1]] : undefined;
 
     rows[num] = {
       driver_number: num,
@@ -321,7 +325,8 @@ export async function getF1LiveState(
       best: parseLapTime(bt?.Value),
       last: parseLapTime(lt?.Value),
       laps: +(t.NumberOfLaps ?? 0),
-      compound,
+      compound: cur?.Compound ?? "UNKNOWN",
+      tyre_laps: Number(cur?.TotalLaps ?? 0),
     };
   }
 

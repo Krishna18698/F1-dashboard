@@ -77,14 +77,25 @@ export default function SessionResults() {
 
   // No token → no ticker at all. Still loading → reserve height so nothing shifts.
   if (r?.status === "off") return null;
-  if (!r || !r.top?.length)
-    return <div className="min-h-20 border-t border-white/10 py-3" aria-hidden />;
+  // Loading: render the exact same layout, invisible, so height matches → no shift.
+  if (!r || !r.top?.length) {
+    return (
+      <div className="border-t border-white/10 py-3" aria-hidden>
+        <div className="mb-2 px-6 sm:px-8">
+          <span className="eyebrow inline-block rounded-sm px-2 py-1 text-[0.55rem] font-bold opacity-0">
+            —
+          </span>
+        </div>
+        <div className="text-sm opacity-0">·</div>
+      </div>
+    );
+  }
   const isRace = r.mode === "race";
   // Slower for longer grids; one full loop ≈ 2.4s per entry.
   const duration = Math.max(20, r.top.length * 2.4);
 
   return (
-    <div className="min-h-20 border-t border-white/10 py-3">
+    <div className="border-t border-white/10 py-3">
       {/* Line 1: session · RESULT */}
       <div className="mb-2 px-6 sm:px-8">
         <span
