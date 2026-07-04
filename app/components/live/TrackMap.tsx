@@ -146,8 +146,8 @@ export default function TrackMap({
       const isLeader = num === leaderNum;
       return (
         <g key={num} data-num={num} style={{ visibility: "hidden" }}>
-          {isLeader && <circle r={20} fill={color} opacity={0.25} />}
-          <circle r={isLeader ? 15 : 12} fill={color} stroke="#fff" strokeWidth={isLeader ? 3.5 : 2.5} />
+          {isLeader && <circle r={20} fill={color} opacity={0.3} />}
+          <circle r={isLeader ? 14 : 11} fill={color} stroke="#15151a" strokeWidth={isLeader ? 3 : 2} />
           <g transform="translate(0, -30)">
             <rect x={-26} y={-15} width={52} height={26} rx={5} fill="#15151a" stroke={color} strokeWidth={2} />
             <text x={0} y={3} textAnchor="middle" fontSize={17} fontWeight={800} fill="#fff" fontFamily="var(--font-geist-sans), sans-serif">
@@ -172,14 +172,20 @@ export default function TrackMap({
     <div className="carbon-bg overflow-hidden rounded-lg ring-1 ring-white/10">
       <svg viewBox={`0 0 ${SIZE} ${SIZE}`} className="h-full w-full">
         {path && (
-          <>
-            <path d={path} fill="none" stroke="#26262c" strokeWidth={34} strokeLinejoin="round" strokeLinecap="round" />
-            <path d={path} fill="none" stroke="#3a3a42" strokeWidth={28} strokeLinejoin="round" strokeLinecap="round" />
-            <path d={path} fill="none" stroke="#e10600" strokeWidth={3} strokeDasharray="1 14" strokeLinecap="round" opacity={0.85} />
-          </>
+          <path d={path} fill="none" stroke="#f4f4f6" strokeWidth={12} strokeLinejoin="round" strokeLinecap="round" />
         )}
         {cornerMarks.map((c) => (
-          <text key={c.n} x={c.cx} y={c.cy} textAnchor="middle" dominantBaseline="middle" fontSize={13} fontWeight={700} fill="rgba(255,255,255,0.35)">
+          <text
+            key={c.n}
+            x={c.cx}
+            y={c.cy}
+            textAnchor="middle"
+            dominantBaseline="middle"
+            fontSize={12}
+            fontWeight={700}
+            fill="#8a8a92"
+            style={{ paintOrder: "stroke", stroke: "#15151a", strokeWidth: 3 }}
+          >
             {c.n}
           </text>
         ))}
