@@ -7,7 +7,7 @@ import { hex } from "@/lib/format";
 import { PosFrame } from "./useLiveSession";
 
 const SIZE = 1000;
-const DELAY_MS = 5000; // play back this far behind the latest data → smooth, F1-TV-style
+const DELAY_MS = 7000; // play back this far behind the latest data → smooth, F1-TV-style
 
 interface Circuit {
   x: number[];
