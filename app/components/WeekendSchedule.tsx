@@ -44,31 +44,32 @@ export default function WeekendSchedule({ sessions }: { sessions: WeekendSession
         {sessions.map((s, i) => {
           const isLive = ready && liveLabel === s.label;
           const done = ready && !isLive && Date.parse(s.iso) <= now!;
-          const isNext = i === nextIdx;
+          const isNext = !isLive && i === nextIdx;
           return (
             <div
               key={s.label}
               className={[
                 "rounded-lg border p-3 transition-colors",
-                isLive
+                isLive || isNext
                   ? "border-red bg-red-tint"
-                  : isNext
-                    ? "border-ink bg-paper"
-                    : done
-                      ? "border-line bg-panel/60 opacity-70"
-                      : "border-line bg-paper",
+                  : done
+                    ? "border-line bg-panel/60 opacity-70"
+                    : "border-line bg-paper",
               ].join(" ")}
             >
               <div className="flex items-center justify-between">
                 <span className="eyebrow text-[0.6rem] text-muted">{s.short}</span>
                 {isLive ? (
-                  <span className="live-dot h-2 w-2 rounded-full bg-red" />
-                ) : done ? (
-                  <span className="text-xs font-bold text-red">✓</span>
+                  <span className="flex items-center gap-1 text-[0.5rem] font-bold tracking-wide text-red">
+                    <span className="live-dot h-1.5 w-1.5 rounded-full bg-red" />
+                    LIVE
+                  </span>
                 ) : isNext ? (
-                  <span className="rounded-sm bg-ink px-1 py-0.5 text-[0.5rem] font-bold tracking-wide text-white">
+                  <span className="rounded-sm bg-red px-1.5 py-0.5 text-[0.5rem] font-bold tracking-wide text-white">
                     NEXT
                   </span>
+                ) : done ? (
+                  <span className="text-xs font-bold text-red">✓</span>
                 ) : null}
               </div>
               <p className="mt-1.5 truncate text-sm font-semibold">{s.label}</p>

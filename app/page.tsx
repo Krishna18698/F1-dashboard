@@ -45,15 +45,12 @@ export default async function Page() {
       <TokenBanner />
 
       <div className="flex flex-col gap-10">
-        {/* Current weekend + calendar strip directly beneath it */}
-        <div className="flex flex-col gap-4">
-          <Hero race={nextRace} />
-          {schedule.length > 0 && (
-            <Calendar races={schedule} nextRound={nextRace?.round} />
-          )}
-        </div>
+        <Hero race={nextRace} />
 
+        {/* This weekend's sessions (local time) — above the season calendar */}
         {nextRace && <WeekendSchedule sessions={weekendSessions(nextRace)} />}
+
+        {schedule.length > 0 && <Calendar races={schedule} nextRound={nextRace?.round} />}
 
         <LiveSection />
 
