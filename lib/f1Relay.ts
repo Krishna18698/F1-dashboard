@@ -20,7 +20,7 @@ const g = globalThis as unknown as { WebSocket?: unknown };
 if (typeof g.WebSocket === "undefined") g.WebSocket = WsImpl;
 
 const HUB = "https://livetiming.formula1.com/signalrcore";
-const TOPICS = ["DriverList", "TimingData", "TimingAppData", "Position.z", "SessionInfo", "SessionStatus", "ChampionshipPrediction", "RaceControlMessages", "TrackStatus"];
+const TOPICS = ["DriverList", "TimingData", "TimingAppData", "Position.z", "SessionInfo", "SessionStatus", "ChampionshipPrediction", "RaceControlMessages", "TrackStatus", "LapCount"];
 const ENDED = new Set(["finished", "finalised", "ends"]);
 const BUFFER_MS = 45_000; // keep ~45s of position frames (covers a 20s playback delay)
 
@@ -77,6 +77,8 @@ interface RcMessage {
 // Per-event race control messages (keyed by index) + track status — reset per session.
 let raceControl: Record<string, RcMessage> = {};
 let trackStatus: { Status?: string; Message?: string } | null = null;
+// Race lap counter (races only) — drives the tyre-strategy bar's lap axis.
+let lapCount: { CurrentLap?: number; TotalLaps?: number } | null = null;
 
 function resetOnNewSession(info: NonNullable<typeof sessionInfo>) {
   if (sessionInfo?.Key && info?.Key && info.Key !== sessionInfo.Key) {
@@ -87,6 +89,7 @@ function resetOnNewSession(info: NonNullable<typeof sessionInfo>) {
     sessionStatus = null;
     raceControl = {};
     trackStatus = null;
+    lapCount = null;
   }
   sessionInfo = info;
 }
@@ -183,6 +186,8 @@ function applyFeed(topic: string, data: unknown) {
     }
   } else if (topic === "TrackStatus") {
     trackStatus = data as typeof trackStatus;
+  } else if (topic === "LapCount") {
+    lapCount = { ...(lapCount ?? {}), ...(data as { CurrentLap?: number; TotalLaps?: number }) };
   } else if (topic === "Position.z") {
     pushFrames(data as string);
   }
@@ -195,6 +200,7 @@ function applySnapshot(snap: Record<string, unknown>) {
   if (snap.ChampionshipPrediction) applyFeed("ChampionshipPrediction", snap.ChampionshipPrediction);
   if (snap.RaceControlMessages) applyFeed("RaceControlMessages", snap.RaceControlMessages);
   if (snap.TrackStatus) applyFeed("TrackStatus", snap.TrackStatus);
+  if (snap.LapCount) applyFeed("LapCount", snap.LapCount);
   if (snap.DriverList) applyFeed("DriverList", snap.DriverList);
   if (snap.TimingData) applyFeed("TimingData", snap.TimingData);
   if (snap.TimingAppData) applyFeed("TimingAppData", snap.TimingAppData);
@@ -273,6 +279,7 @@ export interface F1LiveRow {
   compound: string;
   tyre_laps: number;
   in_pit: boolean;
+  stints: { compound: string; laps: number }[]; // full tyre history (strategy bar)
 }
 export interface F1LiveState {
   mode: "race" | "quali" | "practice";
@@ -282,6 +289,8 @@ export interface F1LiveState {
   order: number[];
   rows: Record<number, F1LiveRow>;
   frames: PosFrame[]; // recent window for smooth client playback
+  totalLaps: number; // race distance (0 outside a race) — strategy bar axis
+  currentLap: number;
 }
 export interface SessionResult {
   session_name: string;
@@ -297,6 +306,28 @@ function modeOf(type?: string): F1LiveState["mode"] {
   return "race";
 }
 
+/** Every stint a driver has run, in order, with laps DRIVEN this stint (TotalLaps − StartLaps). */
+function allStints(numStr: string): { compound: string; laps: number }[] {
+  const st = app[numStr]?.Stints as unknown;
+  let list: Dict[] = [];
+  if (Array.isArray(st)) list = st as Dict[];
+  else if (st && typeof st === "object") {
+    list = Object.keys(st as Dict)
+      .map(Number)
+      .sort((a, b) => a - b)
+      .map((k) => (st as Dict)[k] as Dict);
+  }
+  return list
+    .map((s) => {
+      const total = Number((s as { TotalLaps?: number }).TotalLaps ?? 0);
+      const start = Number((s as { StartLaps?: number }).StartLaps ?? 0);
+      const compound = String((s as { Compound?: string }).Compound ?? "").toUpperCase();
+      return { compound: compound || "UNKNOWN", laps: Math.max(0, total - start) };
+    })
+    .filter((s) => s.compound !== "UNKNOWN" || s.laps > 0);
+}
+
+/** Current tyre: last stint, with tyre AGE (TotalLaps incl. any scrub) for the board. */
 function currentStint(numStr: string): { compound: string; laps: number } {
   const st = app[numStr]?.Stints as unknown;
   let stint: { Compound?: string; TotalLaps?: number } | undefined;
@@ -356,6 +387,7 @@ function classify() {
       compound: stint.compound,
       tyre_laps: stint.laps,
       in_pit: Boolean(t.InPit),
+      stints: allStints(n),
     };
   }
   const order = nums.map(Number).sort((a, b) => (mode === "race" ? rows[a].position - rows[b].position : (rows[a].best ?? Infinity) - (rows[b].best ?? Infinity)));
@@ -386,6 +418,8 @@ export async function getRelayState(): Promise<F1LiveState | null> {
     order,
     rows,
     frames: frameBuffer.slice(-150), // ~45s window (covers the 20s delay + jitter)
+    totalLaps: mode === "race" ? Number(lapCount?.TotalLaps ?? 0) : 0,
+    currentLap: Number(lapCount?.CurrentLap ?? 0),
   };
 }
 

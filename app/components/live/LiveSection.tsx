@@ -77,14 +77,14 @@ export default function LiveSection() {
         />
       </div>
 
-      {/* Tyre tracker below the driver tracker — current compound + laps, in order */}
+      {/* Tyre strategy board — one stint bar per driver across the lap axis */}
       <div className="mt-4">
         <TyreTracker
           order={s.order}
           drivers={s.drivers}
           positions={s.positions}
-          stints={s.stints}
-          tyreLaps={s.tyreLaps}
+          stints={s.tyreStints ?? new Map()}
+          totalLaps={s.totalLaps}
         />
       </div>
     </section>

@@ -17,6 +17,7 @@ interface ApiRow {
   compound: string;
   tyre_laps: number;
   in_pit: boolean;
+  stints?: { compound: string; laps: number }[];
 }
 interface ApiDriver {
   driver_number: number;
@@ -35,6 +36,8 @@ interface ApiResponse {
   order?: number[];
   rows?: Record<number, ApiRow>;
   frames?: { t: number; c: Record<string, [number, number]> }[];
+  totalLaps?: number;
+  currentLap?: number;
 }
 
 const empty: LiveState = {
@@ -67,6 +70,7 @@ function toState(r: ApiResponse): LiveState {
   const positions = new Map<number, number>();
   const intervals = new Map<number, IntervalRow>();
   const stints = new Map<number, StintRow>();
+  const tyreStints = new Map<number, { compound: string; laps: number }[]>();
   const tyreLaps = new Map<number, number>();
   const inPit = new Set<number>();
   const laps = new Map<number, LapSummary>();
@@ -74,6 +78,8 @@ function toState(r: ApiResponse): LiveState {
     const num = +numStr;
     positions.set(num, row.position);
     tyreLaps.set(num, row.tyre_laps ?? 0);
+    // Full history from the token feed; otherwise synthesize one stint from the current tyre.
+    tyreStints.set(num, row.stints?.length ? row.stints : [{ compound: row.compound, laps: row.tyre_laps ?? 0 }]);
     if (row.in_pit) inPit.add(num);
     intervals.set(num, {
       date: "",
@@ -106,6 +112,9 @@ function toState(r: ApiResponse): LiveState {
     positions,
     intervals,
     stints,
+    tyreStints,
+    totalLaps: r.totalLaps ?? 0,
+    currentLap: r.currentLap ?? 0,
     tyreLaps,
     inPit,
     locations: new Map(),
