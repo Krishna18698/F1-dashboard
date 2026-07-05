@@ -115,19 +115,26 @@ export default function TrackMap({
       if (buf.length >= 2 && proj && group) {
         const latest = buf[buf.length - 1].t;
         const now = performance.now();
-        const target = latest - DELAY_MS;
-        // Rubber-band clock: normally advances at 1x; if it drifts from the target it
-        // GENTLY changes speed (±10%) to converge — no visible jump. Hard-resync only on
-        // startup, a huge gap, or after the tab was hidden.
-        if (ptRef.current === null || Math.abs(target - ptRef.current) > 15000 || now - lastNow.current > 2000) {
-          ptRef.current = target;
-        } else {
-          const dt = now - lastNow.current;
-          const error = target - ptRef.current;
-          const rate = 1 + Math.max(-0.1, Math.min(0.1, error / 4000));
-          ptRef.current += dt * rate;
-        }
+        const dt = now - lastNow.current;
         lastNow.current = now;
+        if (ptRef.current === null || dt > 1500 || latest - ptRef.current > 40000) {
+          // startup / tab was hidden / hopelessly behind → snap (rare)
+          ptRef.current = latest - DELAY_MS;
+        } else {
+          // Free-run at EXACTLY 1x for constant, smooth motion. Only nudge the rate
+          // (±5%) when the lag leaves a wide deadzone around DELAY — which normally never
+          // happens, so there is no speed pulse on each 3s poll. (The old bug corrected
+          // toward `latest`, which staircases every poll, causing periodic speed-ups.)
+          const err = latest - ptRef.current - DELAY_MS; // + = too much lag, - = too little
+          const DEAD = 8000;
+          let rate = 1;
+          if (Math.abs(err) > DEAD) {
+            const over = err - Math.sign(err) * DEAD;
+            rate = 1 + Math.max(-0.05, Math.min(0.05, over / 12000));
+          }
+          ptRef.current += dt * rate;
+          if (ptRef.current > latest) ptRef.current = latest; // never overrun the newest frame
+        }
         const pt = ptRef.current;
 
         let i = 0;
