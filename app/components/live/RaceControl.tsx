@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 interface RcMessage {
   Utc?: string;
@@ -14,7 +14,6 @@ interface RaceControl {
   messages?: RcMessage[];
 }
 
-/** Colour for a message dot, by category / flag. */
 function msgColor(m: RcMessage): string {
   const cat = (m.Category ?? "").toLowerCase();
   const flag = (m.Flag ?? "").toLowerCase();
@@ -67,27 +66,13 @@ function Msg({ m }: { m: RcMessage }) {
 export default function RaceControl() {
   const [data, setData] = useState<RaceControl | null>(null);
   const [open, setOpen] = useState(false);
-  const [toast, setToast] = useState<RcMessage[] | null>(null);
-  const prevUtc = useRef<string | null>(null);
-  const initialized = useRef(false);
-  const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
     let on = true;
     const poll = async () => {
       try {
         const d = (await (await fetch("/api/racecontrol", { cache: "no-store" })).json()) as RaceControl;
-        if (!on) return;
-        setData(d);
-        const latest = d.available ? (d.messages?.[0]?.Utc ?? null) : null;
-        // Toast on genuinely new messages (not on first load / the initial history).
-        if (initialized.current && latest && latest !== prevUtc.current) {
-          setToast((d.messages ?? []).slice(0, 2));
-          clearTimeout(toastTimer.current);
-          toastTimer.current = setTimeout(() => setToast(null), 30_000);
-        }
-        prevUtc.current = latest;
-        initialized.current = true;
+        if (on) setData(d);
       } catch {}
     };
     poll();
@@ -95,7 +80,6 @@ export default function RaceControl() {
     return () => {
       on = false;
       clearInterval(id);
-      clearTimeout(toastTimer.current);
     };
   }, []);
 
@@ -105,27 +89,20 @@ export default function RaceControl() {
 
   return (
     <>
-      {/* Edge tab */}
+      {/* Always-visible latest-2 card (click for full history) */}
       {!open && (
         <button
           onClick={() => setOpen(true)}
-          className="fixed right-0 top-1/3 z-40 flex items-center gap-1.5 rounded-l-md bg-red px-1.5 py-3 text-white shadow-lg"
-          style={{ writingMode: "vertical-rl" }}
-          aria-label="Open race control"
+          className="carbon-bg fixed bottom-3 right-3 z-40 w-72 max-w-[calc(100vw-1.5rem)] rounded-lg p-3 text-left shadow-xl ring-1 ring-white/15"
         >
-          <span className="live-dot h-1.5 w-1.5 rounded-full bg-white" />
-          <span className="text-[0.65rem] font-bold tracking-widest">RACE CONTROL</span>
-        </button>
-      )}
-
-      {/* Toast — latest 2, auto-hides after 30s */}
-      {toast && !open && (
-        <button
-          onClick={() => setOpen(true)}
-          className="carbon-bg fixed right-3 top-20 z-40 w-72 rounded-lg p-3 text-left shadow-xl ring-1 ring-white/15"
-        >
-          <span className="eyebrow mb-1 block text-[0.55rem] text-red">Race Control</span>
-          {toast.map((m, i) => (
+          <div className="mb-1 flex items-center justify-between">
+            <span className="flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: ts.color }} />
+              <span className="eyebrow text-[0.55rem] text-red">Race Control</span>
+            </span>
+            <span className="text-[0.55rem] text-white/40">view all →</span>
+          </div>
+          {messages.slice(0, 2).map((m, i) => (
             <Msg key={`${m.Utc}-${i}`} m={m} />
           ))}
         </button>

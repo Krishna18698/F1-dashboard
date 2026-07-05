@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Driver } from "@/lib/openf1";
-import { Bounds, computeBounds, project, rotate, tracePath } from "@/lib/geo";
+import { Bounds, computeBounds, rotate, tracePath } from "@/lib/geo";
 import { hex } from "@/lib/format";
 import { PosFrame } from "./useLiveSession";
 
@@ -62,10 +62,6 @@ export default function TrackMap({
   );
   const bounds: Bounds | null = useMemo(() => (outline.length ? computeBounds(outline) : null), [outline]);
   const path = useMemo(() => (bounds ? tracePath(outline, bounds, SIZE) + " Z" : ""), [bounds, outline]);
-  const cornerMarks = useMemo(() => {
-    if (!circuit || !bounds) return [];
-    return rotate(circuit.corners, rot).map((c) => ({ n: c.number, ...project(c.x, c.y, bounds, SIZE) }));
-  }, [circuit, rot, bounds]);
 
   // Precompute rotation + projection scalars once (updated when the circuit changes),
   // so the 60fps loop does pure scalar math with ZERO allocations → no GC stutter.
@@ -105,8 +101,8 @@ export default function TrackMap({
 
   // Positions are updated IMPERATIVELY (no React re-render per frame).
   const dotsGroupRef = useRef<SVGGElement>(null);
-  const dataAnchor = useRef<number | null>(null);
-  const realAnchor = useRef(0);
+  const ptRef = useRef<number | null>(null);
+  const lastNow = useRef(0);
 
   useEffect(() => {
     let raf = 0;
@@ -117,17 +113,20 @@ export default function TrackMap({
       if (buf.length >= 2 && proj && group) {
         const latest = buf[buf.length - 1].t;
         const now = performance.now();
-        if (dataAnchor.current === null) {
-          dataAnchor.current = latest - DELAY_MS;
-          realAnchor.current = now;
+        const target = latest - DELAY_MS;
+        // Rubber-band clock: normally advances at 1x; if it drifts from the target it
+        // GENTLY changes speed (±10%) to converge — no visible jump. Hard-resync only on
+        // startup, a huge gap, or after the tab was hidden.
+        if (ptRef.current === null || Math.abs(target - ptRef.current) > 15000 || now - lastNow.current > 2000) {
+          ptRef.current = target;
+        } else {
+          const dt = now - lastNow.current;
+          const error = target - ptRef.current;
+          const rate = 1 + Math.max(-0.1, Math.min(0.1, error / 4000));
+          ptRef.current += dt * rate;
         }
-        let pt = dataAnchor.current + (now - realAnchor.current);
-        const behind = latest - pt;
-        if (behind < 2000 || behind > DELAY_MS + 10000) {
-          dataAnchor.current = latest - DELAY_MS;
-          realAnchor.current = now;
-          pt = dataAnchor.current;
-        }
+        lastNow.current = now;
+        const pt = ptRef.current;
 
         let i = 0;
         while (i < buf.length - 1 && buf[i + 1].t <= pt) i++;
@@ -208,21 +207,6 @@ export default function TrackMap({
         {path && (
           <path d={path} fill="none" stroke="#f4f4f6" strokeWidth={12} strokeLinejoin="round" strokeLinecap="round" />
         )}
-        {cornerMarks.map((c) => (
-          <text
-            key={c.n}
-            x={c.cx}
-            y={c.cy}
-            textAnchor="middle"
-            dominantBaseline="middle"
-            fontSize={12}
-            fontWeight={700}
-            fill="#8a8a92"
-            style={{ paintOrder: "stroke", stroke: "#15151a", strokeWidth: 3 }}
-          >
-            {c.n}
-          </text>
-        ))}
         <g ref={dotsGroupRef}>{dots}</g>
       </svg>
     </div>
