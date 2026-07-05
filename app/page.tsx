@@ -16,6 +16,7 @@ import Calendar from "./components/Calendar";
 import PaddockIntel from "./components/PaddockIntel";
 import TokenBanner from "./components/TokenBanner";
 import LiveSection from "./components/live/LiveSection";
+import RaceControl from "./components/live/RaceControl";
 
 // Revalidate every 10 min so standings/news refresh soon after they change.
 export const revalidate = 600;
@@ -89,6 +90,9 @@ export default async function Page() {
           For the fans, <span className="text-red">from a fan</span>.
         </p>
       </footer>
+
+      {/* Fixed right-side overlay — self-hides unless a session is live */}
+      <RaceControl />
     </main>
   );
 }

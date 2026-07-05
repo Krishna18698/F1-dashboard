@@ -20,7 +20,7 @@ const g = globalThis as unknown as { WebSocket?: unknown };
 if (typeof g.WebSocket === "undefined") g.WebSocket = WsImpl;
 
 const HUB = "https://livetiming.formula1.com/signalrcore";
-const TOPICS = ["DriverList", "TimingData", "TimingAppData", "Position.z", "SessionInfo", "SessionStatus", "ChampionshipPrediction"];
+const TOPICS = ["DriverList", "TimingData", "TimingAppData", "Position.z", "SessionInfo", "SessionStatus", "ChampionshipPrediction", "RaceControlMessages", "TrackStatus"];
 const ENDED = new Set(["finished", "finalised", "ends"]);
 const BUFFER_MS = 45_000; // keep ~45s of position frames (covers a 20s playback delay)
 
@@ -62,6 +62,21 @@ let championship: {
   Drivers?: Record<string, { PredictedPoints?: number }>;
   Teams?: Record<string, { TeamName?: string; PredictedPoints?: number }>;
 } | null = null;
+interface RcMessage {
+  Utc?: string;
+  Category?: string;
+  Message?: string;
+  Flag?: string;
+  Scope?: string;
+  Sector?: number;
+  Status?: string;
+  Mode?: string;
+  RacingNumber?: string;
+  Lap?: number;
+}
+// Per-event race control messages (keyed by index) + track status — reset per session.
+let raceControl: Record<string, RcMessage> = {};
+let trackStatus: { Status?: string; Message?: string } | null = null;
 
 function resetOnNewSession(info: NonNullable<typeof sessionInfo>) {
   if (sessionInfo?.Key && info?.Key && info.Key !== sessionInfo.Key) {
@@ -70,6 +85,8 @@ function resetOnNewSession(info: NonNullable<typeof sessionInfo>) {
     drivers = {};
     frameBuffer = [];
     sessionStatus = null;
+    raceControl = {};
+    trackStatus = null;
   }
   sessionInfo = info;
 }
@@ -156,6 +173,16 @@ function applyFeed(topic: string, data: unknown) {
         for (const [k, v] of Object.entries(d.Teams)) deepMerge((championship.Teams[k] ??= {}), v as Dict);
       }
     }
+  } else if (topic === "RaceControlMessages") {
+    // Snapshot: { Messages: [...] } (array). Deltas: { Messages: { "64": {...} } } (index-keyed).
+    const m = (data as { Messages?: unknown }).Messages;
+    if (Array.isArray(m)) {
+      m.forEach((msg, i) => (raceControl[String(i)] = msg as RcMessage));
+    } else if (m && typeof m === "object") {
+      for (const [k, v] of Object.entries(m as Dict)) raceControl[k] = v as RcMessage;
+    }
+  } else if (topic === "TrackStatus") {
+    trackStatus = data as typeof trackStatus;
   } else if (topic === "Position.z") {
     pushFrames(data as string);
   }
@@ -166,6 +193,8 @@ function applySnapshot(snap: Record<string, unknown>) {
   if (snap.SessionInfo) resetOnNewSession(snap.SessionInfo as NonNullable<typeof sessionInfo>);
   if (snap.SessionStatus) sessionStatus = snap.SessionStatus as typeof sessionStatus;
   if (snap.ChampionshipPrediction) applyFeed("ChampionshipPrediction", snap.ChampionshipPrediction);
+  if (snap.RaceControlMessages) applyFeed("RaceControlMessages", snap.RaceControlMessages);
+  if (snap.TrackStatus) applyFeed("TrackStatus", snap.TrackStatus);
   if (snap.DriverList) applyFeed("DriverList", snap.DriverList);
   if (snap.TimingData) applyFeed("TimingData", snap.TimingData);
   if (snap.TimingAppData) applyFeed("TimingAppData", snap.TimingAppData);
@@ -386,6 +415,25 @@ export async function getChampionship(): Promise<{
   }
   if (!Object.keys(driverPoints).length) return { available: false };
   return { available: true, round: sessionInfo?.Meeting?.Number ?? 0, driverPoints, constructorPoints };
+}
+
+export interface RaceControl {
+  available: boolean;
+  trackStatus?: { Status?: string; Message?: string } | null;
+  messages?: RcMessage[];
+}
+
+/** Race control messages for the current event — only while a session is live. */
+export async function getRaceControl(): Promise<RaceControl> {
+  if (!(await ensureConnection())) return { available: false };
+  await refreshIfStale();
+  if (!sessionInfo || !liveNow()) return { available: false };
+  const messages = Object.values(raceControl)
+    .filter((m) => m.Message)
+    .sort((a, b) => (b.Utc ?? "").localeCompare(a.Utc ?? ""))
+    .slice(0, 150);
+  if (!messages.length) return { available: false };
+  return { available: true, trackStatus, messages };
 }
 
 /** Lightweight "is a session live and which one" — for the hero + schedule. */
