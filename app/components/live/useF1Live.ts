@@ -4,6 +4,7 @@ import { startTransition, useEffect, useRef, useState } from "react";
 import { Driver, IntervalRow, LapSummary, StintRow } from "@/lib/openf1";
 import { F1_LIVE } from "@/lib/f1liveConfig";
 import type { LiveState } from "./useLiveSession";
+import { pushFrames } from "./framesStore";
 
 interface ApiRow {
   driver_number: number;
@@ -95,7 +96,7 @@ function toState(r: ApiResponse): LiveState {
     status: "live",
     replay: r.replay,
     circuitKey: r.circuitKey,
-    frames: r.frames ?? [],
+    frames: [], // positions live in framesStore now, not React state (keeps the map smooth)
     mode: r.mode ?? "race",
     session: r.session
       ? ({ location: r.session.location, session_name: r.session.session_name } as unknown as LiveState["session"])
@@ -135,8 +136,10 @@ export function useF1Live(): LiveState {
         if (data.status === "idle" || data.status === "error") {
           setState((s) => ({ ...s, status: data.status }));
         } else {
-          // Non-urgent: lets React yield to the 60fps map animation instead of
-          // blocking it while the board/tyre tracker re-render every poll.
+          // Feed the map's animation buffer directly — NOT through React state — so the
+          // heavy position payload never triggers a re-render or stalls the 60fps loop.
+          pushFrames(data.frames);
+          // Table/tyre data is non-urgent: let React yield to the map animation.
           startTransition(() => setState(toState(data)));
         }
       } catch {

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Driver } from "@/lib/openf1";
 import { Bounds, computeBounds, rotate, tracePath } from "@/lib/geo";
 import { hex } from "@/lib/format";
-import { PosFrame } from "./useLiveSession";
+import { getFrames, resetFrames, subscribeFrames } from "./framesStore";
 
 const SIZE = 1000;
 const DELAY_MS = 20000; // play back this far behind the latest data → smooth, F1-TV-style
@@ -18,14 +18,12 @@ interface Circuit {
 
 export default function TrackMap({
   circuitKey,
-  frames,
   drivers,
   leaderNum,
   inPit,
   name,
 }: {
   circuitKey?: number;
-  frames?: PosFrame[];
   drivers: Map<number, Driver>;
   leaderNum?: number;
   inPit?: Set<number>;
@@ -45,17 +43,20 @@ export default function TrackMap({
     };
   }, [circuitKey]);
 
-  // Rolling frame buffer (deduped, ~30s).
-  const bufRef = useRef<PosFrame[]>([]);
+  // The frame buffer lives in framesStore (fed straight from the poll, no React state).
+  // We just hold a live reference to it for the animation loop; resetting on unmount so
+  // the next session starts clean.
+  const bufRef = useRef(getFrames());
   useEffect(() => {
-    if (!frames?.length) return;
-    const buf = bufRef.current;
-    const seen = new Set(buf.map((f) => f.t));
-    for (const f of frames) if (!seen.has(f.t)) buf.push(f);
-    buf.sort((a, b) => a.t - b.t);
-    const cutoff = (buf.at(-1)?.t ?? 0) - 40_000;
-    bufRef.current = buf.filter((f) => f.t >= cutoff);
-  }, [frames]);
+    bufRef.current = getFrames();
+    const unsub = subscribeFrames(() => {
+      bufRef.current = getFrames();
+    });
+    return () => {
+      unsub();
+      resetFrames();
+    };
+  }, []);
 
   const rot = circuit?.rotation ?? 0;
   const outline = useMemo(
