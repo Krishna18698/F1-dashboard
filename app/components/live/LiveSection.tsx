@@ -71,9 +71,10 @@ export default function LiveSection() {
           order={s.order}
           drivers={s.drivers}
           positions={s.positions}
+          grids={s.grids}
           intervals={s.intervals}
-          stints={s.stints}
           laps={s.laps}
+          fastestLap={s.fastestLap}
         />
       </div>
 

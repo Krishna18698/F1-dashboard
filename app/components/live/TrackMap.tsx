@@ -212,18 +212,23 @@ export default function TrackMap({
   }
 
   return (
-    <div className="relative aspect-square self-start overflow-hidden rounded-lg carbon-bg ring-1 ring-white/10">
-      {name && (
-        <span className="eyebrow absolute bottom-3 left-4 z-10 text-[0.7rem] font-semibold text-white/50">
-          {name}
-        </span>
-      )}
+    <div className="self-start">
+      <span className="eyebrow mb-2 block text-[0.6rem] text-white/45">
+        Driver <span className="text-red">Tracker</span>
+      </span>
+      <div className="relative aspect-square overflow-hidden rounded-lg carbon-bg ring-1 ring-white/10">
+        {name && (
+          <span className="eyebrow absolute bottom-3 left-4 z-10 text-[0.7rem] font-semibold text-white/50">
+            {name}
+          </span>
+        )}
       <svg viewBox={`0 0 ${SIZE} ${SIZE}`} className="h-full w-full">
         {path && (
           <path d={path} fill="none" stroke="#f4f4f6" strokeWidth={12} strokeLinejoin="round" strokeLinecap="round" />
         )}
-        <g ref={dotsGroupRef}>{dots}</g>
-      </svg>
+          <g ref={dotsGroupRef}>{dots}</g>
+        </svg>
+      </div>
     </div>
   );
 }

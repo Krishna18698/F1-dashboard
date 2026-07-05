@@ -279,7 +279,14 @@ export interface F1LiveRow {
   compound: string;
   tyre_laps: number;
   in_pit: boolean;
-  stints: { compound: string; laps: number }[]; // full tyre history (strategy bar)
+  grid: number; // starting grid position (0 = unknown) — for gained/lost indicator
+  stints: { compound: string; laps: number; age: number }[]; // full tyre history (strategy bar)
+}
+export interface FastestLap {
+  driver_number: number;
+  tla: string;
+  time: string; // e.g. "1:33.562"
+  lap: number;
 }
 export interface F1LiveState {
   mode: "race" | "quali" | "practice";
@@ -291,6 +298,7 @@ export interface F1LiveState {
   frames: PosFrame[]; // recent window for smooth client playback
   totalLaps: number; // race distance (0 outside a race) — strategy bar axis
   currentLap: number;
+  fastestLap: FastestLap | null;
 }
 export interface SessionResult {
   session_name: string;
@@ -306,8 +314,8 @@ function modeOf(type?: string): F1LiveState["mode"] {
   return "race";
 }
 
-/** Every stint a driver has run, in order, with laps DRIVEN this stint (TotalLaps − StartLaps). */
-function allStints(numStr: string): { compound: string; laps: number }[] {
+/** Every stint a driver has run, in order (laps = race laps this stint, age = laps on tyre). */
+function allStints(numStr: string): { compound: string; laps: number; age: number }[] {
   const st = app[numStr]?.Stints as unknown;
   let list: Dict[] = [];
   if (Array.isArray(st)) list = st as Dict[];
@@ -322,7 +330,8 @@ function allStints(numStr: string): { compound: string; laps: number }[] {
       const total = Number((s as { TotalLaps?: number }).TotalLaps ?? 0);
       const start = Number((s as { StartLaps?: number }).StartLaps ?? 0);
       const compound = String((s as { Compound?: string }).Compound ?? "").toUpperCase();
-      return { compound: compound || "UNKNOWN", laps: Math.max(0, total - start) };
+      // laps = race laps this stint (bar width); age = laps on that tyre (icon number).
+      return { compound: compound || "UNKNOWN", laps: Math.max(0, total - start), age: total };
     })
     .filter((s) => s.compound !== "UNKNOWN" || s.laps > 0);
 }
@@ -364,34 +373,42 @@ function classify() {
   const nums = Object.keys(timing).filter((k) => /^\d+$/.test(k) && Object.keys(timing[k]).length);
   const mode = modeOf(sessionInfo?.Type);
   const rows: Record<number, F1LiveRow> = {};
+  let fastestLap: FastestLap | null = null;
+  let fastestMs = Infinity;
   for (const n of nums) {
     const t = timing[n] as {
       Position?: string | number;
       Line?: number;
       GapToLeader?: string;
       IntervalToPositionAhead?: { Value?: string };
-      BestLapTime?: { Value?: string };
+      BestLapTime?: { Value?: string; Lap?: number };
       LastLapTime?: { Value?: string };
       NumberOfLaps?: number;
       InPit?: boolean;
     };
     const stint = currentStint(n);
+    const best = parseLapTime(t.BestLapTime?.Value);
     rows[+n] = {
       driver_number: +n,
       position: +(t.Position ?? t.Line ?? 99),
       gap_to_leader: t.GapToLeader ?? "",
       interval: t.IntervalToPositionAhead?.Value ?? "",
-      best: parseLapTime(t.BestLapTime?.Value),
+      best,
       last: parseLapTime(t.LastLapTime?.Value),
       laps: +(t.NumberOfLaps ?? 0),
       compound: stint.compound,
       tyre_laps: stint.laps,
       in_pit: Boolean(t.InPit),
+      grid: Number((app[n] as { GridPos?: string | number })?.GridPos ?? 0),
       stints: allStints(n),
     };
+    if (best != null && best < fastestMs && t.BestLapTime?.Value) {
+      fastestMs = best;
+      fastestLap = { driver_number: +n, tla: drivers[n]?.Tla ?? String(n), time: t.BestLapTime.Value, lap: Number(t.BestLapTime.Lap ?? 0) };
+    }
   }
   const order = nums.map(Number).sort((a, b) => (mode === "race" ? rows[a].position - rows[b].position : (rows[a].best ?? Infinity) - (rows[b].best ?? Infinity)));
-  return { nums, mode, rows, order };
+  return { nums, mode, rows, order, fastestLap };
 }
 
 export async function getRelayState(): Promise<F1LiveState | null> {
@@ -399,7 +416,7 @@ export async function getRelayState(): Promise<F1LiveState | null> {
   await refreshIfStale();
   if (!sessionInfo || !liveNow()) return null;
 
-  const { nums, mode, rows, order } = classify();
+  const { nums, mode, rows, order, fastestLap } = classify();
   if (!nums.length) return null;
 
   const driverList: F1LiveDriver[] = Object.entries(drivers).map(([k, d]) => ({
@@ -420,6 +437,7 @@ export async function getRelayState(): Promise<F1LiveState | null> {
     frames: frameBuffer.slice(-150), // ~45s window (covers the 20s delay + jitter)
     totalLaps: mode === "race" ? Number(lapCount?.TotalLaps ?? 0) : 0,
     currentLap: Number(lapCount?.CurrentLap ?? 0),
+    fastestLap,
   };
 }
 

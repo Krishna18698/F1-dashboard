@@ -17,7 +17,14 @@ interface ApiRow {
   compound: string;
   tyre_laps: number;
   in_pit: boolean;
-  stints?: { compound: string; laps: number }[];
+  grid?: number;
+  stints?: { compound: string; laps: number; age: number }[];
+}
+interface ApiFastest {
+  driver_number: number;
+  tla: string;
+  time: string;
+  lap: number;
 }
 interface ApiDriver {
   driver_number: number;
@@ -38,6 +45,7 @@ interface ApiResponse {
   frames?: { t: number; c: Record<string, [number, number]> }[];
   totalLaps?: number;
   currentLap?: number;
+  fastestLap?: ApiFastest | null;
 }
 
 const empty: LiveState = {
@@ -68,18 +76,23 @@ function toState(r: ApiResponse): LiveState {
   }
 
   const positions = new Map<number, number>();
+  const grids = new Map<number, number>();
   const intervals = new Map<number, IntervalRow>();
   const stints = new Map<number, StintRow>();
-  const tyreStints = new Map<number, { compound: string; laps: number }[]>();
+  const tyreStints = new Map<number, { compound: string; laps: number; age: number }[]>();
   const tyreLaps = new Map<number, number>();
   const inPit = new Set<number>();
   const laps = new Map<number, LapSummary>();
   for (const [numStr, row] of Object.entries(r.rows ?? {})) {
     const num = +numStr;
     positions.set(num, row.position);
+    grids.set(num, row.grid ?? 0);
     tyreLaps.set(num, row.tyre_laps ?? 0);
     // Full history from the token feed; otherwise synthesize one stint from the current tyre.
-    tyreStints.set(num, row.stints?.length ? row.stints : [{ compound: row.compound, laps: row.tyre_laps ?? 0 }]);
+    tyreStints.set(
+      num,
+      row.stints?.length ? row.stints : [{ compound: row.compound, laps: row.tyre_laps ?? 0, age: row.tyre_laps ?? 0 }],
+    );
     if (row.in_pit) inPit.add(num);
     intervals.set(num, {
       date: "",
@@ -110,11 +123,13 @@ function toState(r: ApiResponse): LiveState {
     drivers,
     order: r.order ?? [],
     positions,
+    grids,
     intervals,
     stints,
     tyreStints,
     totalLaps: r.totalLaps ?? 0,
     currentLap: r.currentLap ?? 0,
+    fastestLap: r.fastestLap ?? null,
     tyreLaps,
     inPit,
     locations: new Map(),
