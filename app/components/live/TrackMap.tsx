@@ -22,12 +22,14 @@ export default function TrackMap({
   drivers,
   leaderNum,
   inPit,
+  name,
 }: {
   circuitKey?: number;
   frames?: PosFrame[];
   drivers: Map<number, Driver>;
   leaderNum?: number;
   inPit?: Set<number>;
+  name?: string;
 }) {
   const [circuit, setCircuit] = useState<Circuit | null>(null);
 
@@ -202,7 +204,12 @@ export default function TrackMap({
   }
 
   return (
-    <div className="aspect-square self-start overflow-hidden rounded-lg carbon-bg ring-1 ring-white/10">
+    <div className="relative aspect-square self-start overflow-hidden rounded-lg carbon-bg ring-1 ring-white/10">
+      {name && (
+        <span className="eyebrow absolute bottom-3 left-4 z-10 text-[0.7rem] font-semibold text-white/50">
+          {name}
+        </span>
+      )}
       <svg viewBox={`0 0 ${SIZE} ${SIZE}`} className="h-full w-full">
         {path && (
           <path d={path} fill="none" stroke="#f4f4f6" strokeWidth={12} strokeLinejoin="round" strokeLinecap="round" />

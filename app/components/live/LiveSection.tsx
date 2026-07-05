@@ -65,6 +65,7 @@ export default function LiveSection() {
           drivers={s.drivers}
           leaderNum={leaderNum}
           inPit={s.inPit}
+          name={s.session?.location}
         />
         <TimingBoard
           mode={s.mode}
