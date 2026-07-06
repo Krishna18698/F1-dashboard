@@ -37,6 +37,9 @@ export default function TokenBanner() {
   if (!s.expired && !soon) return null;
 
   const expired = s.expired;
+  // Remaining time as h:mm (e.g. "20:40"), not decimal hours.
+  const totalMin = Math.max(0, Math.round((s.hoursLeft ?? 0) * 60));
+  const remaining = `${Math.floor(totalMin / 60)}:${String(totalMin % 60).padStart(2, "0")}`;
   return (
     <div
       className={`mb-6 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border px-4 py-3 text-sm ${
@@ -46,7 +49,7 @@ export default function TokenBanner() {
       }`}
     >
       <span className="font-semibold">
-        {expired ? "⚠️ F1 TV token expired" : `⏳ F1 TV token expires in ${s.hoursLeft}h`}
+        {expired ? "⚠️ F1 TV token expired" : `⏳ F1 TV token expires in ${remaining} (h:mm)`}
       </span>
       <span className="text-ink-soft">
         {expired
