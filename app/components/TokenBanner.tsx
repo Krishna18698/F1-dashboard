@@ -49,7 +49,7 @@ export default function TokenBanner() {
       }`}
     >
       <span className="font-semibold">
-        {expired ? "⚠️ F1 TV token expired" : `⏳ F1 TV token expires in ${remaining} (h:mm)`}
+        {expired ? "⚠️ F1 TV token expired" : `⏳ F1 TV token expires in ${remaining}`}
       </span>
       <span className="text-ink-soft">
         {expired

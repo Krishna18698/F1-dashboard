@@ -8,9 +8,11 @@ import TyreTracker from "./TyreTracker";
 function Header({
   badge,
   label,
+  freeFeed,
 }: {
   badge?: "live" | "replay";
   label: string;
+  freeFeed?: boolean;
 }) {
   return (
     <div className="mb-4 flex items-end justify-between gap-4 border-b-2 border-ink pb-2">
@@ -25,6 +27,14 @@ function Header({
         {badge === "replay" && (
           <span className="rounded-full bg-ink px-2.5 py-1 text-[0.6rem] font-bold tracking-wider text-white">
             LATEST
+          </span>
+        )}
+        {freeFeed && (
+          <span
+            className="rounded-full border border-line px-2.5 py-1 text-[0.6rem] font-bold tracking-wider text-muted"
+            title="Running on F1's free public feed — add an F1 TV token (F1_TV_TOKEN) for real-time, smoother tracking."
+          >
+            FREE FEED
           </span>
         )}
       </h3>
@@ -55,9 +65,16 @@ export default function LiveSection() {
   const sessionLabel = `${s.session?.location} · ${s.session?.session_name}`;
   const label = s.replay ? `Latest session · ${sessionLabel}` : `${sessionLabel} · on track now`;
 
+  const freeFeed = s.source === "free";
+
   return (
     <section>
-      <Header badge={s.replay ? "replay" : "live"} label={label} />
+      <Header badge={s.replay ? "replay" : "live"} label={label} freeFeed={freeFeed} />
+      {freeFeed && (
+        <p className="-mt-3 mb-4 text-xs text-muted">
+          Running on F1&apos;s free public feed — for real-time, smoother tracking, add an F1 TV token.
+        </p>
+      )}
 
       {/* Track map + clean running order side by side */}
       <div className="grid gap-4 lg:grid-cols-2">

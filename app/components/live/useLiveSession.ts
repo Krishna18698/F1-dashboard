@@ -37,6 +37,7 @@ export interface LiveState {
   status: LiveStatus;
   mode: SessionMode;
   replay?: boolean; // true when showing a past session (nothing live right now)
+  source?: "token" | "free"; // which feed is powering this — token = real-time, free = public fallback
   circuitKey?: number;
   session?: Session;
   clockISO?: string;

@@ -36,6 +36,7 @@ interface ApiDriver {
 interface ApiResponse {
   status: "live" | "idle" | "error";
   replay?: boolean;
+  source?: "token" | "free";
   mode?: LiveState["mode"];
   circuitKey?: number;
   session?: { location: string; session_name: string };
@@ -114,6 +115,7 @@ function toState(r: ApiResponse): LiveState {
   return {
     status: "live",
     replay: r.replay,
+    source: r.source,
     circuitKey: r.circuitKey,
     frames: [], // positions live in framesStore now, not React state (keeps the map smooth)
     mode: r.mode ?? "race",

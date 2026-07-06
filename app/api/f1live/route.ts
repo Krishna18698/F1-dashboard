@@ -37,7 +37,7 @@ export async function GET() {
     if (process.env.F1_TV_TOKEN?.trim()) {
       const relay = await getRelayState();
       if (relay && relay.drivers.length > 0) {
-        return Response.json({ status: "live", replay: false, ...relay });
+        return Response.json({ status: "live", replay: false, source: "token", ...relay });
       }
       return Response.json({ status: "idle" });
     }
@@ -50,6 +50,7 @@ export async function GET() {
         return Response.json({
           status: "live",
           replay: false,
+          source: "free",
           session: { location: live.location, session_name: live.name },
           ...state,
         });
@@ -68,6 +69,7 @@ export async function GET() {
         return Response.json({
           status: "live",
           replay: true,
+          source: "free",
           session: { location: c.location, session_name: c.name },
           ...state,
         });
