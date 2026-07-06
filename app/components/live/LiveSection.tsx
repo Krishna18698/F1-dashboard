@@ -2,7 +2,6 @@
 
 import { useF1Live } from "./useF1Live";
 import TrackMap from "./TrackMap";
-import TimingBoard from "./TimingBoard";
 import TyreTracker from "./TyreTracker";
 
 function Header({
@@ -58,7 +57,7 @@ export default function LiveSection() {
   return (
     <section>
       <Header badge={s.replay ? "replay" : "live"} label={label} />
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,380px)_1fr]">
         <TrackMap
           circuitKey={s.circuitKey}
           drivers={s.drivers}
@@ -66,26 +65,17 @@ export default function LiveSection() {
           inPit={s.inPit}
           name={s.session?.location}
         />
-        <TimingBoard
-          mode={s.mode}
+        {/* Combined live board: order + gained/lost + gap/int/last + tyre strategy */}
+        <TyreTracker
           order={s.order}
           drivers={s.drivers}
           positions={s.positions}
           grids={s.grids}
           intervals={s.intervals}
           laps={s.laps}
-          fastestLap={s.fastestLap}
-        />
-      </div>
-
-      {/* Tyre strategy board — one stint bar per driver across the lap axis */}
-      <div className="mt-4">
-        <TyreTracker
-          order={s.order}
-          drivers={s.drivers}
-          positions={s.positions}
           stints={s.tyreStints ?? new Map()}
           totalLaps={s.totalLaps}
+          fastestLap={s.fastestLap}
         />
       </div>
     </section>

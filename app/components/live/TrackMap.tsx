@@ -213,7 +213,7 @@ export default function TrackMap({
 
   return (
     <div className="self-start">
-      <span className="eyebrow mb-2 block text-[0.6rem] text-white/45">
+      <span className="eyebrow mb-2 block text-[0.6rem] text-muted">
         Driver <span className="text-red">Tracker</span>
       </span>
       <div className="relative aspect-square overflow-hidden rounded-lg carbon-bg ring-1 ring-white/10">

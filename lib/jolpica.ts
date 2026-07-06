@@ -122,11 +122,17 @@ export async function getSchedule(): Promise<Race[]> {
   return d.MRData.RaceTable.Races ?? [];
 }
 
-/** Next race, if the season isn't over. Falls back to null. */
+/**
+ * Next race — the first weekend that isn't over yet. Derived from the schedule by date
+ * (not Jolpica's `/current/next/`, which keeps returning the just-finished race for days
+ * until their backend rolls over). Rolls to the following round ~3.5 h after lights-out.
+ */
 export async function getNextRace(): Promise<Race | null> {
   try {
-    const d = await get<{ MRData: { RaceTable: { Races: Race[] } } }>(`/current/next/`);
-    return d.MRData.RaceTable.Races[0] ?? null;
+    const races = await getSchedule();
+    const now = Date.now();
+    const RACE_OVER_MS = 3.5 * 3600_000; // treat the weekend as done ~3.5h after the race start
+    return races.find((r) => Date.parse(raceStartISO(r)) + RACE_OVER_MS > now) ?? null;
   } catch {
     return null;
   }
