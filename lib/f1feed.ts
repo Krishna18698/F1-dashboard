@@ -167,6 +167,7 @@ interface SessionCache {
   drivers: Record<string, RawDriver>;
   timing: Delta[];
   app: Delta[];
+  lap: { ts: number; data: Record<string, unknown> }[];
   frames: PosFrame[];
   durationMs: number;
 }
@@ -190,11 +191,12 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
   // Completed session → static, cache forever. Live → 2s TTL so polls see fresh data.
   if (cached && (!live || Date.now() - cached.loadedAt < 2000)) return cached;
 
-  const [driverTxt, timingTxt, appTxt, posTxt] = await Promise.all([
+  const [driverTxt, timingTxt, appTxt, posTxt, lapTxt] = await Promise.all([
     fetchText(sessionPath, "DriverList.jsonStream").catch(() => ""),
     fetchText(sessionPath, "TimingData.jsonStream").catch(() => ""),
     fetchText(sessionPath, "TimingAppData.jsonStream").catch(() => ""),
     fetchText(sessionPath, "Position.z.jsonStream").catch(() => ""),
+    fetchText(sessionPath, "LapCount.jsonStream").catch(() => ""),
   ]);
 
   const drivers: Record<string, RawDriver> = {};
@@ -210,6 +212,15 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
 
   const timing = parseDeltas(timingTxt);
   const app = parseDeltas(appTxt);
+
+  // LapCount stream: "HH:MM:SS.mmm{CurrentLap,TotalLaps}" (flat, not keyed by driver).
+  const lap: { ts: number; data: Record<string, unknown> }[] = [];
+  for (const raw of lapTxt.replace(/^﻿/, "").split(/\r?\n/)) {
+    if (!raw) continue;
+    try {
+      lap.push({ ts: tsToMs(raw.slice(0, TS_LEN)), data: JSON.parse(raw.slice(TS_LEN)) as Record<string, unknown> });
+    } catch {}
+  }
 
   const frames: PosFrame[] = [];
   for (const raw of posTxt.replace(/^﻿/, "").split(/\r?\n/)) {
@@ -230,7 +241,7 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
   }
 
   const durationMs = Math.max(timing.at(-1)?.ts ?? 0, frames.at(-1)?.ts ?? 0);
-  const entry: SessionCache = { loadedAt: Date.now(), drivers, timing, app, frames, durationMs };
+  const entry: SessionCache = { loadedAt: Date.now(), drivers, timing, app, lap, frames, durationMs };
   cache.set(sessionPath, entry);
   return entry;
 }
@@ -250,6 +261,8 @@ export interface F1LiveRow {
   laps: number;
   compound: string;
   tyre_laps: number;
+  grid: number;
+  stints: { compound: string; laps: number; age: number }[];
 }
 export interface F1LiveDriver {
   driver_number: number;
@@ -265,6 +278,10 @@ export interface F1LiveState {
   rows: Record<number, F1LiveRow>;
   cars: { driver_number: number; x: number; y: number }[];
   trace: { x: number; y: number }[];
+  frames: { t: number; c: Record<string, [number, number]> }[];
+  totalLaps: number;
+  currentLap: number;
+  fastestLap: { driver_number: number; tla: string; time: string; lap: number } | null;
   durationMs: number;
 }
 
@@ -305,29 +322,47 @@ export async function getF1LiveState(
   }));
 
   const rows: Record<number, F1LiveRow> = {};
+  let fastestLap: F1LiveState["fastestLap"] = null;
+  let fastestMs = Infinity;
   for (const [numStr, t] of Object.entries(timing)) {
     const num = +numStr;
-    const bt = t.BestLapTime as { Value?: string } | undefined;
+    const bt = t.BestLapTime as { Value?: string; Lap?: number } | undefined;
     const lt = t.LastLapTime as { Value?: string } | undefined;
     const iv = t.IntervalToPositionAhead as { Value?: string } | undefined;
-    const stints = (appState[numStr]?.Stints ?? {}) as Record<
+    const stintsRaw = (appState[numStr]?.Stints ?? {}) as Record<
       string,
-      { Compound?: string; TotalLaps?: number }
+      { Compound?: string; TotalLaps?: number; StartLaps?: number }
     >;
-    const keys = Object.keys(stints).map(Number).sort((a, b) => a - b);
-    const cur = keys.length ? stints[keys[keys.length - 1]] : undefined;
+    const keys = Object.keys(stintsRaw).map(Number).sort((a, b) => a - b);
+    const cur = keys.length ? stintsRaw[keys[keys.length - 1]] : undefined;
+    const stints = keys
+      .map((k) => {
+        const st = stintsRaw[k];
+        const total = Number(st.TotalLaps ?? 0);
+        const start = Number(st.StartLaps ?? 0);
+        const compound = String(st.Compound ?? "").toUpperCase() || "UNKNOWN";
+        return { compound, laps: Math.max(0, total - start), age: total };
+      })
+      .filter((st) => st.compound !== "UNKNOWN" || st.laps > 0);
 
+    const best = parseLapTime(bt?.Value);
     rows[num] = {
       driver_number: num,
       position: +(t.Position ?? t.Line ?? 99),
       gap_to_leader: (t.GapToLeader as string) ?? "",
       interval: iv?.Value ?? "",
-      best: parseLapTime(bt?.Value),
+      best,
       last: parseLapTime(lt?.Value),
       laps: +(t.NumberOfLaps ?? 0),
       compound: cur?.Compound ?? "UNKNOWN",
       tyre_laps: Number(cur?.TotalLaps ?? 0),
+      grid: Number((appState[numStr]?.GridPos as string | number) ?? 0),
+      stints,
     };
+    if (best != null && best < fastestMs && bt?.Value) {
+      fastestMs = best;
+      fastestLap = { driver_number: num, tla: s.drivers[numStr]?.Tla ?? numStr, time: bt.Value, lap: Number(bt.Lap ?? 0) };
+    }
   }
 
   const m = mode(sessionType);
@@ -352,12 +387,38 @@ export async function getF1LiveState(
   const leader = order[0];
   const traceStart = uptoMs - 110_000;
   const trace: { x: number; y: number }[] = [];
+  // Position buffer for smooth client playback (same shape the token relay emits).
+  const FRAME_WINDOW = 45_000;
+  const outFrames: { t: number; c: Record<string, [number, number]> }[] = [];
   for (const f of s.frames) {
     if (f.ts > uptoMs) break;
-    if (f.ts < traceStart) continue;
-    const p = f.cars[String(leader)];
-    if (p) trace.push({ x: p[0], y: p[1] });
+    if (f.ts >= uptoMs - FRAME_WINDOW) outFrames.push({ t: f.ts, c: f.cars });
+    if (f.ts >= traceStart) {
+      const p = f.cars[String(leader)];
+      if (p) trace.push({ x: p[0], y: p[1] });
+    }
   }
 
-  return { mode: m, drivers, order, rows, cars, trace, durationMs: s.durationMs };
+  // Lap counter up to now (races) — for the tyre-tracker lap axis.
+  let currentLap = 0;
+  let totalLaps = 0;
+  for (const l of s.lap) {
+    if (l.ts > uptoMs) break;
+    if (l.data.CurrentLap != null) currentLap = Number(l.data.CurrentLap);
+    if (l.data.TotalLaps != null) totalLaps = Number(l.data.TotalLaps);
+  }
+
+  return {
+    mode: m,
+    drivers,
+    order,
+    rows,
+    cars,
+    trace,
+    frames: outFrames,
+    totalLaps: m === "race" ? totalLaps : 0,
+    currentLap,
+    fastestLap,
+    durationMs: s.durationMs,
+  };
 }
