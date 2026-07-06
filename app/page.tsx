@@ -7,6 +7,7 @@ import {
   weekendSessions,
 } from "@/lib/jolpica";
 import { getPaddockIntel } from "@/lib/news";
+import { getEndedWeekend } from "@/lib/f1Relay";
 import Hero from "./components/Hero";
 import WeekendSchedule from "./components/WeekendSchedule";
 import Section from "./components/Section";
@@ -18,18 +19,35 @@ import TokenBanner from "./components/TokenBanner";
 import LiveSection from "./components/live/LiveSection";
 import RaceControl from "./components/live/RaceControl";
 
-// Revalidate every 10 min so standings/news refresh soon after they change.
-export const revalidate = 600;
+// Dynamic: the hero consults the live relay to decide when a finished race weekend should
+// flip to the next round. Standings/news stay cached at the fetch layer.
+export const dynamic = "force-dynamic";
 
 export default async function Page() {
-  const [nextRace, drivers, constructors, schedule, intel, standingsRound] = await Promise.all([
+  const [rawNext, drivers, constructors, schedule, intel, standingsRound, endedWeekend] = await Promise.all([
     getNextRace(),
     getDriverStandings().catch(() => []),
     getConstructorStandings().catch(() => []),
     getSchedule().catch(() => []),
     getPaddockIntel().catch(() => []),
     getStandingsRound().catch(() => 0),
+    // Only the live feed knows when the race is REALLY over (handles red flags / extensions).
+    // Guarded by token + a short timeout so a page render never hangs on the relay.
+    process.env.F1_TV_TOKEN?.trim()
+      ? Promise.race([
+          getEndedWeekend().catch(() => null),
+          new Promise<null>((r) => setTimeout(() => r(null), 2500)),
+        ])
+      : Promise.resolve(null),
   ]);
+
+  // Flip only once the race is actually NOT live for 5 min (from the feed) — never on a
+  // wall-clock guess, so an extended/red-flagged race won't roll over early. Advances the
+  // hero, weekend schedule and calendar to the next round together.
+  let nextRace = rawNext;
+  if (endedWeekend?.flipReady && nextRace && Number(nextRace.round) <= endedWeekend.round) {
+    nextRace = schedule.find((r) => Number(r.round) > endedWeekend.round) ?? nextRace;
+  }
 
   return (
     <main className="mx-auto w-full max-w-350 overflow-x-hidden px-4 py-6 sm:px-8 sm:py-8">

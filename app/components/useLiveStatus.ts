@@ -6,6 +6,8 @@ export interface LiveStatus {
   live: boolean;
   name?: string;
   type?: string;
+  endedAt?: number; // epoch ms the current session ended
+  round?: number;
 }
 
 /** Polls whether a session is on track right now (for the hero + weekend schedule). */

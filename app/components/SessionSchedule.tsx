@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { WeekendSession } from "@/lib/jolpica";
 import { useLiveStatus } from "./useLiveStatus";
 
 const pad = (n: number) => String(n).padStart(2, "0");
+const FLIP_MS = 300_000; // "Race ended" holds for 5 min, then flip to the next weekend
 
 function delta(ms: number) {
   ms = Math.max(0, ms);
@@ -31,14 +33,29 @@ export default function SessionSchedule({ sessions }: { sessions: WeekendSession
       clearInterval(id);
     };
   }, []);
-  const { live, name } = useLiveStatus();
+  const { live, name, type, endedAt } = useLiveStatus();
+  const router = useRouter();
 
   const ready = now !== null;
   const liveLabel = live && name ? name.split("·").pop()?.trim() : null;
   const liveSession = ready && liveLabel ? (sessions.find((s) => s.label === liveLabel) ?? null) : null;
   const nextIdx = ready ? sessions.findIndex((s) => Date.parse(s.iso) > now!) : -1;
   const next = nextIdx >= 0 ? sessions[nextIdx] : null;
-  const t = ready && !liveSession && next ? delta(Date.parse(next.iso) - now!) : null;
+
+  // Just after the race: show "Race ended" (no timer) for 5 min, then refresh so the
+  // server advances the hero/schedule/calendar to the next round.
+  const isRace = (type ?? "").toLowerCase() === "race";
+  const raceEnded = ready && !live && !!endedAt && isRace && now! < endedAt + FLIP_MS;
+  const flipped = useRef<number | null>(null);
+  useEffect(() => {
+    if (!ready || !endedAt || !isRace) return;
+    if (now! >= endedAt + FLIP_MS && flipped.current !== endedAt) {
+      flipped.current = endedAt; // fire once per race end — no refresh loop
+      router.refresh();
+    }
+  }, [ready, now, endedAt, isRace, router]);
+
+  const t = ready && !liveSession && !raceEnded && next ? delta(Date.parse(next.iso) - now!) : null;
 
   const cells: [string, string][] = [
     ["Days", t ? pad(t.d) : "––"],
@@ -55,6 +72,14 @@ export default function SessionSchedule({ sessions }: { sessions: WeekendSession
           <div className="inline-flex items-center gap-2.5 rounded-md bg-red px-4 py-2.5">
             <span className="live-dot h-2.5 w-2.5 rounded-full bg-white" />
             <span className="font-display text-xl italic text-white">{liveSession.label} · Live</span>
+          </div>
+        </>
+      ) : raceEnded ? (
+        <>
+          <p className="eyebrow mb-2 text-[0.65rem] text-white/45 lg:text-right">Just finished</p>
+          <div className="inline-flex items-center gap-2.5 rounded-md bg-white/10 px-4 py-2.5 ring-1 ring-white/15">
+            <span aria-hidden>🏁</span>
+            <span className="font-display text-xl italic text-white">Race ended</span>
           </div>
         </>
       ) : (

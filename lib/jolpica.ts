@@ -131,7 +131,10 @@ export async function getNextRace(): Promise<Race | null> {
   try {
     const races = await getSchedule();
     const now = Date.now();
-    const RACE_OVER_MS = 3.5 * 3600_000; // treat the weekend as done ~3.5h after the race start
+    // Backstop only (used when the live feed isn't available). Wide enough that it can
+    // never roll over during a running/red-flagged race — the precise "5 min after the
+    // race is actually not live" flip is driven by the relay in page.tsx.
+    const RACE_OVER_MS = 6 * 3600_000;
     return races.find((r) => Date.parse(raceStartISO(r)) + RACE_OVER_MS > now) ?? null;
   } catch {
     return null;

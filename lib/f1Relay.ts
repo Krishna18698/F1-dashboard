@@ -79,6 +79,14 @@ let raceControl: Record<string, RcMessage> = {};
 let trackStatus: { Status?: string; Message?: string } | null = null;
 // Race lap counter (races only) — drives the tyre-strategy bar's lap axis.
 let lapCount: { CurrentLap?: number; TotalLaps?: number } | null = null;
+// When the current session first ended (epoch ms) — powers the live-tracking grace and
+// the hero's "race ended → flip to next weekend" timing. Only set if we actually SAW the
+// session live (so connecting long after a race can't fake a fresh "just ended"). Reset per session.
+let endedAt: number | null = null;
+let sawLive = false;
+
+const LIVE_GRACE_MS = 120_000; // keep live tracking on 2 min after a session ends
+const WEEKEND_FLIP_MS = 300_000; // flip the hero to the next weekend 5 min after the race ends
 
 function resetOnNewSession(info: NonNullable<typeof sessionInfo>) {
   if (sessionInfo?.Key && info?.Key && info.Key !== sessionInfo.Key) {
@@ -90,6 +98,8 @@ function resetOnNewSession(info: NonNullable<typeof sessionInfo>) {
     raceControl = {};
     trackStatus = null;
     lapCount = null;
+    endedAt = null;
+    sawLive = false;
   }
   sessionInfo = info;
 }
@@ -359,14 +369,34 @@ function sessionName(): string {
  * post-show are skipped. Falls back to SessionStatus if no scheduled start is known.
  */
 function liveNow(): boolean {
-  if (!sessionInfo) return false;
+  if (!sessionInfo) {
+    endedAt = null;
+    sawLive = false;
+    return false;
+  }
   const status = (sessionStatus?.Status ?? "").toLowerCase();
-  if (sessionInfo.ArchiveStatus?.Status === "Complete" || ENDED.has(status)) return false;
+  if (sessionInfo.ArchiveStatus?.Status === "Complete" || ENDED.has(status)) {
+    // Only stamp an end time if we actually watched it run — otherwise connecting hours
+    // after the flag (or a dev hot-reload) would fake a fresh "just ended".
+    if (sawLive && endedAt == null) endedAt = Date.now();
+    return false;
+  }
+  endedAt = null; // still running (or resumed after a red flag)
+  let live: boolean;
   if (sessionInfo.StartDate) {
     const startMs = Date.parse(sessionInfo.StartDate + "Z") - offsetMs(sessionInfo.GmtOffset);
-    return Number.isFinite(startMs) && Date.now() >= startMs - 60_000;
+    live = Number.isFinite(startMs) && Date.now() >= startMs - 60_000;
+  } else {
+    live = status === "started" || status === "aborted";
   }
-  return status === "started" || status === "aborted";
+  if (live) sawLive = true;
+  return live;
+}
+
+/** Live, OR within the short grace window after a session ends (keeps the map/board up). */
+function liveOrGrace(): boolean {
+  if (liveNow()) return true;
+  return endedAt != null && Date.now() < endedAt + LIVE_GRACE_MS;
 }
 
 function classify() {
@@ -414,7 +444,7 @@ function classify() {
 export async function getRelayState(): Promise<F1LiveState | null> {
   if (!(await ensureConnection())) return null;
   await refreshIfStale();
-  if (!sessionInfo || !liveNow()) return null;
+  if (!sessionInfo || !liveOrGrace()) return null;
 
   const { nums, mode, rows, order, fastestLap } = classify();
   if (!nums.length) return null;
@@ -479,7 +509,7 @@ export interface RaceControl {
 export async function getRaceControl(): Promise<RaceControl> {
   if (!(await ensureConnection())) return { available: false };
   await refreshIfStale();
-  if (!sessionInfo || !liveNow()) return { available: false };
+  if (!sessionInfo || !liveOrGrace()) return { available: false };
   const messages = Object.values(raceControl)
     .filter((m) => m.Message)
     .sort((a, b) => (b.Utc ?? "").localeCompare(a.Utc ?? ""))
@@ -489,11 +519,38 @@ export async function getRaceControl(): Promise<RaceControl> {
 }
 
 /** Lightweight "is a session live and which one" — for the hero + schedule. */
-export async function getLiveStatus(): Promise<{ live: boolean; name?: string; type?: string }> {
+export async function getLiveStatus(): Promise<{
+  live: boolean;
+  name?: string;
+  type?: string;
+  endedAt?: number; // epoch ms the current session ended (drives the hero flip)
+  round?: number; // meeting/round number of the current session
+}> {
   if (!(await ensureConnection())) return { live: false };
   await refreshIfStale();
   if (!sessionInfo) return { live: false };
-  return { live: liveNow(), name: sessionName(), type: sessionInfo.Type };
+  const live = liveNow(); // also maintains endedAt
+  return {
+    live,
+    name: sessionName(),
+    type: sessionInfo.Type,
+    endedAt: endedAt ?? undefined,
+    round: sessionInfo.Meeting?.Number,
+  };
+}
+
+/**
+ * The just-ended RACE weekend (main Grand Prix only), once it's over — so the hero can
+ * flip to the next round 5 min after the flag. Null until then / without a token.
+ */
+export async function getEndedWeekend(): Promise<{ round: number; flipReady: boolean } | null> {
+  if (!(await ensureConnection())) return null;
+  await refreshIfStale();
+  if (!sessionInfo) return null;
+  liveNow(); // maintain endedAt
+  const isRace = (sessionInfo.Type ?? "").toLowerCase() === "race";
+  if (!isRace || endedAt == null) return null;
+  return { round: Number(sessionInfo.Meeting?.Number ?? 0), flipReady: Date.now() >= endedAt + WEEKEND_FLIP_MS };
 }
 
 export async function getRelayResults(): Promise<SessionResult | null> {
