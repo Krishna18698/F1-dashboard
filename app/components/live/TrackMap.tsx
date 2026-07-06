@@ -31,13 +31,22 @@ export default function TrackMap({
 }) {
   const [circuit, setCircuit] = useState<Circuit | null>(null);
 
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
     if (!circuitKey) return;
     let on = true;
     fetch(`/api/circuit?key=${circuitKey}`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => on && d?.x?.length && setCircuit(d))
-      .catch(() => {});
+      .then((d) => {
+        if (!on) return;
+        if (d?.x?.length) {
+          setCircuit(d);
+          setFailed(false);
+        } else {
+          setFailed(true); // MultiViewer has no outline (e.g. a brand-new circuit)
+        }
+      })
+      .catch(() => on && setFailed(true));
     return () => {
       on = false;
     };
@@ -205,8 +214,13 @@ export default function TrackMap({
 
   if (!bounds) {
     return (
-      <div className="flex aspect-square items-center justify-center self-start rounded-lg carbon-bg text-sm text-white/40">
-        Loading circuit…
+      <div className="self-start">
+        <span className="eyebrow mb-2 block text-[0.6rem] text-muted">
+          Driver <span className="text-red">Tracker</span>
+        </span>
+        <div className="flex aspect-square items-center justify-center rounded-lg carbon-bg px-6 text-center text-sm text-white/40">
+          {failed ? "Track outline unavailable for this circuit — timing & tyres below still update live." : "Loading circuit…"}
+        </div>
       </div>
     );
   }
