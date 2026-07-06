@@ -128,22 +128,17 @@ export default function TrackMap({
         const dt = now - lastNow.current;
         lastNow.current = now;
         if (ptRef.current === null || dt > 1500 || latest - ptRef.current > 40000) {
-          // startup / tab was hidden / hopelessly behind → snap (rare)
+          // First frame / tab was hidden / fell to the buffer's edge → (re)anchor. Rare.
           ptRef.current = latest - DELAY_MS;
         } else {
-          // Free-run at EXACTLY 1x for constant, smooth motion. Only nudge the rate
-          // (±5%) when the lag leaves a wide deadzone around DELAY — which normally never
-          // happens, so there is no speed pulse on each 3s poll. (The old bug corrected
-          // toward `latest`, which staircases every poll, causing periodic speed-ups.)
-          const err = latest - ptRef.current - DELAY_MS; // + = too much lag, - = too little
-          const DEAD = 8000;
-          let rate = 1;
-          if (Math.abs(err) > DEAD) {
-            const over = err - Math.sign(err) * DEAD;
-            rate = 1 + Math.max(-0.05, Math.min(0.05, over / 12000));
-          }
-          ptRef.current += dt * rate;
-          if (ptRef.current > latest) ptRef.current = latest; // never overrun the newest frame
+          // Advance the render clock at EXACTLY real time — NEVER correct its rate. Playback
+          // speed is therefore perfectly constant; interpolation between the bracketing
+          // frames absorbs all network jitter. (This is "renderTime = clock − delay", but
+          // driven by a monotonic timer and anchored to the data's own timestamps, so a
+          // skewed system clock can't break it.) If we catch up to the newest frame because
+          // data stalled, hold there instead of jumping backwards.
+          ptRef.current += dt;
+          if (ptRef.current > latest) ptRef.current = latest;
         }
         const pt = ptRef.current;
 
