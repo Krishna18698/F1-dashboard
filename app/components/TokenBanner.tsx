@@ -32,24 +32,60 @@ export default function TokenBanner() {
   // Remaining time as h:mm (e.g. "20:40"), not decimal hours.
   const totalMin = Math.max(0, Math.round((s.hoursLeft ?? 0) * 60));
   const remaining = `${Math.floor(totalMin / 60)}:${String(totalMin % 60).padStart(2, "0")}`;
+  const code = "rounded bg-black/5 px-1 font-mono text-[0.7rem] text-ink";
   return (
     <div
-      className={`mb-6 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border px-4 py-3 text-sm ${
-        expired
-          ? "border-red bg-red-tint text-ink"
-          : "border-amber-400 bg-amber-50 text-ink"
+      className={`reveal-in mb-6 flex items-center gap-3.5 rounded-xl border-l-4 py-3.5 pr-4 pl-4 shadow-sm ring-1 sm:gap-4 sm:pl-5 ${
+        expired ? "border-l-red bg-red-tint ring-red/15" : "border-l-amber-400 bg-amber-50 ring-amber-200/70"
       }`}
     >
-      <span className="font-semibold">
-        {expired ? "⚠️ F1 TV token expired" : `⏳ F1 TV token expires in ${remaining}`}
-      </span>
-      <span className="text-ink-soft">
-        {expired
-          ? "— live tracking is off. "
-          : "— live tracking will stop soon. "}
-        Re-grab the token from your <code className="rounded bg-black/5 px-1">login-session</code>{" "}
-        cookie and update <code className="rounded bg-black/5 px-1">.env.local</code>.
-      </span>
+      {/* Icon badge */}
+      <div
+        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${
+          expired ? "bg-red/10 text-red" : "bg-amber-100 text-amber-600"
+        }`}
+      >
+        {expired ? (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
+            <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" strokeLinejoin="round" />
+            <path d="M12 9v4M12 17h.01" strokeLinecap="round" />
+          </svg>
+        ) : (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 7.5V12l3 2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        )}
+      </div>
+
+      {/* Message */}
+      <div className="min-w-0 flex-1">
+        <span className={`eyebrow text-[0.6rem] ${expired ? "text-red" : "text-amber-700"}`}>F1 TV Token</span>
+        <p className="font-display text-base leading-tight text-ink sm:text-lg">
+          {expired ? "Token has expired" : "Token expiring soon"}
+        </p>
+        <p className="mt-0.5 text-xs leading-snug text-ink-soft">
+          {expired ? "Live tracking is off — " : "Live tracking will stop when it runs out — "}
+          refresh <code className={code}>subscriptionToken</code> from the <code className={code}>login-session</code>{" "}
+          cookie into <code className={code}>.env.local</code>.
+        </p>
+      </div>
+
+      {/* Time chip */}
+      <div
+        className={`hidden shrink-0 flex-col items-center rounded-lg px-3.5 py-1.5 leading-none ring-1 sm:flex ${
+          expired ? "bg-red text-white ring-red" : "bg-white text-ink ring-amber-200"
+        }`}
+      >
+        {expired ? (
+          <span className="text-sm font-bold tracking-wider">OFFLINE</span>
+        ) : (
+          <>
+            <span className="tnum font-mono text-xl font-bold">{remaining}</span>
+            <span className="eyebrow mt-1 text-[0.5rem] text-amber-600">hrs : min</span>
+          </>
+        )}
+      </div>
     </div>
   );
 }

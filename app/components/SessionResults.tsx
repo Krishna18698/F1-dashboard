@@ -19,9 +19,13 @@ interface Res {
   top?: Row[];
 }
 
-const RESULT_TTL = 24 * 60 * 60 * 1000; // hide the result bar 24h after the session ended
-const expired = (d: Res | null) =>
-  !!d?.endedAtMs && d.complete !== false && Date.now() > d.endedAtMs + RESULT_TTL;
+const RESULT_TTL = 24 * 60 * 60 * 1000; // keep the result bar for 24h after the session ends
+// Renderable only if it's a live result, or a completed one dated within the last 24h.
+// Anything else renders NOTHING (not a placeholder) → the bar never flashes in and
+// collapses out on reload, which was sliding the page.
+const showable = (d: Res | null): d is Res & { top: Row[] } =>
+  !!d && d.status !== "off" && !!d.top?.length &&
+  (d.complete === false || (!!d.endedAtMs && Date.now() <= d.endedAtMs + RESULT_TTL));
 
 function Item({ d, isRace }: { d: Row; isRace: boolean }) {
   const value = isRace ? d.gap || "—" : formatLap(d.best);
@@ -53,7 +57,10 @@ export default function SessionResults() {
         hydrated = true;
         try {
           const cached = localStorage.getItem(CACHE_KEY);
-          if (cached && on) setR(JSON.parse(cached));
+          if (cached && on) {
+            const parsed = JSON.parse(cached) as Res;
+            if (showable(parsed)) setR(parsed); // don't restore something we won't render
+          }
         } catch {}
       }
       // Tab hidden → skip the network refresh (cache already shown); re-check soon.
@@ -85,27 +92,15 @@ export default function SessionResults() {
     };
   }, []);
 
-  // Hidden when there's nothing to show, or 24h after the session ended.
-  if (r?.status === "off" || expired(r)) return null;
-  // Loading: render the exact same layout, invisible, so height matches → no shift.
-  if (!r || !r.top?.length) {
-    return (
-      <div className="border-t border-white/10 py-3" aria-hidden>
-        <div className="mb-2 px-6 sm:px-8">
-          <span className="eyebrow inline-block rounded-sm px-2 py-1 text-[0.55rem] font-bold opacity-0">
-            —
-          </span>
-        </div>
-        <div className="text-sm opacity-0">·</div>
-      </div>
-    );
-  }
+  // Render nothing until there's a current, showable result — no reserved-height
+  // placeholder, so the bar can't flash in and collapse out (that slid the page).
+  if (!showable(r)) return null;
   const isRace = r.mode === "race";
   // Slower for longer grids; one full loop ≈ 2.4s per entry.
   const duration = Math.max(20, r.top.length * 2.4);
 
   return (
-    <div className="border-t border-white/10 py-3">
+    <div className="reveal-in border-t border-white/10 py-3">
       {/* Line 1: session · RESULT */}
       <div className="mb-2 px-6 sm:px-8">
         <span
@@ -122,7 +117,7 @@ export default function SessionResults() {
         <div className="ticker-track" style={{ animationDuration: `${duration}s` }}>
           {[0, 1].map((copy) => (
             <span key={copy} className="inline-flex shrink-0" aria-hidden={copy === 1}>
-              {r.top!.map((d) => (
+              {r.top.map((d) => (
                 <Item key={`${copy}-${d.pos}-${d.tla}`} d={d} isRace={isRace} />
               ))}
             </span>
