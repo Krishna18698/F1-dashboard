@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { WeekendSession } from "@/lib/jolpica";
 import { useLiveStatus } from "./useLiveStatus";
 
@@ -13,23 +13,26 @@ function fmtLocal(iso: string): string {
 }
 
 /** Full weekend schedule in the viewer's local time: done ✓, live 🔴, or upcoming. */
-export default function WeekendSchedule({ sessions }: { sessions: WeekendSession[] }) {
-  const [now, setNow] = useState<number | null>(null);
+export default function WeekendSchedule({ sessions, nowMs }: { sessions: WeekendSession[]; nowMs: number }) {
+  // Seed the clock from the server timestamp so the done/next/live card colours are correct
+  // on the very first paint (no light→dark flip). The interval keeps it live afterwards.
+  const [now, setNow] = useState(nowMs);
   useEffect(() => {
-    const tick = () => setNow(Date.now());
-    const raf = requestAnimationFrame(tick);
-    const id = setInterval(tick, 30000);
-    return () => {
-      cancelAnimationFrame(raf);
-      clearInterval(id);
-    };
+    const id = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(id);
   }, []);
+  // True only after client hydration (no setState-in-effect) — gates the local-time text so
+  // a server(UTC)→client(local) time difference can't cause a hydration mismatch.
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
   const { live, name } = useLiveStatus();
 
-  const ready = now !== null;
   // The live session is matched by the feed's name (e.g. "… · Qualifying").
   const liveLabel = live && name ? name.split("·").pop()?.trim() : null;
-  const nextIdx = ready ? sessions.findIndex((s) => Date.parse(s.iso) > now!) : -1;
+  const nextIdx = sessions.findIndex((s) => Date.parse(s.iso) > now);
 
   return (
     <section>
@@ -42,8 +45,8 @@ export default function WeekendSchedule({ sessions }: { sessions: WeekendSession
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
         {sessions.map((s, i) => {
-          const isLive = ready && liveLabel === s.label;
-          const done = ready && !isLive && Date.parse(s.iso) <= now!;
+          const isLive = liveLabel === s.label;
+          const done = !isLive && Date.parse(s.iso) <= now;
           const isNext = !isLive && i === nextIdx;
           const dark = isLive || isNext; // black card like the season calendar's current round
           return (
@@ -79,7 +82,7 @@ export default function WeekendSchedule({ sessions }: { sessions: WeekendSession
                 {s.label}
               </p>
               <p className={`tnum text-xs ${dark ? "text-white/60" : "text-ink-soft"}`}>
-                {ready ? fmtLocal(s.iso) : "—"}
+                {mounted ? fmtLocal(s.iso) : "—"}
               </p>
             </div>
           );

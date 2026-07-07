@@ -8,6 +8,7 @@ import {
 } from "@/lib/jolpica";
 import { getPaddockIntel } from "@/lib/news";
 import { getEndedWeekend } from "@/lib/f1Relay";
+import { requestNow } from "@/lib/now";
 import Hero from "./components/Hero";
 import WeekendSchedule from "./components/WeekendSchedule";
 import Section from "./components/Section";
@@ -69,7 +70,7 @@ export default async function Page() {
         <Hero race={nextRace} />
 
         {/* This weekend's sessions (local time) — above the season calendar */}
-        {nextRace && <WeekendSchedule sessions={weekendSessions(nextRace)} />}
+        {nextRace && <WeekendSchedule sessions={weekendSessions(nextRace)} nowMs={requestNow()} />}
 
         {schedule.length > 0 && (
           <Section title="Season" emphasis="Calendar" hint="2026 · 22 rounds">

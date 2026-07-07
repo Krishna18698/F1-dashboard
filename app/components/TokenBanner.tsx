@@ -35,7 +35,7 @@ export default function TokenBanner() {
   const code = "rounded bg-black/5 px-1 font-mono text-[0.7rem] text-ink";
   return (
     <div
-      className={`reveal-in mb-6 flex items-center gap-3.5 rounded-xl border-l-4 py-3.5 pr-4 pl-4 shadow-sm ring-1 sm:gap-4 sm:pl-5 ${
+      className={`reveal-banner mb-6 flex items-center gap-3.5 rounded-xl border-l-4 py-3.5 pr-4 pl-4 shadow-sm ring-1 sm:gap-4 sm:pl-5 ${
         expired ? "border-l-red bg-red-tint ring-red/15" : "border-l-amber-400 bg-amber-50 ring-amber-200/70"
       }`}
     >
