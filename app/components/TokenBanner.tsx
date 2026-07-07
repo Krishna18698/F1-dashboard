@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { usePolling } from "./usePolling";
 
 interface Status {
   present: boolean;
@@ -15,21 +16,12 @@ const WARN_HOURS = 24;
 export default function TokenBanner() {
   const [s, setS] = useState<Status | null>(null);
 
-  useEffect(() => {
-    let on = true;
-    const poll = async () => {
-      try {
-        const d = (await (await fetch("/api/f1token", { cache: "no-store" })).json()) as Status;
-        if (on) setS(d);
-      } catch {}
-    };
-    poll();
-    const id = setInterval(poll, 10 * 60_000); // re-check every 10 min
-    return () => {
-      on = false;
-      clearInterval(id);
-    };
-  }, []);
+  usePolling(async () => {
+    try {
+      const d = (await (await fetch("/api/f1token", { cache: "no-store" })).json()) as Status;
+      setS(d);
+    } catch {}
+  }, 10 * 60_000); // re-check every 10 min
 
   // No token (running the free feed) or a healthy token → say nothing.
   if (!s || !s.present) return null;

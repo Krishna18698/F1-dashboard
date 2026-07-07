@@ -154,6 +154,11 @@ export function useF1Live(): LiveState {
 
     async function poll() {
       let status: ApiResponse["status"] = "idle";
+      // Tab hidden → don't hit the server (and rAF is paused anyway); re-check soon.
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        if (!cancelled.current) timer = setTimeout(poll, 5_000);
+        return;
+      }
       try {
         const res = await fetch("/api/f1live", { cache: "no-store" });
         const data = (await res.json()) as ApiResponse;

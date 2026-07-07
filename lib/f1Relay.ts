@@ -50,6 +50,7 @@ let sessionInfo: {
   Type?: string;
   Name?: string;
   StartDate?: string;
+  EndDate?: string;
   GmtOffset?: string;
   ArchiveStatus?: { Status?: string };
   Meeting?: { Name?: string; Number?: number; Location?: string; Circuit?: { ShortName?: string; Key?: number } };
@@ -314,6 +315,7 @@ export interface SessionResult {
   session_name: string;
   mode: "race" | "quali" | "practice";
   complete: boolean;
+  endedAtMs?: number; // when the session ended — client hides the bar 24h later
   top: { pos: number; tla: string; team_colour: string; best: number | null; gap: string }[];
 }
 
@@ -560,10 +562,17 @@ export async function getRelayResults(): Promise<SessionResult | null> {
   const { nums, mode, rows, order } = classify();
   if (!nums.length) return null;
   const complete = sessionInfo.ArchiveStatus?.Status === "Complete" || ENDED.has((sessionStatus?.Status ?? "").toLowerCase());
+  const off = offsetMs(sessionInfo.GmtOffset);
+  const endedAtMs = sessionInfo.EndDate
+    ? Date.parse(sessionInfo.EndDate + "Z") - off
+    : sessionInfo.StartDate
+      ? Date.parse(sessionInfo.StartDate + "Z") - off + 9_000_000 // ~2.5h after start if no EndDate
+      : undefined;
   return {
     session_name: sessionName(),
     mode,
     complete,
+    endedAtMs,
     top: order.map((n) => ({ pos: rows[n].position, tla: drivers[n]?.Tla ?? String(n), team_colour: drivers[n]?.TeamColour ?? "", best: rows[n].best, gap: rows[n].gap_to_leader })),
   };
 }

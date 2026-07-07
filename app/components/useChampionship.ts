@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { usePolling } from "./usePolling";
 
 export interface Championship {
   available: boolean;
@@ -12,20 +13,12 @@ export interface Championship {
 /** Polls the live championship projection (instant points during/after a session). */
 export function useChampionship(): Championship {
   const [c, setC] = useState<Championship>({ available: false });
-  useEffect(() => {
-    let on = true;
-    const poll = async () => {
-      try {
-        const d = (await (await fetch("/api/championship", { cache: "no-store" })).json()) as Championship;
-        if (on) setC(d);
-      } catch {}
-    };
-    poll();
-    const id = setInterval(poll, 20000);
-    return () => {
-      on = false;
-      clearInterval(id);
-    };
-  }, []);
+  // Only meaningful during/after a live session → poll slowly when there's nothing to show.
+  usePolling(async () => {
+    try {
+      const d = (await (await fetch("/api/championship", { cache: "no-store" })).json()) as Championship;
+      setC(d);
+    } catch {}
+  }, c.available ? 20_000 : 60_000);
   return c;
 }

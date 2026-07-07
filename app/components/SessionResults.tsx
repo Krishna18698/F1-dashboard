@@ -15,8 +15,13 @@ interface Res {
   session_name?: string;
   mode?: "race" | "quali" | "practice";
   complete?: boolean;
+  endedAtMs?: number;
   top?: Row[];
 }
+
+const RESULT_TTL = 24 * 60 * 60 * 1000; // hide the result bar 24h after the session ended
+const expired = (d: Res | null) =>
+  !!d?.endedAtMs && d.complete !== false && Date.now() > d.endedAtMs + RESULT_TTL;
 
 function Item({ d, isRace }: { d: Row; isRace: boolean }) {
   const value = isRace ? d.gap || "—" : formatLap(d.best);
@@ -51,6 +56,11 @@ export default function SessionResults() {
           if (cached && on) setR(JSON.parse(cached));
         } catch {}
       }
+      // Tab hidden → skip the network refresh (cache already shown); re-check soon.
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        if (on) timer = setTimeout(poll, 15_000);
+        return;
+      }
       let complete = true;
       try {
         const d = (await (await fetch("/api/f1results", { cache: "no-store" })).json()) as Res;
@@ -75,8 +85,8 @@ export default function SessionResults() {
     };
   }, []);
 
-  // No token → no ticker at all. Still loading → reserve height so nothing shifts.
-  if (r?.status === "off") return null;
+  // Hidden when there's nothing to show, or 24h after the session ended.
+  if (r?.status === "off" || expired(r)) return null;
   // Loading: render the exact same layout, invisible, so height matches → no shift.
   if (!r || !r.top?.length) {
     return (

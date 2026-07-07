@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { usePolling } from "../usePolling";
 
 interface RcMessage {
   Utc?: string;
@@ -67,21 +68,13 @@ export default function RaceControl() {
   const [data, setData] = useState<RaceControl | null>(null);
   const [open, setOpen] = useState(false);
 
-  useEffect(() => {
-    let on = true;
-    const poll = async () => {
-      try {
-        const d = (await (await fetch("/api/racecontrol", { cache: "no-store" })).json()) as RaceControl;
-        if (on) setData(d);
-      } catch {}
-    };
-    poll();
-    const id = setInterval(poll, 5000);
-    return () => {
-      on = false;
-      clearInterval(id);
-    };
-  }, []);
+  // Only relevant during a live session → 5s while active, 30s idle (pauses when hidden).
+  usePolling(async () => {
+    try {
+      const d = (await (await fetch("/api/racecontrol", { cache: "no-store" })).json()) as RaceControl;
+      setData(d);
+    } catch {}
+  }, data?.available ? 5_000 : 30_000);
 
   if (!data?.available) return null;
   const messages = data.messages ?? [];
