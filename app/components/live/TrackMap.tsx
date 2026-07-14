@@ -96,7 +96,11 @@ export default function TrackMap({
     const r = (rot * Math.PI) / 180;
     const cos = Math.cos(r);
     const sin = Math.sin(r);
-    const OFF = 26;
+    // Driver tags float a FIXED distance above each dot in screen space (see the dot's
+    // own `translate(0,-27)` below), while corner numbers sit a track-relative distance
+    // outward — so on some corners the two land in the same screen spot. Push numbers
+    // further out so they clear the tags' ~22px-tall footprint in the common case.
+    const OFF = 42;
     return circuit.corners.map((c) => {
       const rx = c.x * cos - c.y * sin;
       const ry = c.x * sin + c.y * cos;
@@ -362,19 +366,20 @@ export default function TrackMap({
             <path d={path} fill="none" stroke="#f4f4f6" strokeWidth={12} strokeLinejoin="round" strokeLinecap="round" />
           )}
           {cornerLabels.map((c) => (
-            <text
-              key={c.n}
-              x={c.x}
-              y={c.y}
-              textAnchor="middle"
-              dominantBaseline="central"
-              fontSize={15}
-              fontWeight={700}
-              fill="#8a8a92"
-              fontFamily="var(--font-geist-mono), monospace"
-            >
-              {c.n}
-            </text>
+            <g key={c.n} transform={`translate(${c.x} ${c.y})`}>
+              <circle r={12} fill="#15151a" fillOpacity={0.75} />
+              <text
+                textAnchor="middle"
+                dominantBaseline="central"
+                y={0.5}
+                fontSize={20}
+                fontWeight={800}
+                fill="#c9c9d1"
+                fontFamily="var(--font-geist-mono), monospace"
+              >
+                {c.n}
+              </text>
+            </g>
           ))}
           <g ref={dotsGroupRef}>{dots}</g>
         </svg>
