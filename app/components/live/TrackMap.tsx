@@ -14,7 +14,7 @@ interface Circuit {
   x: number[];
   y: number[];
   rotation: number;
-  corners: { number: number; x: number; y: number }[];
+  corners: { number: number; x: number; y: number; angle?: number }[];
 }
 
 export default function TrackMap({
@@ -81,6 +81,31 @@ export default function TrackMap({
   );
   const bounds: Bounds | null = useMemo(() => (outline.length ? computeBounds(outline) : null), [outline]);
   const path = useMemo(() => (bounds ? tracePath(outline, bounds, SIZE) + " Z" : ""), [bounds, outline]);
+
+  // Corner numbers, sitting just OUTSIDE the track line: project each corner to screen
+  // coords, then push it ~26px along the corner's outward angle (from MultiViewer).
+  const cornerLabels = useMemo(() => {
+    if (!circuit?.corners?.length || !bounds) return [];
+    const w = bounds.maxX - bounds.minX || 1;
+    const h = bounds.maxY - bounds.minY || 1;
+    const scale = Math.min(SIZE / w, SIZE / h);
+    const offX = (SIZE - w * scale) / 2;
+    const offY = (SIZE - h * scale) / 2;
+    const r = (rot * Math.PI) / 180;
+    const cos = Math.cos(r);
+    const sin = Math.sin(r);
+    const OFF = 26;
+    return circuit.corners.map((c) => {
+      const rx = c.x * cos - c.y * sin;
+      const ry = c.x * sin + c.y * cos;
+      const cx = offX + (rx - bounds.minX) * scale;
+      const cy = SIZE - (offY + (ry - bounds.minY) * scale);
+      const a = ((c.angle ?? 0) * Math.PI) / 180;
+      const dx = Math.cos(a) * cos - Math.sin(a) * sin;
+      const dy = Math.cos(a) * sin + Math.sin(a) * cos;
+      return { n: c.number, x: cx + dx * OFF, y: cy - dy * OFF };
+    });
+  }, [circuit, bounds, rot]);
 
   // Precompute rotation + projection scalars once (updated when the circuit changes),
   // so the 60fps loop does pure scalar math with ZERO allocations → no GC stutter.
@@ -298,6 +323,21 @@ export default function TrackMap({
           {path && (
             <path d={path} fill="none" stroke="#f4f4f6" strokeWidth={12} strokeLinejoin="round" strokeLinecap="round" />
           )}
+          {cornerLabels.map((c) => (
+            <text
+              key={c.n}
+              x={c.x}
+              y={c.y}
+              textAnchor="middle"
+              dominantBaseline="central"
+              fontSize={15}
+              fontWeight={700}
+              fill="#8a8a92"
+              fontFamily="var(--font-geist-mono), monospace"
+            >
+              {c.n}
+            </text>
+          ))}
           <g ref={dotsGroupRef}>{dots}</g>
         </svg>
       </div>

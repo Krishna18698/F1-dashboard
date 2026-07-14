@@ -32,26 +32,30 @@ export default function TokenBanner() {
   // Remaining time as h:mm (e.g. "20:40"), not decimal hours.
   const totalMin = Math.max(0, Math.round((s.hoursLeft ?? 0) * 60));
   const remaining = `${Math.floor(totalMin / 60)}:${String(totalMin % 60).padStart(2, "0")}`;
-  const code = "rounded bg-black/5 px-1 font-mono text-[0.7rem] text-ink";
+  const accent = expired ? "#e10600" : "#f5c518";
+  const code = "rounded bg-white/10 px-1.5 py-0.5 font-mono text-[0.68rem] text-white/85";
   return (
-    <div
-      className={`reveal-banner mb-6 flex items-center gap-3.5 rounded-xl border-l-4 py-3.5 pr-4 pl-4 shadow-sm ring-1 sm:gap-4 sm:pl-5 ${
-        expired ? "border-l-red bg-red-tint ring-red/15" : "border-l-amber-400 bg-amber-50 ring-amber-200/70"
-      }`}
-    >
+    <div className="reveal-banner carbon-bg relative mb-6 flex items-center gap-4 overflow-hidden rounded-xl py-4 pl-5 pr-4 ring-1 ring-white/10 sm:gap-5 sm:pl-6">
+      {/* Racing stripe */}
+      <span className="absolute inset-y-0 left-0 w-1.5" style={{ backgroundColor: accent }} />
+      {/* soft glow bleeding from the stripe */}
+      <span
+        className="pointer-events-none absolute inset-y-0 left-0 w-40"
+        style={{ background: `linear-gradient(90deg, ${accent}26, transparent)` }}
+      />
+
       {/* Icon badge */}
       <div
-        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${
-          expired ? "bg-red/10 text-red" : "bg-amber-100 text-amber-600"
-        }`}
+        className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full ring-2"
+        style={{ color: accent, backgroundColor: `${accent}1a`, borderColor: accent, ["--tw-ring-color" as string]: `${accent}55` }}
       >
         {expired ? (
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5.5 w-5.5">
             <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" strokeLinejoin="round" />
             <path d="M12 9v4M12 17h.01" strokeLinecap="round" />
           </svg>
         ) : (
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5.5 w-5.5">
             <circle cx="12" cy="12" r="9" />
             <path d="M12 7.5V12l3 2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
@@ -59,30 +63,39 @@ export default function TokenBanner() {
       </div>
 
       {/* Message */}
-      <div className="min-w-0 flex-1">
-        <span className={`eyebrow text-[0.6rem] ${expired ? "text-red" : "text-amber-700"}`}>F1 TV Token</span>
-        <p className="font-display text-base leading-tight text-ink sm:text-lg">
-          {expired ? "Token has expired" : "Token expiring soon"}
+      <div className="relative min-w-0 flex-1">
+        <span className="eyebrow text-[0.6rem]" style={{ color: accent }}>
+          F1 TV Token
+        </span>
+        <p className="font-display text-lg leading-tight text-white sm:text-xl">
+          {expired ? (
+            <>
+              Token has <span className="italic text-red">expired</span>
+            </>
+          ) : (
+            <>
+              Token <span className="italic" style={{ color: accent }}>expiring soon</span>
+            </>
+          )}
         </p>
-        <p className="mt-0.5 text-xs leading-snug text-ink-soft">
+        <p className="mt-1 text-xs leading-relaxed text-white/55">
           {expired ? "Live tracking is off — " : "Live tracking will stop when it runs out — "}
           refresh <code className={code}>subscriptionToken</code> from the <code className={code}>login-session</code>{" "}
           cookie into <code className={code}>.env.local</code>.
         </p>
       </div>
 
-      {/* Time chip */}
-      <div
-        className={`hidden shrink-0 flex-col items-center rounded-lg px-3.5 py-1.5 leading-none ring-1 sm:flex ${
-          expired ? "bg-red text-white ring-red" : "bg-white text-ink ring-amber-200"
-        }`}
-      >
+      {/* Time chip — mirrors the hero countdown cells */}
+      <div className="relative hidden shrink-0 flex-col items-center rounded-md bg-white/10 px-4 py-2.5 ring-1 ring-white/15 sm:flex">
         {expired ? (
-          <span className="text-sm font-bold tracking-wider">OFFLINE</span>
+          <>
+            <span className="tnum font-mono text-2xl font-bold leading-none text-red">0:00</span>
+            <span className="eyebrow mt-1.5 text-[0.55rem] text-red">Offline</span>
+          </>
         ) : (
           <>
-            <span className="tnum font-mono text-xl font-bold">{remaining}</span>
-            <span className="eyebrow mt-1 text-[0.5rem] text-amber-600">hrs : min</span>
+            <span className="tnum font-mono text-2xl font-bold leading-none text-white">{remaining}</span>
+            <span className="eyebrow mt-1.5 text-[0.55rem] text-white/55">hrs : min</span>
           </>
         )}
       </div>

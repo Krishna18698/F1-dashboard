@@ -4,7 +4,7 @@ import { startTransition, useEffect, useRef, useState } from "react";
 import { Driver, IntervalRow, LapSummary, StintRow } from "@/lib/openf1";
 import { F1_LIVE } from "@/lib/f1liveConfig";
 import type { LiveState } from "./useLiveSession";
-import { pushFrames } from "./framesStore";
+import { newestFrameT, pushFrames } from "./framesStore";
 
 interface ApiRow {
   driver_number: number;
@@ -164,7 +164,9 @@ export function useF1Live(): LiveState {
         return;
       }
       try {
-        const res = await fetch("/api/f1live", { cache: "no-store" });
+        // Incremental: ask only for frames newer than what we've buffered — keeps each
+        // poll's payload/parse tiny so it never steals an animation frame.
+        const res = await fetch(`/api/f1live?since=${newestFrameT()}`, { cache: "no-store" });
         const data = (await res.json()) as ApiResponse;
         if (cancelled.current) return;
         status = data.status;

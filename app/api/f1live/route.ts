@@ -1,3 +1,4 @@
+import { NextRequest } from "next/server";
 import { fallbackCandidates, getF1LiveState, getSessionDuration, resolveLiveSession } from "@/lib/f1feed";
 import { getRelayState } from "@/lib/f1Relay";
 import { F1_LIVE } from "@/lib/f1liveConfig";
@@ -6,13 +7,24 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 20; // allow time to connect+subscribe on serverless
 
+/** Incremental frames: only those newer than the client's `since` — shrinks each poll from
+ *  the full ~45s window (~100KB to parse on the main thread, which cost an animation frame
+ *  every poll) to just the new ~3s of data. */
+function newFrames<T extends { t: number }>(frames: T[], since: number): T[] {
+  if (!since) return frames;
+  let i = frames.length;
+  while (i > 0 && frames[i - 1].t > since) i--;
+  return frames.slice(i);
+}
+
 /**
  * Serves live map + timing.
  * 1) If F1_TV_TOKEN is set → F1's real-time SignalR feed (authenticated, live now).
  * 2) Else → F1's free static feed (only a genuinely-live, published session).
  * Otherwise the client minimizes to "no live session".
  */
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const since = Number(req.nextUrl.searchParams.get("since") ?? 0) || 0;
   try {
     // 0) TEST replay — advance a past session against a real-time virtual clock.
     if (F1_LIVE.replay.enabled) {
@@ -28,6 +40,7 @@ export async function GET() {
         circuitKey: r.circuitKey,
         session: { location: r.location, session_name: r.name },
         ...state,
+        frames: newFrames(state.frames, since),
       });
     }
 
@@ -37,7 +50,13 @@ export async function GET() {
     if (process.env.F1_TV_TOKEN?.trim()) {
       const relay = await getRelayState();
       if (relay && relay.drivers.length > 0) {
-        return Response.json({ status: "live", replay: false, source: "token", ...relay });
+        return Response.json({
+          status: "live",
+          replay: false,
+          source: "token",
+          ...relay,
+          frames: newFrames(relay.frames, since),
+        });
       }
       return Response.json({ status: "idle" });
     }
@@ -53,6 +72,7 @@ export async function GET() {
           source: "free",
           session: { location: live.location, session_name: live.name },
           ...state,
+          frames: newFrames(state.frames, since),
         });
       }
     }
@@ -72,6 +92,7 @@ export async function GET() {
           source: "free",
           session: { location: c.location, session_name: c.name },
           ...state,
+          frames: newFrames(state.frames, since),
         });
       }
     }

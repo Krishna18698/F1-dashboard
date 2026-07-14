@@ -12,17 +12,20 @@ function windowLabel(race: Race): string {
 }
 
 /**
- * Horizontal strip: last completed round (dimmed, with its winner), the current weekend
- * (black) and the next four rounds.
+ * Horizontal strip: last completed round (dimmed, with its winner), the featured round
+ * (black — badged NEXT until its weekend starts, CURRENT once it's underway) and the
+ * following four rounds.
  */
 export default function Calendar({
   races,
   nextRound,
   winners,
+  nowMs,
 }: {
   races: Race[];
   nextRound?: string;
   winners?: Record<number, { code: string; name: string }>;
+  nowMs?: number;
 }) {
   const currentIdx = nextRound ? Math.max(0, races.findIndex((r) => r.round === nextRound)) : 0;
   // Include the round before the current one so its winner stays visible for a week.
@@ -32,7 +35,13 @@ export default function Calendar({
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
       {slice.map((race) => {
-        const current = race.round === nextRound;
+        const featured = race.round === nextRound;
+        // "CURRENT" only once the weekend has actually started (FP1); "NEXT" before that.
+        const weekendStartMs = Date.parse(
+          `${race.FirstPractice?.date ?? race.date}T${race.FirstPractice?.time ?? "00:00:00Z"}`,
+        );
+        const underway = featured && nowMs != null && nowMs >= weekendStartMs;
+        const current = featured;
         const winner = winners?.[Number(race.round)];
         const past = !current && !!winner;
         return (
@@ -55,7 +64,7 @@ export default function Calendar({
               </span>
               {current && (
                 <span className="rounded-sm bg-red px-1.5 py-0.5 text-[0.55rem] font-bold tracking-wide text-white">
-                  CURRENT
+                  {underway ? "CURRENT" : "NEXT"}
                 </span>
               )}
               {past && <span className="text-xs font-bold text-red">✓</span>}

@@ -85,7 +85,7 @@ export default async function Page() {
 
         {schedule.length > 0 && (
           <Section title="Season" emphasis="Calendar" hint="2026 · 22 rounds">
-            <Calendar races={schedule} nextRound={nextRace?.round} winners={winners} />
+            <Calendar races={schedule} nextRound={nextRace?.round} winners={winners} nowMs={requestNow()} />
           </Section>
         )}
 

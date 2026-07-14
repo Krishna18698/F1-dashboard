@@ -17,20 +17,33 @@ const subs = new Set<() => void>();
 /** Merge a freshly-polled batch (deduped by timestamp), trim to the window. */
 export function pushFrames(frames?: Frame[] | null): void {
   if (!frames?.length) return;
-  const seen = new Set(buffer.map((f) => f.t));
+  const lastT = buffer.length ? buffer[buffer.length - 1].t : -Infinity;
   let changed = false;
-  for (const f of frames) {
-    if (!seen.has(f.t)) {
-      buffer.push(f);
-      seen.add(f.t);
-      changed = true;
+  // Fast path: with incremental polling (`since`) every frame is strictly newer than the
+  // buffer tail, so this is a plain append — no Set, no sort, no per-poll GC burst.
+  if (frames[0].t > lastT) {
+    for (const f of frames) buffer.push(f);
+    changed = true;
+  } else {
+    const seen = new Set(buffer.map((f) => f.t));
+    for (const f of frames) {
+      if (!seen.has(f.t)) {
+        buffer.push(f);
+        seen.add(f.t);
+        changed = true;
+      }
     }
+    if (changed) buffer.sort((a, b) => a.t - b.t);
   }
   if (!changed) return;
-  buffer.sort((a, b) => a.t - b.t);
   const cutoff = buffer[buffer.length - 1].t - WINDOW_MS;
   if (buffer[0].t < cutoff) buffer = buffer.filter((f) => f.t >= cutoff);
   subs.forEach((fn) => fn());
+}
+
+/** Newest buffered timestamp — sent as `since` so the server returns only new frames. */
+export function newestFrameT(): number {
+  return buffer.length ? buffer[buffer.length - 1].t : 0;
 }
 
 /** Clear on unmount / session change so the next session starts fresh. */

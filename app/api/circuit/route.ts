@@ -8,6 +8,7 @@ const YEARS = [2024, 2023, 2025, 2026, 2022];
 
 interface MvCorner {
   number: number;
+  angle?: number; // direction (deg, track coords) pointing OUTWARD — where the label goes
   trackPosition?: { x: number; y: number };
 }
 
@@ -39,7 +40,7 @@ export async function GET(req: NextRequest) {
         rotation: d.rotation ?? 0,
         corners: (d.corners ?? [])
           .filter((c) => c.trackPosition)
-          .map((c) => ({ number: c.number, x: c.trackPosition!.x, y: c.trackPosition!.y })),
+          .map((c) => ({ number: c.number, x: c.trackPosition!.x, y: c.trackPosition!.y, angle: c.angle ?? 0 })),
       });
     } catch {
       // try next year
