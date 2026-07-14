@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { usePolling } from "../usePolling";
+import { trackStatusInfo } from "@/lib/trackStatus";
 
 interface RcMessage {
   Utc?: string;
@@ -31,18 +32,6 @@ function msgColor(m: RcMessage): string {
   if (cat === "drs") return "#1e6bd6";
   if (msg.includes("penalty") || msg.includes("investigation") || msg.includes("deleted")) return "#e10600";
   return "#8a8a92";
-}
-
-function trackStatusInfo(s?: string): { label: string; color: string } {
-  switch (s) {
-    case "1": return { label: "Track Clear", color: "#3fa34d" };
-    case "2": return { label: "Yellow Flag", color: "#f5c518" };
-    case "4": return { label: "Safety Car", color: "#ff8000" };
-    case "5": return { label: "Red Flag", color: "#e10600" };
-    case "6": return { label: "Virtual Safety Car", color: "#ff8000" };
-    case "7": return { label: "VSC Ending", color: "#f5c518" };
-    default: return { label: "Race Control", color: "#8a8a92" };
-  }
 }
 
 function fmtTime(utc?: string): string {

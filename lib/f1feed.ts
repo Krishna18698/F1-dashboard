@@ -168,6 +168,8 @@ interface SessionCache {
   timing: Delta[];
   app: Delta[];
   lap: { ts: number; data: Record<string, unknown> }[];
+  track: { ts: number; status: string }[];
+  car: { ts: number; raw: string }[]; // CarData.z lines, decoded lazily (one per request)
   frames: PosFrame[];
   durationMs: number;
 }
@@ -191,12 +193,14 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
   // Completed session → static, cache forever. Live → 2s TTL so polls see fresh data.
   if (cached && (!live || Date.now() - cached.loadedAt < 2000)) return cached;
 
-  const [driverTxt, timingTxt, appTxt, posTxt, lapTxt] = await Promise.all([
+  const [driverTxt, timingTxt, appTxt, posTxt, lapTxt, trackTxt, carTxt] = await Promise.all([
     fetchText(sessionPath, "DriverList.jsonStream").catch(() => ""),
     fetchText(sessionPath, "TimingData.jsonStream").catch(() => ""),
     fetchText(sessionPath, "TimingAppData.jsonStream").catch(() => ""),
     fetchText(sessionPath, "Position.z.jsonStream").catch(() => ""),
     fetchText(sessionPath, "LapCount.jsonStream").catch(() => ""),
+    fetchText(sessionPath, "TrackStatus.jsonStream").catch(() => ""),
+    fetchText(sessionPath, "CarData.z.jsonStream").catch(() => ""),
   ]);
 
   const drivers: Record<string, RawDriver> = {};
@@ -222,6 +226,25 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
     } catch {}
   }
 
+  // TrackStatus stream: sparse "{Status, Message}" lines (green/yellow/SC/red…).
+  const track: { ts: number; status: string }[] = [];
+  for (const raw of trackTxt.replace(/^﻿/, "").split(/\r?\n/)) {
+    if (!raw) continue;
+    try {
+      const d = JSON.parse(raw.slice(TS_LEN)) as { Status?: string };
+      if (d.Status != null) track.push({ ts: tsToMs(raw.slice(0, TS_LEN)), status: String(d.Status) });
+    } catch {}
+  }
+
+  // CarData.z: thousands of compressed lines — keep them RAW (ts + payload) and decode only
+  // the one bracketing the requested instant, so load stays fast and memory small.
+  const car: { ts: number; raw: string }[] = [];
+  for (const raw of carTxt.replace(/^﻿/, "").split(/\r?\n/)) {
+    if (!raw) continue;
+    const ts = tsToMs(raw.slice(0, TS_LEN));
+    if (Number.isFinite(ts)) car.push({ ts, raw: raw.slice(TS_LEN) });
+  }
+
   const frames: PosFrame[] = [];
   for (const raw of posTxt.replace(/^﻿/, "").split(/\r?\n/)) {
     if (!raw) continue;
@@ -241,7 +264,7 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
   }
 
   const durationMs = Math.max(timing.at(-1)?.ts ?? 0, frames.at(-1)?.ts ?? 0);
-  const entry: SessionCache = { loadedAt: Date.now(), drivers, timing, app, lap, frames, durationMs };
+  const entry: SessionCache = { loadedAt: Date.now(), drivers, timing, app, lap, track, car, frames, durationMs };
   cache.set(sessionPath, entry);
   return entry;
 }
@@ -282,6 +305,8 @@ export interface F1LiveState {
   totalLaps: number;
   currentLap: number;
   fastestLap: { driver_number: number; tla: string; time: string; lap: number } | null;
+  trackStatus: string | null;
+  telemetry: Record<number, { rpm: number; speed: number; gear: number; throttle: number }>;
   durationMs: number;
 }
 
@@ -408,6 +433,35 @@ export async function getF1LiveState(
     if (l.data.TotalLaps != null) totalLaps = Number(l.data.TotalLaps);
   }
 
+  // Track status at this instant (yellow/SC/red map tint).
+  let trackStatus: string | null = null;
+  for (const t of s.track) {
+    if (t.ts > uptoMs) break;
+    trackStatus = t.status;
+  }
+
+  // Telemetry at this instant: binary-search the newest CarData line ≤ upto, decode just it.
+  const telemetry: F1LiveState["telemetry"] = {};
+  if (s.car.length) {
+    let lo = 0, hi = s.car.length - 1, idx = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (s.car[mid].ts <= uptoMs) { idx = mid; lo = mid + 1; } else hi = mid - 1;
+    }
+    if (idx >= 0) {
+      try {
+        const dec = decodeZ(s.car[idx].raw) as {
+          Entries?: { Cars?: Record<string, { Channels?: Record<string, number> }> }[];
+        };
+        const last = dec.Entries?.at(-1);
+        for (const [num, c] of Object.entries(last?.Cars ?? {})) {
+          const ch = c.Channels ?? {};
+          telemetry[+num] = { rpm: ch["0"] ?? 0, speed: ch["2"] ?? 0, gear: ch["3"] ?? 0, throttle: ch["4"] ?? 0 };
+        }
+      } catch {}
+    }
+  }
+
   return {
     mode: m,
     drivers,
@@ -419,6 +473,8 @@ export async function getF1LiveState(
     totalLaps: m === "race" ? totalLaps : 0,
     currentLap,
     fastestLap,
+    trackStatus,
+    telemetry,
     durationMs: s.durationMs,
   };
 }

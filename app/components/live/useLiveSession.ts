@@ -51,6 +51,8 @@ export interface LiveState {
   currentLap?: number;
   grids?: Map<number, number>; // starting grid position per driver (gained/lost indicator)
   fastestLap?: { driver_number: number; tla: string; time: string; lap: number } | null;
+  trackStatus?: string | null; // TrackStatus code — tints the map (yellow/SC/red)
+  telemetry?: Record<number, { rpm: number; speed: number; gear: number; throttle: number }>;
   tyreLaps?: Map<number, number>; // laps on current tyre, per driver
   inPit?: Set<number>; // drivers currently in the pit lane
   locations: Map<number, LocationRow>;

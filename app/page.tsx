@@ -2,7 +2,10 @@ import {
   getConstructorStandings,
   getDriverStandings,
   getNextRace,
+  getPrevConstructorStandings,
+  getPrevDriverStandings,
   getSchedule,
+  getSeasonWinners,
   getStandingsRound,
   weekendSessions,
 } from "@/lib/jolpica";
@@ -25,13 +28,14 @@ import RaceControl from "./components/live/RaceControl";
 export const dynamic = "force-dynamic";
 
 export default async function Page() {
-  const [rawNext, drivers, constructors, schedule, intel, standingsRound, endedWeekend] = await Promise.all([
+  const [rawNext, drivers, constructors, schedule, intel, standingsRound, winners, endedWeekend] = await Promise.all([
     getNextRace(),
     getDriverStandings().catch(() => []),
     getConstructorStandings().catch(() => []),
     getSchedule().catch(() => []),
     getPaddockIntel().catch(() => []),
     getStandingsRound().catch(() => 0),
+    getSeasonWinners().catch(() => ({})),
     // Only the live feed knows when the race is REALLY over (handles red flags / extensions).
     // Guarded by token + a short timeout so a page render never hangs on the relay.
     process.env.F1_TV_TOKEN?.trim()
@@ -40,6 +44,13 @@ export default async function Page() {
           new Promise<null>((r) => setTimeout(() => r(null), 2500)),
         ])
       : Promise.resolve(null),
+  ]);
+
+  // Standings after the PREVIOUS round → movement arrows (needs standingsRound, so a 2nd pass;
+  // past rounds are immutable and cached a day, so this is usually instant).
+  const [prevDrivers, prevConstructors] = await Promise.all([
+    getPrevDriverStandings(standingsRound - 1).catch(() => ({})),
+    getPrevConstructorStandings(standingsRound - 1).catch(() => ({})),
   ]);
 
   // Flip only once the race is actually NOT live for 5 min (from the feed) — never on a
@@ -74,7 +85,7 @@ export default async function Page() {
 
         {schedule.length > 0 && (
           <Section title="Season" emphasis="Calendar" hint="2026 · 22 rounds">
-            <Calendar races={schedule} nextRound={nextRace?.round} />
+            <Calendar races={schedule} nextRound={nextRace?.round} winners={winners} />
           </Section>
         )}
 
@@ -84,7 +95,7 @@ export default async function Page() {
         <div className="grid gap-10 lg:grid-cols-3">
           <Section title="Drivers'" emphasis="Championship" hint="2026 · latest round">
             {drivers.length ? (
-              <DriversTable standings={drivers} round={standingsRound} />
+              <DriversTable standings={drivers} round={standingsRound} prev={prevDrivers} />
             ) : (
               <p className="text-sm text-muted">Standings unavailable right now.</p>
             )}
@@ -92,7 +103,7 @@ export default async function Page() {
 
           <Section title="Constructors'" emphasis="Championship" hint="2026 season">
             {constructors.length ? (
-              <ConstructorsTable standings={constructors} round={standingsRound} />
+              <ConstructorsTable standings={constructors} round={standingsRound} prev={prevConstructors} />
             ) : (
               <p className="text-sm text-muted">Standings unavailable right now.</p>
             )}

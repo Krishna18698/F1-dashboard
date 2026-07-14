@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Driver } from "@/lib/openf1";
 import { Bounds, computeBounds, rotate, tracePath } from "@/lib/geo";
 import { hex } from "@/lib/format";
+import { trackStatusInfo } from "@/lib/trackStatus";
 import { getFrames, resetFrames, subscribeFrames } from "./framesStore";
 
 const SIZE = 1000;
@@ -22,12 +23,18 @@ export default function TrackMap({
   leaderNum,
   inPit,
   name,
+  trackStatus,
+  selectedNum,
+  onSelect,
 }: {
   circuitKey?: number;
   drivers: Map<number, Driver>;
   leaderNum?: number;
   inPit?: Set<number>;
   name?: string;
+  trackStatus?: string | null;
+  selectedNum?: number | null;
+  onSelect?: (num: number | null) => void;
 }) {
   const [circuit, setCircuit] = useState<Circuit | null>(null);
 
@@ -110,6 +117,10 @@ export default function TrackMap({
   useEffect(() => {
     inPitRef.current = inPit;
   }, [inPit]);
+  const selRef = useRef<number | null>(null);
+  useEffect(() => {
+    selRef.current = selectedNum ?? null;
+  }, [selectedNum]);
 
   // Positions are updated IMPERATIVELY (no React re-render per frame).
   const dotsGroupRef = useRef<SVGGElement>(null);
@@ -146,9 +157,20 @@ export default function TrackMap({
         while (i < buf.length - 1 && buf[i + 1].t <= pt) i++;
         const a = buf[i];
         const c = buf[Math.min(i + 1, buf.length - 1)];
+        // Neighbours for Catmull-Rom (clamped at buffer edges → degenerates to ~linear).
+        const p0f = buf[Math.max(0, i - 1)];
+        const p3f = buf[Math.min(i + 2, buf.length - 1)];
         const frac = c.t > a.t ? Math.max(0, Math.min(1, (pt - a.t) / (c.t - a.t))) : 0;
+        const t2 = frac * frac;
+        const t3 = t2 * frac;
+        // Uniform Catmull-Rom basis weights (precomputed once per frame, shared by all cars).
+        const w0 = -0.5 * t3 + t2 - 0.5 * frac;
+        const w1 = 1.5 * t3 - 2.5 * t2 + 1;
+        const w2 = -1.5 * t3 + 2 * t2 + 0.5 * frac;
+        const w3 = 0.5 * t3 - 0.5 * t2;
         const { cos, sin, scale, offX, offY, minX, minY } = proj;
         const pits = inPitRef.current;
+        const sel = selRef.current;
 
         const kids = group.children;
         for (let k = 0; k < kids.length; k++) {
@@ -160,14 +182,20 @@ export default function TrackMap({
             continue;
           }
           const pb = c.c[num] ?? pa;
-          const x = pa[0] + (pb[0] - pa[0]) * frac;
-          const y = pa[1] + (pb[1] - pa[1]) * frac;
+          // Catmull-Rom through the 4 bracketing GPS points → dots sweep smoothly through
+          // corners instead of polygon-ing. Missing neighbours fall back to the segment ends.
+          const q0 = p0f.c[num] ?? pa;
+          const q3 = p3f.c[num] ?? pb;
+          const x = w0 * q0[0] + w1 * pa[0] + w2 * pb[0] + w3 * q3[0];
+          const y = w0 * q0[1] + w1 * pa[1] + w2 * pb[1] + w3 * q3[1];
           const rx = x * cos - y * sin;
           const ry = x * sin + y * cos;
           const cx = offX + (rx - minX) * scale;
           const cy = SIZE - (offY + (ry - minY) * scale);
           el.setAttribute("transform", `translate(${cx.toFixed(1)} ${cy.toFixed(1)})`);
           el.style.visibility = "visible";
+          // Click-to-follow: dim everyone except the selected driver.
+          el.style.opacity = sel == null || sel === num ? "1" : "0.3";
         }
       }
       raf = requestAnimationFrame(loop);
@@ -182,22 +210,29 @@ export default function TrackMap({
     () =>
       [...drivers.keys()]
         .sort((a, b) => a - b)
-        .map((n) => `${n}:${drivers.get(n)?.team_colour}:${drivers.get(n)?.name_acronym}:${n === leaderNum}`)
+        .map((n) => `${n}:${drivers.get(n)?.team_colour}:${drivers.get(n)?.name_acronym}:${n === leaderNum}:${n === selectedNum}`)
         .join("|"),
-    [drivers, leaderNum],
+    [drivers, leaderNum, selectedNum],
   );
   const dots = useMemo(() => {
     return [...drivers.keys()].map((num) => {
       const d = drivers.get(num);
       const color = hex(d?.team_colour);
       const isLeader = num === leaderNum;
+      const isSel = num === selectedNum;
       return (
-        <g key={num} data-num={num} style={{ visibility: "hidden" }}>
+        <g
+          key={num}
+          data-num={num}
+          style={{ visibility: "hidden", cursor: "pointer", transition: "opacity 0.25s" }}
+          onClick={() => onSelect?.(isSel ? null : num)}
+        >
+          {isSel && <circle r={22} fill="none" stroke="#ffffff" strokeWidth={3} opacity={0.9} />}
           {isLeader && <circle r={20} fill={color} opacity={0.3} />}
           <circle r={isLeader ? 14 : 11} fill={color} stroke="#15151a" strokeWidth={isLeader ? 3 : 2} />
-          <g transform="translate(0, -30)">
-            <rect x={-26} y={-15} width={52} height={26} rx={5} fill="#15151a" stroke={color} strokeWidth={2} />
-            <text x={0} y={3} textAnchor="middle" fontSize={17} fontWeight={800} fill="#fff" fontFamily="var(--font-geist-sans), sans-serif">
+          <g transform="translate(0, -27)">
+            <rect x={-22} y={-13} width={44} height={22} rx={4} fill="#15151a" stroke={isSel ? "#fff" : color} strokeWidth={2} />
+            <text x={0} y={2.5} textAnchor="middle" fontSize={14} fontWeight={800} fill="#fff" fontFamily="var(--font-geist-sans), sans-serif">
               {d?.name_acronym ?? num}
             </text>
           </g>
@@ -213,28 +248,56 @@ export default function TrackMap({
         <span className="eyebrow mb-2 block text-[0.6rem] text-muted">
           Driver <span className="text-red">Tracker</span>
         </span>
-        <div className="flex aspect-square items-center justify-center rounded-lg carbon-bg px-6 text-center text-sm text-white/40">
-          {failed ? "Track outline unavailable for this circuit — timing & tyres below still update live." : "Loading circuit…"}
-        </div>
+        {failed ? (
+          <div className="flex aspect-square items-center justify-center rounded-lg carbon-bg px-6 text-center text-sm text-white/40">
+            Track outline unavailable for this circuit — timing &amp; tyres below still update live.
+          </div>
+        ) : (
+          <div className="relative aspect-square overflow-hidden rounded-lg carbon-bg ring-1 ring-white/10">
+            <div className="skeleton-dark absolute inset-6 rounded-full opacity-60" />
+            <span className="absolute inset-0 flex items-center justify-center text-sm text-white/40">
+              Loading circuit…
+            </span>
+          </div>
+        )}
       </div>
     );
   }
+
+  // Track-status tint: yellow / SC-orange / red glow around the map while not clear.
+  const ts = trackStatusInfo(trackStatus ?? undefined);
+  const tinted = !!trackStatus && !ts.calm;
 
   return (
     <div className="self-start">
       <span className="eyebrow mb-2 block text-[0.6rem] text-muted">
         Driver <span className="text-red">Tracker</span>
       </span>
-      <div className="relative aspect-square overflow-hidden rounded-lg carbon-bg ring-1 ring-white/10">
+      <div
+        className="relative aspect-square overflow-hidden rounded-lg carbon-bg ring-1 ring-white/10"
+        style={{
+          boxShadow: tinted ? `inset 0 0 0 3px ${ts.color}, inset 0 0 60px ${ts.color}33` : "none",
+          transition: "box-shadow 0.6s ease",
+        }}
+      >
+        {tinted && (
+          <span
+            className="absolute left-3 top-3 z-10 flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[0.6rem] font-bold tracking-wider"
+            style={{ backgroundColor: ts.color, color: trackStatus === "2" || trackStatus === "7" ? "#15151a" : "#fff" }}
+          >
+            <span className="live-dot h-1.5 w-1.5 rounded-full bg-current" />
+            {ts.label.toUpperCase()}
+          </span>
+        )}
         {name && (
           <span className="eyebrow absolute bottom-3 left-4 z-10 text-[0.7rem] font-semibold text-white/50">
             {name}
           </span>
         )}
-      <svg viewBox={`0 0 ${SIZE} ${SIZE}`} className="h-full w-full">
-        {path && (
-          <path d={path} fill="none" stroke="#f4f4f6" strokeWidth={12} strokeLinejoin="round" strokeLinecap="round" />
-        )}
+        <svg viewBox={`0 0 ${SIZE} ${SIZE}`} className="h-full w-full">
+          {path && (
+            <path d={path} fill="none" stroke="#f4f4f6" strokeWidth={12} strokeLinejoin="round" strokeLinecap="round" />
+          )}
           <g ref={dotsGroupRef}>{dots}</g>
         </svg>
       </div>

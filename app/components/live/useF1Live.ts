@@ -47,6 +47,8 @@ interface ApiResponse {
   totalLaps?: number;
   currentLap?: number;
   fastestLap?: ApiFastest | null;
+  trackStatus?: string | null;
+  telemetry?: Record<number, { rpm: number; speed: number; gear: number; throttle: number }>;
 }
 
 const empty: LiveState = {
@@ -132,6 +134,8 @@ function toState(r: ApiResponse): LiveState {
     totalLaps: r.totalLaps ?? 0,
     currentLap: r.currentLap ?? 0,
     fastestLap: r.fastestLap ?? null,
+    trackStatus: r.trackStatus ?? null,
+    telemetry: r.telemetry ?? {},
     tyreLaps,
     inPit,
     locations: new Map(),

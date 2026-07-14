@@ -20,7 +20,7 @@ const g = globalThis as unknown as { WebSocket?: unknown };
 if (typeof g.WebSocket === "undefined") g.WebSocket = WsImpl;
 
 const HUB = "https://livetiming.formula1.com/signalrcore";
-const TOPICS = ["DriverList", "TimingData", "TimingAppData", "Position.z", "SessionInfo", "SessionStatus", "ChampionshipPrediction", "RaceControlMessages", "TrackStatus", "LapCount"];
+const TOPICS = ["DriverList", "TimingData", "TimingAppData", "Position.z", "SessionInfo", "SessionStatus", "ChampionshipPrediction", "RaceControlMessages", "TrackStatus", "LapCount", "CarData.z"];
 const ENDED = new Set(["finished", "finalised", "ends"]);
 const BUFFER_MS = 45_000; // keep ~45s of position frames (covers a 20s playback delay)
 
@@ -80,6 +80,14 @@ let raceControl: Record<string, RcMessage> = {};
 let trackStatus: { Status?: string; Message?: string } | null = null;
 // Race lap counter (races only) — drives the tyre-strategy bar's lap axis.
 let lapCount: { CurrentLap?: number; TotalLaps?: number } | null = null;
+// Latest car telemetry per driver (CarData.z channels: 0=RPM 2=Speed 3=Gear 4=Throttle).
+export interface Telemetry {
+  rpm: number;
+  speed: number;
+  gear: number;
+  throttle: number;
+}
+let carTelemetry: Record<string, Telemetry> = {};
 // When the current session first ended (epoch ms) — powers the live-tracking grace and
 // the hero's "race ended → flip to next weekend" timing. Only set if we actually SAW the
 // session live (so connecting long after a race can't fake a fresh "just ended"). Reset per session.
@@ -99,6 +107,7 @@ function resetOnNewSession(info: NonNullable<typeof sessionInfo>) {
     raceControl = {};
     trackStatus = null;
     lapCount = null;
+    carTelemetry = {};
     endedAt = null;
     sawLive = false;
   }
@@ -133,6 +142,21 @@ function pushFrames(payload: string) {
     frameBuffer.sort((a, b) => a.t - b.t);
     const cutoff = (frameBuffer.at(-1)?.t ?? 0) - BUFFER_MS;
     if (frameBuffer.length > 40) frameBuffer = frameBuffer.filter((f) => f.t >= cutoff);
+  } catch {}
+}
+
+function applyCarData(payload: string) {
+  try {
+    const dec = JSON.parse(zlib.inflateRawSync(Buffer.from(payload, "base64")).toString("utf8")) as {
+      Entries?: { Cars?: Record<string, { Channels?: Record<string, number> }> }[];
+    };
+    const last = dec.Entries?.at(-1);
+    if (!last?.Cars) return;
+    for (const [num, car] of Object.entries(last.Cars)) {
+      const ch = car.Channels;
+      if (!ch) continue;
+      carTelemetry[num] = { rpm: ch["0"] ?? 0, speed: ch["2"] ?? 0, gear: ch["3"] ?? 0, throttle: ch["4"] ?? 0 };
+    }
   } catch {}
 }
 
@@ -201,6 +225,8 @@ function applyFeed(topic: string, data: unknown) {
     lapCount = { ...(lapCount ?? {}), ...(data as { CurrentLap?: number; TotalLaps?: number }) };
   } else if (topic === "Position.z") {
     pushFrames(data as string);
+  } else if (topic === "CarData.z") {
+    applyCarData(data as string);
   }
 }
 
@@ -216,6 +242,7 @@ function applySnapshot(snap: Record<string, unknown>) {
   if (snap.TimingData) applyFeed("TimingData", snap.TimingData);
   if (snap.TimingAppData) applyFeed("TimingAppData", snap.TimingAppData);
   if (snap["Position.z"]) pushFrames(snap["Position.z"] as string);
+  if (snap["CarData.z"]) applyCarData(snap["CarData.z"] as string);
 }
 
 async function ensureConnection(): Promise<boolean> {
@@ -310,6 +337,8 @@ export interface F1LiveState {
   totalLaps: number; // race distance (0 outside a race) — strategy bar axis
   currentLap: number;
   fastestLap: FastestLap | null;
+  trackStatus: string | null; // TrackStatus code (1 clear, 2 yellow, 4 SC, 5 red, 6 VSC, 7 VSC ending)
+  telemetry: Record<number, Telemetry>; // latest car telemetry per driver
 }
 export interface SessionResult {
   session_name: string;
@@ -470,6 +499,8 @@ export async function getRelayState(): Promise<F1LiveState | null> {
     totalLaps: mode === "race" ? Number(lapCount?.TotalLaps ?? 0) : 0,
     currentLap: Number(lapCount?.CurrentLap ?? 0),
     fastestLap,
+    trackStatus: trackStatus?.Status ?? null,
+    telemetry: Object.fromEntries(Object.entries(carTelemetry).map(([k, v]) => [+k, v])),
   };
 }
 

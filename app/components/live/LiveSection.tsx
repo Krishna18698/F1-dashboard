@@ -1,9 +1,11 @@
 "use client";
 
+import { useState } from "react";
 import { useF1Live } from "./useF1Live";
 import TrackMap from "./TrackMap";
 import TimingBoard from "./TimingBoard";
 import TyreTracker from "./TyreTracker";
+import TelemetryCard from "./TelemetryCard";
 
 function Header({
   badge,
@@ -45,18 +47,22 @@ function Header({
 
 export default function LiveSection() {
   const s = useF1Live();
+  // Click-to-follow: selected driver is highlighted on the map + gets a telemetry card.
+  const [selected, setSelected] = useState<number | null>(null);
 
   if (s.status === "error" || s.status === "idle" || s.status === "loading") {
     // Minimized: nothing is live, so collapse to a single slim bar.
     return (
       <section className="flex items-center gap-3 rounded-lg border border-line bg-panel px-4 py-3">
-        <span className="h-2 w-2 shrink-0 rounded-full bg-muted" />
+        <span className={`h-2 w-2 shrink-0 rounded-full ${s.status === "loading" ? "live-dot bg-muted" : "bg-muted"}`} />
         <span className="font-display text-lg">
           Live <span className="italic text-red">Tracking</span>
         </span>
-        <span className="text-sm text-muted">
-          {s.status === "loading" ? "checking for a live session…" : "no live session right now"}
-        </span>
+        {s.status === "loading" ? (
+          <span className="skeleton h-4 w-44" />
+        ) : (
+          <span className="text-sm text-muted">no live session right now</span>
+        )}
       </section>
     );
   }
@@ -78,13 +84,25 @@ export default function LiveSection() {
 
       {/* Track map + clean running order side by side */}
       <div className="grid gap-4 lg:grid-cols-2">
-        <TrackMap
-          circuitKey={s.circuitKey}
-          drivers={s.drivers}
-          leaderNum={leaderNum}
-          inPit={s.inPit}
-          name={s.session?.location}
-        />
+        <div className="self-start">
+          <TrackMap
+            circuitKey={s.circuitKey}
+            drivers={s.drivers}
+            leaderNum={leaderNum}
+            inPit={s.inPit}
+            name={s.session?.location}
+            trackStatus={s.trackStatus}
+            selectedNum={selected}
+            onSelect={setSelected}
+          />
+          {selected != null && (
+            <TelemetryCard
+              driver={s.drivers.get(selected)}
+              telemetry={s.telemetry?.[selected]}
+              onClose={() => setSelected(null)}
+            />
+          )}
+        </div>
         <TimingBoard
           mode={s.mode}
           order={s.order}
@@ -92,6 +110,8 @@ export default function LiveSection() {
           positions={s.positions}
           intervals={s.intervals}
           laps={s.laps}
+          selectedNum={selected}
+          onSelect={setSelected}
         />
       </div>
 

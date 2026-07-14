@@ -91,9 +91,9 @@ export default function SessionSchedule({ sessions }: { sessions: WeekendSession
             {cells.map(([label, val]) => (
               <div
                 key={label}
-                className="flex min-w-[3.4rem] flex-col items-center rounded-md bg-white/10 px-3 py-2 ring-1 ring-white/15 sm:min-w-16"
+                className="flex min-w-12 flex-col items-center rounded-md bg-white/10 px-2.5 py-2 ring-1 ring-white/15 sm:min-w-16 sm:px-3"
               >
-                <span className="tnum font-mono text-2xl font-bold leading-none text-white sm:text-3xl">
+                <span className="tnum font-mono text-xl font-bold leading-none text-white sm:text-3xl">
                   {val}
                 </span>
                 <span className="eyebrow mt-1 text-[0.6rem] text-white/55">{label}</span>

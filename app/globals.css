@@ -133,3 +133,25 @@ body {
   .reveal-in,
   .reveal-banner { animation: none; }
 }
+
+/* Loading skeletons — soft grey blocks with a slow sheen sweeping across. */
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+.skeleton {
+  border-radius: 0.5rem;
+  background: linear-gradient(100deg, #ececee 40%, #f7f7f8 50%, #ececee 60%);
+  background-size: 200% 100%;
+  animation: shimmer 1.8s linear infinite;
+}
+.skeleton-dark {
+  border-radius: 0.5rem;
+  background: linear-gradient(100deg, #26262c 40%, #33333a 50%, #26262c 60%);
+  background-size: 200% 100%;
+  animation: shimmer 1.8s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton,
+  .skeleton-dark { animation: none; }
+}

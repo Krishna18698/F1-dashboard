@@ -11,9 +11,9 @@ export const SEASON = "2026";
 // session (its own lag aside). Standings change only a few times per weekend.
 const REVALIDATE = 600;
 
-async function get<T>(path: string): Promise<T> {
+async function get<T>(path: string, revalidate: number = REVALIDATE): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
-    next: { revalidate: REVALIDATE },
+    next: { revalidate },
     headers: { Accept: "application/json" },
   });
   if (!res.ok) throw new Error(`Jolpica ${path} → ${res.status}`);
@@ -102,6 +102,52 @@ export async function getConstructorStandings(): Promise<ConstructorStanding[]> 
     };
   }>(`/${SEASON}/constructorstandings/`);
   return d.MRData.StandingsTable.StandingsLists[0]?.ConstructorStandings ?? [];
+}
+
+/** Position + points after a specific PAST round — for movement arrows. Cached a day (immutable). */
+export interface PrevStanding {
+  pos: number;
+  points: number;
+}
+export async function getPrevDriverStandings(round: number): Promise<Record<string, PrevStanding>> {
+  if (round < 1) return {};
+  const d = await get<{
+    MRData: { StandingsTable: { StandingsLists: { DriverStandings: DriverStanding[] }[] } };
+  }>(`/${SEASON}/${round}/driverstandings/`, 86400);
+  const out: Record<string, PrevStanding> = {};
+  for (const s of d.MRData.StandingsTable.StandingsLists[0]?.DriverStandings ?? []) {
+    out[s.Driver.driverId] = { pos: Number(s.position), points: Number(s.points) };
+  }
+  return out;
+}
+
+export async function getPrevConstructorStandings(round: number): Promise<Record<string, PrevStanding>> {
+  if (round < 1) return {};
+  const d = await get<{
+    MRData: { StandingsTable: { StandingsLists: { ConstructorStandings: ConstructorStanding[] }[] } };
+  }>(`/${SEASON}/${round}/constructorstandings/`, 86400);
+  const out: Record<string, PrevStanding> = {};
+  for (const s of d.MRData.StandingsTable.StandingsLists[0]?.ConstructorStandings ?? []) {
+    out[s.Constructor.constructorId] = { pos: Number(s.position), points: Number(s.points) };
+  }
+  return out;
+}
+
+/** Winner of every completed race, in one call — `Map round → {code, name}`. */
+export async function getSeasonWinners(): Promise<Record<number, { code: string; name: string }>> {
+  const d = await get<{
+    MRData: {
+      RaceTable: {
+        Races: { round: string; Results?: { Driver: { code?: string; familyName: string } }[] }[];
+      };
+    };
+  }>(`/${SEASON}/results/1/`, 3600);
+  const out: Record<number, { code: string; name: string }> = {};
+  for (const r of d.MRData.RaceTable.Races ?? []) {
+    const w = r.Results?.[0]?.Driver;
+    if (w) out[Number(r.round)] = { code: w.code ?? w.familyName.slice(0, 3).toUpperCase(), name: w.familyName };
+  }
+  return out;
 }
 
 /** The round the standings are current through — used to know if the live projection is ahead. */

@@ -15,6 +15,8 @@ export default function TimingBoard({
   positions,
   intervals,
   laps,
+  selectedNum,
+  onSelect,
 }: {
   mode: SessionMode;
   order: number[];
@@ -22,6 +24,8 @@ export default function TimingBoard({
   positions: Map<number, number>;
   intervals: Map<number, IntervalRow>;
   laps: Map<number, LapSummary>;
+  selectedNum?: number | null;
+  onSelect?: (num: number | null) => void;
 }) {
   const isRace = mode === "race";
   const fastest = [...laps.values()].reduce<number | null>((m, l) => {
@@ -57,9 +61,16 @@ export default function TimingBoard({
             const d = drivers.get(num);
             const pos = isRace ? (positions.get(num) ?? i + 1) : i + 1;
             const isP1 = pos === 1;
+            const isSel = num === selectedNum;
             const lap = laps.get(num);
             return (
-              <li key={num} className={`grid ${cols} items-center gap-2 px-3 py-2`}>
+              <li
+                key={num}
+                onClick={() => onSelect?.(isSel ? null : num)}
+                className={`grid ${cols} cursor-pointer items-center gap-2 px-2 py-1.5 transition-colors sm:px-3 sm:py-2 ${
+                  isSel ? "bg-red/5 ring-1 ring-inset ring-red/30" : "hover:bg-panel"
+                }`}
+              >
                 <span className={`tnum text-right font-mono text-sm font-bold ${isP1 ? "text-red" : ""}`}>{pos}</span>
 
                 <div className="flex min-w-0 items-center gap-2">

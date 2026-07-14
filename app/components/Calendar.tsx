@@ -12,22 +12,29 @@ function windowLabel(race: Race): string {
 }
 
 /**
- * Horizontal strip: the current weekend (black) followed by the next five rounds.
+ * Horizontal strip: last completed round (dimmed, with its winner), the current weekend
+ * (black) and the next four rounds.
  */
 export default function Calendar({
   races,
   nextRound,
+  winners,
 }: {
   races: Race[];
   nextRound?: string;
+  winners?: Record<number, { code: string; name: string }>;
 }) {
-  const startIdx = nextRound ? Math.max(0, races.findIndex((r) => r.round === nextRound)) : 0;
+  const currentIdx = nextRound ? Math.max(0, races.findIndex((r) => r.round === nextRound)) : 0;
+  // Include the round before the current one so its winner stays visible for a week.
+  const startIdx = Math.max(0, currentIdx - 1);
   const slice = races.slice(startIdx, startIdx + 6);
 
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-      {slice.map((race, i) => {
-        const current = i === 0;
+      {slice.map((race) => {
+        const current = race.round === nextRound;
+        const winner = winners?.[Number(race.round)];
+        const past = !current && !!winner;
         return (
           <div
             key={race.round}
@@ -35,7 +42,9 @@ export default function Calendar({
               "flex flex-col rounded-lg p-4 transition-colors",
               current
                 ? "carbon-bg text-white ring-1 ring-white/10"
-                : "border border-line bg-paper hover:border-line-strong",
+                : past
+                  ? "border border-line bg-panel/60"
+                  : "border border-line bg-paper hover:border-line-strong",
             ].join(" ")}
           >
             <div className="flex items-center justify-between">
@@ -49,10 +58,11 @@ export default function Calendar({
                   CURRENT
                 </span>
               )}
+              {past && <span className="text-xs font-bold text-red">✓</span>}
             </div>
 
             <p
-              className={`mt-3 truncate text-sm font-bold ${current ? "text-white" : "text-ink"}`}
+              className={`mt-3 truncate text-sm font-bold ${current ? "text-white" : past ? "text-ink-soft" : "text-ink"}`}
               title={race.raceName}
             >
               {race.Circuit.Location.country}
@@ -67,6 +77,14 @@ export default function Calendar({
             >
               {windowLabel(race)}
             </p>
+            {winner && (
+              <p
+                className={`mt-1 truncate text-[0.7rem] font-semibold ${current ? "text-white/85" : "text-ink"}`}
+                title={`Winner: ${winner.name}`}
+              >
+                🏆 {winner.code}
+              </p>
+            )}
           </div>
         );
       })}

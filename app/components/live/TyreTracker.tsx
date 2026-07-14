@@ -95,15 +95,16 @@ export default function TyreTracker({
         Tyre <span className="text-red">Tracker</span>
       </span>
       <div className="carbon-bg overflow-x-auto rounded-lg p-3 ring-1 ring-white/10 sm:p-4">
-        <div className="min-w-xl">
+        {/* On phones the timing columns hide (the stint bar is the point) so it fits with no scroll. */}
+        <div className="sm:min-w-xl">
           {/* Column header + lap axis */}
           <div className="flex items-center gap-2 border-b border-white/10 pb-1.5 text-[0.55rem] font-bold uppercase tracking-wider text-white/35">
             <span className="w-6 shrink-0 text-right">P</span>
             <span className="w-7 shrink-0" />
-            <span className="w-24 shrink-0">Driver</span>
-            <span className="w-14 shrink-0 text-right">Gap</span>
-            <span className="w-12 shrink-0 text-right">Int</span>
-            <span className="w-14 shrink-0 text-right">Last</span>
+            <span className="w-16 shrink-0 sm:w-24">Driver</span>
+            <span className="hidden w-14 shrink-0 text-right sm:block">Gap</span>
+            <span className="hidden w-12 shrink-0 text-right sm:block">Int</span>
+            <span className="hidden w-14 shrink-0 text-right sm:block">Last</span>
             <div className="relative h-3 flex-1">
               {ticks.map((t) => (
                 <span
@@ -136,18 +137,18 @@ export default function TyreTracker({
                     {pos}
                   </span>
                   <Delta grid={grids?.get(num) ?? 0} pos={pos} />
-                  <div className="flex w-24 shrink-0 items-center gap-1.5">
+                  <div className="flex w-16 shrink-0 items-center gap-1.5 sm:w-24">
                     <span className="h-4 w-1 shrink-0 rounded-full" style={{ backgroundColor: hex(d?.team_colour) }} />
                     <span className="truncate text-sm font-semibold">{d?.name_acronym ?? num}</span>
                   </div>
-                  <span className="tnum w-14 shrink-0 text-right font-mono text-xs font-semibold">
+                  <span className="tnum hidden w-14 shrink-0 text-right font-mono text-xs font-semibold sm:block">
                     {formatGap(intervals.get(num), isP1)}
                   </span>
-                  <span className="tnum w-12 shrink-0 text-right font-mono text-[0.7rem] text-white/45">
+                  <span className="tnum hidden w-12 shrink-0 text-right font-mono text-[0.7rem] text-white/45 sm:block">
                     {isP1 ? "" : formatInterval(intervals.get(num))}
                   </span>
                   <span
-                    className={`tnum w-14 shrink-0 text-right font-mono text-xs ${
+                    className={`tnum hidden w-14 shrink-0 text-right font-mono text-xs sm:block ${
                       isFastest ? "font-bold text-[#d84bff]" : "text-white/80"
                     }`}
                   >
