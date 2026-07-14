@@ -246,14 +246,25 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
   }
 
   const frames: PosFrame[] = [];
+  let posOffset: number | null = null; // absolute Timestamp → session-relative timeline
   for (const raw of posTxt.replace(/^﻿/, "").split(/\r?\n/)) {
     if (!raw) continue;
     try {
       const dec = decodeZ(raw.slice(TS_LEN)) as {
-        Position?: { Entries: Record<string, { X: number; Y: number }> }[];
+        Position?: { Timestamp?: string; Entries: Record<string, { X: number; Y: number }> }[];
       };
-      const ts = tsToMs(raw.slice(0, TS_LEN));
+      const lineTs = tsToMs(raw.slice(0, TS_LEN));
       for (const f of dec.Position ?? []) {
+        // Each line batches several ~300ms GPS samples. Use each sample's OWN Timestamp
+        // (mapped onto the session-relative timeline via a fixed offset) — collapsing
+        // them all onto the line's timestamp quantised motion to ~1s steps, which made
+        // playback sit still then leap ("slow + skips the track").
+        let ts = lineTs;
+        const abs = f.Timestamp ? Date.parse(f.Timestamp) : NaN;
+        if (Number.isFinite(abs)) {
+          if (posOffset === null) posOffset = abs - lineTs;
+          ts = abs - posOffset;
+        }
         const cars: Record<string, [number, number]> = {};
         for (const [num, p] of Object.entries(f.Entries)) {
           if (p.X || p.Y) cars[num] = [p.X, p.Y];
@@ -262,6 +273,7 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
       }
     } catch {}
   }
+  frames.sort((a, b) => a.ts - b.ts);
 
   const durationMs = Math.max(timing.at(-1)?.ts ?? 0, frames.at(-1)?.ts ?? 0);
   const entry: SessionCache = { loadedAt: Date.now(), drivers, timing, app, lap, track, car, frames, durationMs };

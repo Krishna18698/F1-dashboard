@@ -22,8 +22,14 @@ export function pushFrames(frames?: Frame[] | null): void {
   // Fast path: with incremental polling (`since`) every frame is strictly newer than the
   // buffer tail, so this is a plain append — no Set, no sort, no per-poll GC burst.
   if (frames[0].t > lastT) {
-    for (const f of frames) buffer.push(f);
-    changed = true;
+    let tail = lastT;
+    for (const f of frames) {
+      if (f.t > tail) {
+        buffer.push(f);
+        tail = f.t;
+        changed = true;
+      }
+    }
   } else {
     const seen = new Set(buffer.map((f) => f.t));
     for (const f of frames) {
