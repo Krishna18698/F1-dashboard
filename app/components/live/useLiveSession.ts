@@ -55,6 +55,7 @@ export interface LiveState {
   telemetry?: Record<number, { rpm: number; speed: number; gear: number; throttle: number }>;
   tyreLaps?: Map<number, number>; // laps on current tyre, per driver
   inPit?: Set<number>; // drivers currently in the pit lane
+  retired?: Set<number>; // crashed / DNF drivers
   locations: Map<number, LocationRow>;
   frames?: PosFrame[]; // recent position window for smooth playback
   laps: Map<number, LapSummary>;

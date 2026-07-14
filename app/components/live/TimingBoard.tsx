@@ -15,6 +15,7 @@ export default function TimingBoard({
   positions,
   intervals,
   laps,
+  retired,
   selectedNum,
   onSelect,
 }: {
@@ -24,6 +25,7 @@ export default function TimingBoard({
   positions: Map<number, number>;
   intervals: Map<number, IntervalRow>;
   laps: Map<number, LapSummary>;
+  retired?: Set<number>;
   selectedNum?: number | null;
   onSelect?: (num: number | null) => void;
 }) {
@@ -62,6 +64,7 @@ export default function TimingBoard({
             const pos = isRace ? (positions.get(num) ?? i + 1) : i + 1;
             const isP1 = pos === 1;
             const isSel = num === selectedNum;
+            const isOut = retired?.has(num);
             const lap = laps.get(num);
             return (
               <li
@@ -69,7 +72,7 @@ export default function TimingBoard({
                 onClick={() => onSelect?.(isSel ? null : num)}
                 className={`grid ${cols} cursor-pointer items-center gap-2 px-2 py-1.5 transition-colors sm:px-3 sm:py-2 ${
                   isSel ? "bg-red/5 ring-1 ring-inset ring-red/30" : "hover:bg-panel"
-                }`}
+                } ${isOut ? "opacity-50" : ""}`}
               >
                 <span className={`tnum text-right font-mono text-sm font-bold ${isP1 ? "text-red" : ""}`}>{pos}</span>
 
@@ -80,16 +83,24 @@ export default function TimingBoard({
                 </div>
 
                 {isRace ? (
-                  <div className="text-right">
-                    <span className="tnum block font-mono text-xs font-semibold">
-                      {formatGap(intervals.get(num), isP1)}
-                    </span>
-                    {!isP1 && (
-                      <span className="tnum block font-mono text-[0.6rem] text-muted">
-                        {formatInterval(intervals.get(num))}
+                  isOut ? (
+                    <div className="text-right">
+                      <span className="rounded-sm bg-ink px-1.5 py-0.5 text-[0.6rem] font-bold tracking-wider text-white">
+                        DNF
                       </span>
-                    )}
-                  </div>
+                    </div>
+                  ) : (
+                    <div className="text-right">
+                      <span className="tnum block font-mono text-xs font-semibold">
+                        {formatGap(intervals.get(num), isP1)}
+                      </span>
+                      {!isP1 && (
+                        <span className="tnum block font-mono text-[0.6rem] text-muted">
+                          {formatInterval(intervals.get(num))}
+                        </span>
+                      )}
+                    </div>
+                  )
                 ) : (
                   <>
                     <span className={`tnum text-right font-mono text-xs font-bold ${isP1 ? "text-red" : ""}`}>

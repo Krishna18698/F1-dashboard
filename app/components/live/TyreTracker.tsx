@@ -67,6 +67,7 @@ export default function TyreTracker({
   grids,
   intervals,
   laps,
+  retired,
   stints,
   totalLaps = 0,
   fastestLap,
@@ -77,6 +78,7 @@ export default function TyreTracker({
   grids?: Map<number, number>;
   intervals: Map<number, IntervalRow>;
   laps: Map<number, LapSummary>;
+  retired?: Set<number>;
   stints: Map<number, Stint[]>;
   totalLaps?: number;
   fastestLap?: Fastest | null;
@@ -124,6 +126,7 @@ export default function TyreTracker({
               const pos = positions.get(num) ?? i + 1;
               const isP1 = pos === 1;
               const isFastest = num === fastestLap?.driver_number;
+              const isOut = retired?.has(num);
               const list = stints.get(num) ?? [];
               let cum = 0;
               const segs = list.map((st) => {
@@ -132,7 +135,7 @@ export default function TyreTracker({
                 return { ...st, start, end: cum };
               });
               return (
-                <div key={num} className="flex items-center gap-2 text-white">
+                <div key={num} className={`flex items-center gap-2 text-white ${isOut ? "opacity-40" : ""}`}>
                   <span className={`tnum w-6 shrink-0 text-right font-mono text-sm font-bold ${isP1 ? "text-red" : ""}`}>
                     {pos}
                   </span>
@@ -142,7 +145,7 @@ export default function TyreTracker({
                     <span className="truncate text-sm font-semibold">{d?.name_acronym ?? num}</span>
                   </div>
                   <span className="tnum hidden w-14 shrink-0 text-right font-mono text-xs font-semibold sm:block">
-                    {formatGap(intervals.get(num), isP1)}
+                    {isOut ? "DNF" : formatGap(intervals.get(num), isP1)}
                   </span>
                   <span className="tnum hidden w-12 shrink-0 text-right font-mono text-[0.7rem] text-white/45 sm:block">
                     {isP1 ? "" : formatInterval(intervals.get(num))}

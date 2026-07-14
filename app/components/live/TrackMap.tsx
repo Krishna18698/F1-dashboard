@@ -22,6 +22,7 @@ export default function TrackMap({
   drivers,
   leaderNum,
   inPit,
+  retired,
   name,
   trackStatus,
   selectedNum,
@@ -31,6 +32,7 @@ export default function TrackMap({
   drivers: Map<number, Driver>;
   leaderNum?: number;
   inPit?: Set<number>;
+  retired?: Set<number>;
   name?: string;
   trackStatus?: string | null;
   selectedNum?: number | null;
@@ -142,10 +144,18 @@ export default function TrackMap({
   useEffect(() => {
     inPitRef.current = inPit;
   }, [inPit]);
+  const retiredRef = useRef<Set<number> | undefined>(undefined);
+  useEffect(() => {
+    retiredRef.current = retired;
+  }, [retired]);
   const selRef = useRef<number | null>(null);
   useEffect(() => {
     selRef.current = selectedNum ?? null;
   }, [selectedNum]);
+  // Per-car smoothed screen position (EMA) — the raw GPS samples carry speed noise
+  // (~28% of consecutive samples imply >60% speed jumps), so rendering them faithfully
+  // makes dots surge/slow. Entries allocated once per car, then mutated in place.
+  const smoothRef = useRef(new Map<number, { x: number; y: number; shown: boolean }>());
 
   // Positions are updated IMPERATIVELY (no React re-render per frame).
   const dotsGroupRef = useRef<SVGGElement>(null);
@@ -195,15 +205,22 @@ export default function TrackMap({
         const w3 = 0.5 * t3 - 0.5 * t2;
         const { cos, sin, scale, offX, offY, minX, minY } = proj;
         const pits = inPitRef.current;
+        const outs = retiredRef.current;
         const sel = selRef.current;
+        const smooth = smoothRef.current;
+        // EMA weight for this frame (τ = 300ms): filters the feed's sample-to-sample speed
+        // noise so dots hold steady pace instead of surging/slowing with GPS jitter.
+        const ema = 1 - Math.exp(-dt / 300);
 
         const kids = group.children;
         for (let k = 0; k < kids.length; k++) {
           const el = kids[k] as SVGGElement;
           const num = +el.dataset.num!;
           const pa = a.c[num];
-          if (!pa || pits?.has(num)) {
+          const st = smooth.get(num);
+          if (!pa || pits?.has(num) || outs?.has(num)) {
             el.style.visibility = "hidden";
+            if (st) st.shown = false; // snap (not glide) when it reappears
             continue;
           }
           const pb = c.c[num] ?? pa;
@@ -217,7 +234,28 @@ export default function TrackMap({
           const ry = x * sin + y * cos;
           const cx = offX + (rx - minX) * scale;
           const cy = SIZE - (offY + (ry - minY) * scale);
-          el.setAttribute("transform", `translate(${cx.toFixed(1)} ${cy.toFixed(1)})`);
+
+          // Low-pass the rendered position; snap on first show or a big jump (pit exit).
+          let sx = cx;
+          let sy = cy;
+          if (st) {
+            const dx = cx - st.x;
+            const dy = cy - st.y;
+            if (st.shown && dx * dx + dy * dy < 3600) {
+              st.x += dx * ema;
+              st.y += dy * ema;
+            } else {
+              st.x = cx;
+              st.y = cy;
+            }
+            st.shown = true;
+            sx = st.x;
+            sy = st.y;
+          } else {
+            smooth.set(num, { x: cx, y: cy, shown: true });
+          }
+
+          el.setAttribute("transform", `translate(${sx.toFixed(1)} ${sy.toFixed(1)})`);
           el.style.visibility = "visible";
           // Click-to-follow: dim everyone except the selected driver.
           el.style.opacity = sel == null || sel === num ? "1" : "0.3";

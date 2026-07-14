@@ -317,6 +317,7 @@ export interface F1LiveRow {
   compound: string;
   tyre_laps: number;
   in_pit: boolean;
+  retired: boolean; // crashed / DNF (feed Retired or Stopped)
   grid: number; // starting grid position (0 = unknown) — for gained/lost indicator
   stints: { compound: string; laps: number; age: number }[]; // full tyre history (strategy bar)
 }
@@ -446,6 +447,8 @@ function classify() {
       LastLapTime?: { Value?: string };
       NumberOfLaps?: number;
       InPit?: boolean;
+      Retired?: boolean;
+      Stopped?: boolean;
     };
     const stint = currentStint(n);
     const best = parseLapTime(t.BestLapTime?.Value);
@@ -460,6 +463,7 @@ function classify() {
       compound: stint.compound,
       tyre_laps: stint.laps,
       in_pit: Boolean(t.InPit),
+      retired: Boolean(t.Retired || t.Stopped),
       grid: Number((app[n] as { GridPos?: string | number })?.GridPos ?? 0),
       stints: allStints(n),
     };

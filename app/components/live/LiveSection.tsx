@@ -90,6 +90,7 @@ export default function LiveSection() {
             drivers={s.drivers}
             leaderNum={leaderNum}
             inPit={s.inPit}
+            retired={s.retired}
             name={s.session?.location}
             trackStatus={s.trackStatus}
             selectedNum={selected}
@@ -110,6 +111,7 @@ export default function LiveSection() {
           positions={s.positions}
           intervals={s.intervals}
           laps={s.laps}
+          retired={s.retired}
           selectedNum={selected}
           onSelect={setSelected}
         />
@@ -124,6 +126,7 @@ export default function LiveSection() {
           grids={s.grids}
           intervals={s.intervals}
           laps={s.laps}
+          retired={s.retired}
           stints={s.tyreStints ?? new Map()}
           totalLaps={s.totalLaps}
           fastestLap={s.fastestLap}

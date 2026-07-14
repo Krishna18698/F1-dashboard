@@ -296,6 +296,8 @@ export interface F1LiveRow {
   laps: number;
   compound: string;
   tyre_laps: number;
+  in_pit: boolean;
+  retired: boolean;
   grid: number;
   stints: { compound: string; laps: number; age: number }[];
 }
@@ -393,6 +395,8 @@ export async function getF1LiveState(
       laps: +(t.NumberOfLaps ?? 0),
       compound: cur?.Compound ?? "UNKNOWN",
       tyre_laps: Number(cur?.TotalLaps ?? 0),
+      in_pit: Boolean(t.InPit),
+      retired: Boolean(t.Retired || t.Stopped),
       grid: Number((appState[numStr]?.GridPos as string | number) ?? 0),
       stints,
     };
