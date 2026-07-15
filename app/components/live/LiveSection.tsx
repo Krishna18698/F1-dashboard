@@ -63,9 +63,9 @@ export default function LiveSection() {
         {s.status === "loading" ? (
           <span className="skeleton mt-2 block h-4 w-64" />
         ) : (
-          <div className="mt-2 pl-5 text-sm text-muted">
-            <p>No live Formula 1 session is currently running.</p>
-            <p className="mt-1">
+          <div className="mt-2 pl-5 text-sm">
+            <p className="font-medium text-ink-soft">No live Formula 1 session is currently running.</p>
+            <p className="mt-1 text-ink-soft/80">
               Live driver tracking, telemetry, tyre strategy, and Race Control automatically
               become available when an official F1 session starts.
             </p>
