@@ -583,7 +583,7 @@ export async function resolveFreeInstant(): Promise<{ path: string; uptoMs: numb
     const dur = await getSessionDuration(r.sessionPath, false);
     const anchor = Math.floor(dur * r.anchorFrac);
     const span = Math.max(1, dur - anchor);
-    const upto = anchor + (Date.now() % span);
+    const upto = anchor + ((Date.now() - r.restartedAtMs) % span);
     return { path: r.sessionPath, uptoMs: upto, live: false };
   }
 

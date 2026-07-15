@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
       const dur = await getSessionDuration(r.sessionPath, false);
       const anchor = Math.floor(dur * r.anchorFrac);
       const span = Math.max(1, dur - anchor);
-      const upto = anchor + (Date.now() % span);
+      const upto = anchor + ((Date.now() - r.restartedAtMs) % span);
       const state = await getF1LiveState(r.sessionPath, r.sessionType, upto, false);
       return Response.json({
         status: "live",
