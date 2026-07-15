@@ -27,17 +27,17 @@ export const F1_LIVE = {
    */
   replay: {
     enabled: false,
-    sessionPath: "2026/2026-06-28_Austrian_Grand_Prix/2026-06-28_Race/",
+    sessionPath: "2026/2026-07-05_British_Grand_Prix/2026-07-05_Race/",
     sessionType: "Race",
-    circuitKey: 19, // Red Bull Ring (Spielberg)
-    location: "Spielberg",
-    name: "Austrian Grand Prix · Race (test replay)",
+    circuitKey: 2, // Silverstone
+    location: "Silverstone",
+    name: "British Grand Prix · Race (test replay)",
     anchorFrac: 0.45,
     // The virtual clock is anchor + ((Date.now() - restartedAtMs) % span) — so playback
     // starts at the anchor point right as of this timestamp, then advances in real time.
     // To "restart" the replay from the anchor WITHOUT restarting the dev server, just bump
     // this to the current time (e.g. `node -e "console.log(Date.now())"`); Next hot-reloads
     // this config module on save, so it takes effect on the next poll.
-    restartedAtMs: 0,
+    restartedAtMs: 1784109249282,
   },
 } as const;
