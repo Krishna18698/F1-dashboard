@@ -182,7 +182,8 @@ interface SessionCache {
   lap: { ts: number; data: Record<string, unknown> }[];
   track: { ts: number; status: string }[];
   rc: { ts: number; idx: string; msg: RcMessage }[]; // race control messages, flattened
-  car: { ts: number; raw: string }[]; // CarData.z lines, decoded lazily (one per request)
+  car: { ts: number; raw: string }[]; // CarData.z lines, decoded lazily (window per request)
+  posOffset: number | null; // absolute Utc → session-relative ms (shared by Position + CarData)
   frames: PosFrame[];
   durationMs: number;
 }
@@ -309,7 +310,7 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
   frames.sort((a, b) => a.ts - b.ts);
 
   const durationMs = Math.max(timing.at(-1)?.ts ?? 0, frames.at(-1)?.ts ?? 0);
-  const entry: SessionCache = { loadedAt: Date.now(), drivers, timing, app, lap, track, rc, car, frames, durationMs };
+  const entry: SessionCache = { loadedAt: Date.now(), drivers, timing, app, lap, track, rc, car, posOffset, frames, durationMs };
   cache.set(sessionPath, entry);
   return entry;
 }
@@ -353,7 +354,7 @@ export interface F1LiveState {
   currentLap: number;
   fastestLap: { driver_number: number; tla: string; time: string; lap: number } | null;
   trackStatus: string | null;
-  telemetry: Record<number, { rpm: number; speed: number; gear: number; throttle: number }>;
+  telFrames: { t: number; c: Record<string, [number, number, number, number]> }[];
   durationMs: number;
 }
 
@@ -509,26 +510,39 @@ export async function getF1LiveState(
     trackStatus = t.status;
   }
 
-  // Telemetry at this instant: binary-search the newest CarData line ≤ upto, decode just it.
-  const telemetry: F1LiveState["telemetry"] = {};
+  // Telemetry window [upto − 45s, upto]: decode only the CarData lines in the window
+  // (lines are ~1.3s batches → ~35 tiny inflates) and keep each sample's OWN Utc
+  // (mapped via posOffset onto the session clock) so the client can play it back on the
+  // same delayed clock as the dots — continuous ~4Hz updates, in sync with the map.
+  const telFrames: F1LiveState["telFrames"] = [];
   if (s.car.length) {
-    let lo = 0, hi = s.car.length - 1, idx = -1;
+    // Binary-search the first line that could contribute to the window (lines batch ~1.3s
+    // of samples stamped up to ~2s after the line ts, so start a little early).
+    const startTs = uptoMs - FRAME_WINDOW - 3000;
+    let lo = 0, hi = s.car.length - 1, first = s.car.length;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
-      if (s.car[mid].ts <= uptoMs) { idx = mid; lo = mid + 1; } else hi = mid - 1;
+      if (s.car[mid].ts >= startTs) { first = mid; hi = mid - 1; } else lo = mid + 1;
     }
-    if (idx >= 0) {
+    for (let i = first; i < s.car.length && s.car[i].ts <= uptoMs; i++) {
       try {
-        const dec = decodeZ(s.car[idx].raw) as {
-          Entries?: { Cars?: Record<string, { Channels?: Record<string, number> }> }[];
+        const dec = decodeZ(s.car[i].raw) as {
+          Entries?: { Utc?: string; Cars?: Record<string, { Channels?: Record<string, number> }> }[];
         };
-        const last = dec.Entries?.at(-1);
-        for (const [num, c] of Object.entries(last?.Cars ?? {})) {
-          const ch = c.Channels ?? {};
-          telemetry[+num] = { rpm: ch["0"] ?? 0, speed: ch["2"] ?? 0, gear: ch["3"] ?? 0, throttle: ch["4"] ?? 0 };
+        for (const e of dec.Entries ?? []) {
+          const abs = e.Utc ? Date.parse(e.Utc) : NaN;
+          const t = Number.isFinite(abs) && s.posOffset !== null ? abs - s.posOffset : s.car[i].ts;
+          if (t > uptoMs || t < uptoMs - FRAME_WINDOW || !e.Cars) continue;
+          const c: Record<string, [number, number, number, number]> = {};
+          for (const [num, car] of Object.entries(e.Cars)) {
+            const ch = car.Channels;
+            if (ch) c[num] = [ch["0"] ?? 0, ch["2"] ?? 0, ch["3"] ?? 0, ch["4"] ?? 0];
+          }
+          if (Object.keys(c).length) telFrames.push({ t, c });
         }
       } catch {}
     }
+    telFrames.sort((a, b) => a.t - b.t);
   }
 
   return {
@@ -543,7 +557,7 @@ export async function getF1LiveState(
     currentLap,
     fastestLap,
     trackStatus,
-    telemetry,
+    telFrames,
     durationMs: s.durationMs,
   };
 }

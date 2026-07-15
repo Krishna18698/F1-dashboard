@@ -5,7 +5,7 @@ import { Driver } from "@/lib/openf1";
 import { Bounds, computeBounds, rotate, tracePath } from "@/lib/geo";
 import { hex } from "@/lib/format";
 import { trackStatusInfo } from "@/lib/trackStatus";
-import { getFrames, resetFrames, subscribeFrames } from "./framesStore";
+import { getFrames, resetFrames, setPlaybackT, subscribeFrames } from "./framesStore";
 
 const SIZE = 1000;
 const DELAY_MS = 20000; // play back this far behind the latest data → smooth, F1-TV-style
@@ -191,6 +191,7 @@ export default function TrackMap({
           if (ptRef.current > latest) ptRef.current = latest;
         }
         const pt = ptRef.current;
+        setPlaybackT(pt); // share the interpolation clock (telemetry card renders the same instant)
 
         let i = 0;
         while (i < buf.length - 1 && buf[i + 1].t <= pt) i++;

@@ -1,27 +1,69 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Driver } from "@/lib/openf1";
 import { hex } from "@/lib/format";
+import { getPlaybackT, getTel } from "./framesStore";
 
-export interface Telemetry {
+interface Shown {
   rpm: number;
   speed: number;
   gear: number;
   throttle: number;
 }
 
-/** Compact telemetry readout for the selected (followed) driver — speed / gear / throttle / RPM. */
+/**
+ * Live telemetry readout for the followed driver — speed / gear / throttle / RPM.
+ * Plays the buffered ~4Hz CarData samples back at the map's own delayed clock (via
+ * framesStore), interpolating between the bracketing samples — so it updates
+ * continuously AND shows the same instant as the dot on screen, on both the token
+ * and the free feed.
+ */
 export default function TelemetryCard({
+  num,
   driver,
-  telemetry,
   onClose,
 }: {
+  num: number;
   driver?: Driver;
-  telemetry?: Telemetry;
   onClose: () => void;
 }) {
+  const [v, setV] = useState<Shown | null>(null);
+
+  useEffect(() => {
+    const key = String(num);
+    const tick = () => {
+      const tel = getTel();
+      const pt = getPlaybackT();
+      if (!tel.length || !pt) return;
+      // Bracket pt (samples are ~250ms apart; scan back from the newest — pt is near the tail).
+      let i = tel.length - 1;
+      while (i > 0 && tel[i].t > pt) i--;
+      const a = tel[i];
+      const b = tel[Math.min(i + 1, tel.length - 1)];
+      const ca = a.c[key];
+      const cb = b.c[key] ?? ca;
+      if (!ca) return;
+      const f = b.t > a.t ? Math.max(0, Math.min(1, (pt - a.t) / (b.t - a.t))) : 0;
+      const next: Shown = {
+        rpm: Math.round(ca[0] + (cb[0] - ca[0]) * f),
+        speed: Math.round(ca[1] + (cb[1] - ca[1]) * f),
+        gear: ca[2],
+        throttle: Math.round(ca[3] + (cb[3] - ca[3]) * f),
+      };
+      setV((cur) =>
+        cur && cur.speed === next.speed && cur.gear === next.gear && cur.throttle === next.throttle && cur.rpm === next.rpm
+          ? cur
+          : next,
+      );
+    };
+    tick();
+    const id = setInterval(tick, 120);
+    return () => clearInterval(id);
+  }, [num]);
+
   const color = hex(driver?.team_colour);
-  const throttle = Math.max(0, Math.min(100, telemetry?.throttle ?? 0));
+  const throttle = Math.max(0, Math.min(100, v?.throttle ?? 0));
   return (
     <div className="carbon-bg mt-3 flex items-center gap-4 rounded-lg p-3 ring-1 ring-white/10 sm:gap-5 sm:p-4">
       <div className="flex min-w-0 items-center gap-2">
@@ -35,19 +77,19 @@ export default function TelemetryCard({
       <div className="flex flex-1 items-center justify-evenly gap-3">
         <div className="text-center">
           <p className="tnum font-mono text-2xl font-bold leading-none text-white sm:text-3xl">
-            {telemetry?.speed ?? 0}
+            {v?.speed ?? "—"}
           </p>
           <p className="eyebrow mt-1 text-[0.5rem] text-white/40">km/h</p>
         </div>
         <div className="text-center">
           <p className="tnum font-mono text-2xl font-bold leading-none text-white sm:text-3xl">
-            {telemetry?.gear || "N"}
+            {v ? v.gear || "N" : "—"}
           </p>
           <p className="eyebrow mt-1 text-[0.5rem] text-white/40">Gear</p>
         </div>
         <div className="hidden text-center sm:block">
           <p className="tnum font-mono text-2xl font-bold leading-none text-white sm:text-3xl">
-            {((telemetry?.rpm ?? 0) / 1000).toFixed(1)}
+            {v ? ((v.rpm ?? 0) / 1000).toFixed(1) : "—"}
           </p>
           <p className="eyebrow mt-1 text-[0.5rem] text-white/40">kRPM</p>
         </div>
@@ -55,7 +97,7 @@ export default function TelemetryCard({
         <div className="w-20 sm:w-28">
           <div className="h-2 overflow-hidden rounded-full bg-white/10">
             <div
-              className="h-full rounded-full bg-[#3fa34d] transition-[width] duration-500"
+              className="h-full rounded-full bg-[#3fa34d] transition-[width] duration-150"
               style={{ width: `${throttle}%` }}
             />
           </div>

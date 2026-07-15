@@ -52,9 +52,49 @@ export function newestFrameT(): number {
   return buffer.length ? buffer[buffer.length - 1].t : 0;
 }
 
+/* ------------------------- telemetry (same pattern) ------------------------- */
+// ~4Hz timestamped [rpm, speed, gear, throttle] per driver, played back at the map's
+// delayed clock so the telemetry card matches the car on screen and updates continuously.
+export type TelFrame = { t: number; c: Record<string, [number, number, number, number]> };
+
+let telBuffer: TelFrame[] = [];
+
+/** Append new telemetry samples (strictly increasing — the 1.5s server overlap dedupes here). */
+export function pushTel(frames?: TelFrame[] | null): void {
+  if (!frames?.length) return;
+  let tail = telBuffer.length ? telBuffer[telBuffer.length - 1].t : -Infinity;
+  for (const f of frames) {
+    if (f.t > tail) {
+      telBuffer.push(f);
+      tail = f.t;
+    }
+  }
+  const cutoff = tail - WINDOW_MS;
+  if (telBuffer.length && telBuffer[0].t < cutoff) telBuffer = telBuffer.filter((f) => f.t >= cutoff);
+}
+
+export function getTel(): TelFrame[] {
+  return telBuffer;
+}
+
+/* ----------------------------- shared playback clock ----------------------------- */
+// The map's rAF loop publishes its interpolation time here each frame, so other widgets
+// (the telemetry card) can render data for the SAME instant the dots are showing.
+let playbackT = 0;
+
+export function setPlaybackT(t: number): void {
+  playbackT = t;
+}
+
+export function getPlaybackT(): number {
+  return playbackT;
+}
+
 /** Clear on unmount / session change so the next session starts fresh. */
 export function resetFrames(): void {
   buffer = [];
+  telBuffer = [];
+  playbackT = 0;
   subs.forEach((fn) => fn());
 }
 

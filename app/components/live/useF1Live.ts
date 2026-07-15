@@ -4,7 +4,7 @@ import { startTransition, useEffect, useRef, useState } from "react";
 import { Driver, IntervalRow, LapSummary, StintRow } from "@/lib/openf1";
 import { F1_LIVE } from "@/lib/f1liveConfig";
 import type { LiveState } from "./useLiveSession";
-import { newestFrameT, pushFrames } from "./framesStore";
+import { newestFrameT, pushFrames, pushTel } from "./framesStore";
 
 interface ApiRow {
   driver_number: number;
@@ -49,7 +49,7 @@ interface ApiResponse {
   currentLap?: number;
   fastestLap?: ApiFastest | null;
   trackStatus?: string | null;
-  telemetry?: Record<number, { rpm: number; speed: number; gear: number; throttle: number }>;
+  telFrames?: { t: number; c: Record<string, [number, number, number, number]> }[];
 }
 
 const empty: LiveState = {
@@ -138,7 +138,6 @@ function toState(r: ApiResponse): LiveState {
     currentLap: r.currentLap ?? 0,
     fastestLap: r.fastestLap ?? null,
     trackStatus: r.trackStatus ?? null,
-    telemetry: r.telemetry ?? {},
     tyreLaps,
     inPit,
     retired,
@@ -180,6 +179,7 @@ export function useF1Live(): LiveState {
           // Feed the map's animation buffer directly — NOT through React state — so the
           // heavy position payload never triggers a re-render or stalls the 60fps loop.
           pushFrames(data.frames);
+          pushTel(data.telFrames);
           // Table/tyre data is non-urgent: let React yield to the map animation.
           startTransition(() => setState(toState(data)));
         }

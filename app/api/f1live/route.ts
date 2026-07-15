@@ -17,6 +17,13 @@ function newFrames<T extends { t: number }>(frames: T[], since: number): T[] {
   return frames.slice(i);
 }
 
+/** Telemetry shares the position stream's `since`, but its sample timestamps interleave
+ *  with (not equal) the position ones — send a 1.5s overlap and let the client's
+ *  strictly-increasing buffer drop the duplicates. */
+function newTel<T extends { t: number }>(frames: T[], since: number): T[] {
+  return newFrames(frames, since ? since - 1500 : 0);
+}
+
 /**
  * Serves live map + timing.
  * 1) If F1_TV_TOKEN is set → F1's real-time SignalR feed (authenticated, live now).
@@ -41,6 +48,7 @@ export async function GET(req: NextRequest) {
         session: { location: r.location, session_name: r.name },
         ...state,
         frames: newFrames(state.frames, since),
+        telFrames: newTel(state.telFrames, since),
       });
     }
 
@@ -56,6 +64,7 @@ export async function GET(req: NextRequest) {
           source: "token",
           ...relay,
           frames: newFrames(relay.frames, since),
+          telFrames: newTel(relay.telFrames, since),
         });
       }
       return Response.json({ status: "idle" });
@@ -73,6 +82,7 @@ export async function GET(req: NextRequest) {
           session: { location: live.location, session_name: live.name },
           ...state,
           frames: newFrames(state.frames, since),
+          telFrames: newTel(state.telFrames, since),
         });
       }
     }
@@ -93,6 +103,7 @@ export async function GET(req: NextRequest) {
           session: { location: c.location, session_name: c.name },
           ...state,
           frames: newFrames(state.frames, since),
+          telFrames: newTel(state.telFrames, since),
         });
       }
     }

@@ -98,8 +98,8 @@ export default function LiveSection() {
           />
           {selected != null && (
             <TelemetryCard
+              num={selected}
               driver={s.drivers.get(selected)}
-              telemetry={s.telemetry?.[selected]}
               onClose={() => setSelected(null)}
             />
           )}

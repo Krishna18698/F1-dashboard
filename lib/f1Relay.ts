@@ -80,14 +80,14 @@ let raceControl: Record<string, RcMessage> = {};
 let trackStatus: { Status?: string; Message?: string } | null = null;
 // Race lap counter (races only) — drives the tyre-strategy bar's lap axis.
 let lapCount: { CurrentLap?: number; TotalLaps?: number } | null = null;
-// Latest car telemetry per driver (CarData.z channels: 0=RPM 2=Speed 3=Gear 4=Throttle).
-export interface Telemetry {
-  rpm: number;
-  speed: number;
-  gear: number;
-  throttle: number;
+// Rolling buffer of timestamped car telemetry (CarData.z channels: 0=RPM 2=Speed 3=Gear
+// 4=Throttle) — ~4Hz per-sample Utc, played back by the client on the same delayed clock
+// as the position dots so the card matches the car on screen and updates continuously.
+export interface TelFrame {
+  t: number; // epoch ms (sample's own Utc)
+  c: Record<string, [number, number, number, number]>; // num → [rpm, speed, gear, throttle]
 }
-let carTelemetry: Record<string, Telemetry> = {};
+let telBuffer: TelFrame[] = [];
 // When the current session first ended (epoch ms) — powers the live-tracking grace and
 // the hero's "race ended → flip to next weekend" timing. Only set if we actually SAW the
 // session live (so connecting long after a race can't fake a fresh "just ended"). Reset per session.
@@ -107,7 +107,7 @@ function resetOnNewSession(info: NonNullable<typeof sessionInfo>) {
     raceControl = {};
     trackStatus = null;
     lapCount = null;
-    carTelemetry = {};
+    telBuffer = [];
     endedAt = null;
     sawLive = false;
   }
@@ -148,15 +148,24 @@ function pushFrames(payload: string) {
 function applyCarData(payload: string) {
   try {
     const dec = JSON.parse(zlib.inflateRawSync(Buffer.from(payload, "base64")).toString("utf8")) as {
-      Entries?: { Cars?: Record<string, { Channels?: Record<string, number> }> }[];
+      Entries?: { Utc?: string; Cars?: Record<string, { Channels?: Record<string, number> }> }[];
     };
-    const last = dec.Entries?.at(-1);
-    if (!last?.Cars) return;
-    for (const [num, car] of Object.entries(last.Cars)) {
-      const ch = car.Channels;
-      if (!ch) continue;
-      carTelemetry[num] = { rpm: ch["0"] ?? 0, speed: ch["2"] ?? 0, gear: ch["3"] ?? 0, throttle: ch["4"] ?? 0 };
+    let lastT = telBuffer.at(-1)?.t ?? 0;
+    for (const e of dec.Entries ?? []) {
+      const t = e.Utc ? Date.parse(e.Utc) : NaN;
+      if (!Number.isFinite(t) || t <= lastT || !e.Cars) continue; // re-Subscribe snapshots overlap
+      const c: TelFrame["c"] = {};
+      for (const [num, car] of Object.entries(e.Cars)) {
+        const ch = car.Channels;
+        if (ch) c[num] = [ch["0"] ?? 0, ch["2"] ?? 0, ch["3"] ?? 0, ch["4"] ?? 0];
+      }
+      if (Object.keys(c).length) {
+        telBuffer.push({ t, c });
+        lastT = t;
+      }
     }
+    const cutoff = (telBuffer.at(-1)?.t ?? 0) - BUFFER_MS;
+    if (telBuffer.length > 40 && telBuffer[0].t < cutoff) telBuffer = telBuffer.filter((f) => f.t >= cutoff);
   } catch {}
 }
 
@@ -339,7 +348,7 @@ export interface F1LiveState {
   currentLap: number;
   fastestLap: FastestLap | null;
   trackStatus: string | null; // TrackStatus code (1 clear, 2 yellow, 4 SC, 5 red, 6 VSC, 7 VSC ending)
-  telemetry: Record<number, Telemetry>; // latest car telemetry per driver
+  telFrames: TelFrame[]; // recent timestamped telemetry window (client plays back at the map's clock)
 }
 export interface SessionResult {
   session_name: string;
@@ -525,7 +534,7 @@ export async function getRelayState(): Promise<F1LiveState | null> {
     currentLap: Number(lapCount?.CurrentLap ?? 0),
     fastestLap,
     trackStatus: trackStatus?.Status ?? null,
-    telemetry: Object.fromEntries(Object.entries(carTelemetry).map(([k, v]) => [+k, v])),
+    telFrames: telBuffer.slice(-200), // ~45s at ~4Hz
   };
 }
 
