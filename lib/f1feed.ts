@@ -162,6 +162,18 @@ interface RawDriver {
   TeamName: string;
   TeamColour: string;
 }
+export interface RcMessage {
+  Utc?: string;
+  Category?: string;
+  Message?: string;
+  Flag?: string;
+  Scope?: string;
+  Sector?: number;
+  Status?: string;
+  Mode?: string;
+  RacingNumber?: string;
+  Lap?: number;
+}
 interface SessionCache {
   loadedAt: number;
   drivers: Record<string, RawDriver>;
@@ -169,6 +181,7 @@ interface SessionCache {
   app: Delta[];
   lap: { ts: number; data: Record<string, unknown> }[];
   track: { ts: number; status: string }[];
+  rc: { ts: number; idx: string; msg: RcMessage }[]; // race control messages, flattened
   car: { ts: number; raw: string }[]; // CarData.z lines, decoded lazily (one per request)
   frames: PosFrame[];
   durationMs: number;
@@ -193,7 +206,7 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
   // Completed session → static, cache forever. Live → 2s TTL so polls see fresh data.
   if (cached && (!live || Date.now() - cached.loadedAt < 2000)) return cached;
 
-  const [driverTxt, timingTxt, appTxt, posTxt, lapTxt, trackTxt, carTxt] = await Promise.all([
+  const [driverTxt, timingTxt, appTxt, posTxt, lapTxt, trackTxt, carTxt, rcTxt] = await Promise.all([
     fetchText(sessionPath, "DriverList.jsonStream").catch(() => ""),
     fetchText(sessionPath, "TimingData.jsonStream").catch(() => ""),
     fetchText(sessionPath, "TimingAppData.jsonStream").catch(() => ""),
@@ -201,6 +214,7 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
     fetchText(sessionPath, "LapCount.jsonStream").catch(() => ""),
     fetchText(sessionPath, "TrackStatus.jsonStream").catch(() => ""),
     fetchText(sessionPath, "CarData.z.jsonStream").catch(() => ""),
+    fetchText(sessionPath, "RaceControlMessages.jsonStream").catch(() => ""),
   ]);
 
   const drivers: Record<string, RawDriver> = {};
@@ -233,6 +247,25 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
     try {
       const d = JSON.parse(raw.slice(TS_LEN)) as { Status?: string };
       if (d.Status != null) track.push({ ts: tsToMs(raw.slice(0, TS_LEN)), status: String(d.Status) });
+    } catch {}
+  }
+
+  // RaceControlMessages: the first line's "Messages" is a full-snapshot ARRAY; every line
+  // after that is an index-keyed OBJECT delta (same shape the token relay parses). Flatten
+  // to a (ts, idx, msg) list so any instant can be reconstructed by merging up to it.
+  const rc: { ts: number; idx: string; msg: RcMessage }[] = [];
+  for (const raw of rcTxt.replace(/^﻿/, "").split(/\r?\n/)) {
+    if (!raw) continue;
+    try {
+      const ts = tsToMs(raw.slice(0, TS_LEN));
+      const d = JSON.parse(raw.slice(TS_LEN)) as { Messages?: unknown };
+      if (Array.isArray(d.Messages)) {
+        d.Messages.forEach((msg, i) => rc.push({ ts, idx: String(i), msg: msg as RcMessage }));
+      } else if (d.Messages && typeof d.Messages === "object") {
+        for (const [idx, msg] of Object.entries(d.Messages as Record<string, unknown>)) {
+          rc.push({ ts, idx, msg: msg as RcMessage });
+        }
+      }
     } catch {}
   }
 
@@ -276,7 +309,7 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
   frames.sort((a, b) => a.ts - b.ts);
 
   const durationMs = Math.max(timing.at(-1)?.ts ?? 0, frames.at(-1)?.ts ?? 0);
-  const entry: SessionCache = { loadedAt: Date.now(), drivers, timing, app, lap, track, car, frames, durationMs };
+  const entry: SessionCache = { loadedAt: Date.now(), drivers, timing, app, lap, track, rc, car, frames, durationMs };
   cache.set(sessionPath, entry);
   return entry;
 }
@@ -517,4 +550,67 @@ export async function getStaticResults(): Promise<{
     return { pos: r.position, tla: d?.name_acronym ?? String(n), team_colour: d?.team_colour ?? "", best: r.best, gap: r.gap_to_leader };
   });
   return { session_name: race.name, mode: "race", complete: true, endedAtMs: race.endMs, top };
+}
+
+/**
+ * Resolves the (session path, instant, live-ness) the free-feed live panel is currently
+ * showing — the exact same test-replay → live → fallback branching `/api/f1live` uses —
+ * so `/api/racecontrol` can serve messages for that SAME session without a token.
+ */
+export async function resolveFreeInstant(): Promise<{ path: string; uptoMs: number; live: boolean } | null> {
+  if (F1_LIVE.replay.enabled) {
+    const r = F1_LIVE.replay;
+    const dur = await getSessionDuration(r.sessionPath, false);
+    const anchor = Math.floor(dur * r.anchorFrac);
+    const span = Math.max(1, dur - anchor);
+    const upto = anchor + (Date.now() % span);
+    return { path: r.sessionPath, uptoMs: upto, live: false };
+  }
+
+  const live = await resolveLiveSession();
+  if (live && live.startWallMs != null) {
+    return { path: live.path, uptoMs: Date.now() - live.startWallMs, live: true };
+  }
+
+  for (const c of await fallbackCandidates()) {
+    const dur = await getSessionDuration(c.path, false);
+    if (!dur) continue;
+    const anchor = Math.floor(dur * F1_LIVE.replayAnchorFrac);
+    const span = Math.max(1, dur - anchor);
+    const upto = anchor + (Date.now() % span);
+    return { path: c.path, uptoMs: upto, live: false };
+  }
+  return null;
+}
+
+/** Race control messages + track status at a given instant, from the free feed. */
+export async function getStaticRaceControl(
+  sessionPath: string,
+  uptoMs: number,
+  live: boolean,
+): Promise<{
+  available: boolean;
+  trackStatus?: { Status?: string; Message?: string } | null;
+  messages?: RcMessage[];
+}> {
+  const s = await load(sessionPath, live);
+
+  const byIdx: Record<string, RcMessage> = {};
+  for (const r of s.rc) {
+    if (r.ts > uptoMs) break;
+    byIdx[r.idx] = { ...(byIdx[r.idx] ?? {}), ...r.msg };
+  }
+  const messages = Object.values(byIdx)
+    .filter((m) => m.Message)
+    .sort((a, b) => (b.Utc ?? "").localeCompare(a.Utc ?? ""))
+    .slice(0, 150);
+
+  let trackStatus: { Status?: string; Message?: string } | null = null;
+  for (const t of s.track) {
+    if (t.ts > uptoMs) break;
+    trackStatus = { Status: t.status };
+  }
+
+  if (!messages.length) return { available: false };
+  return { available: true, trackStatus, messages };
 }
