@@ -378,6 +378,26 @@ function allStints(numStr: string): { compound: string; laps: number; age: numbe
     .filter((s) => s.compound !== "UNKNOWN" || s.laps > 0);
 }
 
+/**
+ * Tyre-age (TimingAppData) and lap-count (TimingData) are two independently-updating feed
+ * topics — around Safety Car / Red Flag periods they can drift a few laps out of sync, so a
+ * driver's stint widths can sum to MORE than their actual completed laps (bars overshooting
+ * the shared lap axis / not lining up between drivers). Clamp the total to the driver's real
+ * lap count, trimming the CURRENT (most recent) stint first since it's the one still live.
+ */
+function clampStintsToLaps<T extends { laps: number }>(stints: T[], totalLaps: number): T[] {
+  const over = stints.reduce((a, s) => a + s.laps, 0) - totalLaps;
+  if (over <= 0 || !stints.length) return stints;
+  const out = stints.map((s) => ({ ...s }));
+  let remaining = over;
+  for (let i = out.length - 1; i >= 0 && remaining > 0; i--) {
+    const cut = Math.min(out[i].laps, remaining);
+    out[i].laps -= cut;
+    remaining -= cut;
+  }
+  return out;
+}
+
 /** Current tyre: last stint, with tyre AGE (TotalLaps incl. any scrub) for the board. */
 function currentStint(numStr: string): { compound: string; laps: number } {
   const st = app[numStr]?.Stints as unknown;
@@ -452,6 +472,7 @@ function classify() {
     };
     const stint = currentStint(n);
     const best = parseLapTime(t.BestLapTime?.Value);
+    const numberOfLaps = +(t.NumberOfLaps ?? 0);
     rows[+n] = {
       driver_number: +n,
       position: +(t.Position ?? t.Line ?? 99),
@@ -459,13 +480,13 @@ function classify() {
       interval: t.IntervalToPositionAhead?.Value ?? "",
       best,
       last: parseLapTime(t.LastLapTime?.Value),
-      laps: +(t.NumberOfLaps ?? 0),
+      laps: numberOfLaps,
       compound: stint.compound,
       tyre_laps: stint.laps,
       in_pit: Boolean(t.InPit),
       retired: Boolean(t.Retired || t.Stopped),
       grid: Number((app[n] as { GridPos?: string | number })?.GridPos ?? 0),
-      stints: allStints(n),
+      stints: clampStintsToLaps(allStints(n), numberOfLaps),
     };
     if (best != null && best < fastestMs && t.BestLapTime?.Value) {
       fastestMs = best;

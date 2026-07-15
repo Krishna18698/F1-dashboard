@@ -375,6 +375,20 @@ function mode(type: string): F1LiveState["mode"] {
   return "race";
 }
 
+/** See the identical helper in f1Relay.ts for why this clamp is needed. */
+function clampStintsToLaps<T extends { laps: number }>(stints: T[], totalLaps: number): T[] {
+  const over = stints.reduce((a, s) => a + s.laps, 0) - totalLaps;
+  if (over <= 0 || !stints.length) return stints;
+  const out = stints.map((s) => ({ ...s }));
+  let remaining = over;
+  for (let i = out.length - 1; i >= 0 && remaining > 0; i--) {
+    const cut = Math.min(out[i].laps, remaining);
+    out[i].laps -= cut;
+    remaining -= cut;
+  }
+  return out;
+}
+
 export async function getF1LiveState(
   sessionPath: string,
   sessionType: string,
@@ -407,7 +421,7 @@ export async function getF1LiveState(
     >;
     const keys = Object.keys(stintsRaw).map(Number).sort((a, b) => a - b);
     const cur = keys.length ? stintsRaw[keys[keys.length - 1]] : undefined;
-    const stints = keys
+    const stintsRawList = keys
       .map((k) => {
         const st = stintsRaw[k];
         const total = Number(st.TotalLaps ?? 0);
@@ -418,6 +432,12 @@ export async function getF1LiveState(
       .filter((st) => st.compound !== "UNKNOWN" || st.laps > 0);
 
     const best = parseLapTime(bt?.Value);
+    const numberOfLaps = +(t.NumberOfLaps ?? 0);
+    // Tyre-age (TimingAppData) and lap-count (TimingData) are independently-updating feed
+    // topics — around Safety Car / Red Flag periods they drift, so stint widths can sum to
+    // more than the driver's actual completed laps (bars overshooting the shared lap axis).
+    // Clamp to the real lap count, trimming the CURRENT (most recent) stint first.
+    const stints = clampStintsToLaps(stintsRawList, numberOfLaps);
     rows[num] = {
       driver_number: num,
       position: +(t.Position ?? t.Line ?? 99),
@@ -425,7 +445,7 @@ export async function getF1LiveState(
       interval: iv?.Value ?? "",
       best,
       last: parseLapTime(lt?.Value),
-      laps: +(t.NumberOfLaps ?? 0),
+      laps: numberOfLaps,
       compound: cur?.Compound ?? "UNKNOWN",
       tyre_laps: Number(cur?.TotalLaps ?? 0),
       in_pit: Boolean(t.InPit),
