@@ -51,17 +51,25 @@ export default function LiveSection() {
   const [selected, setSelected] = useState<number | null>(null);
 
   if (s.status === "error" || s.status === "idle" || s.status === "loading") {
-    // Minimized: nothing is live, so collapse to a single slim bar.
+    // Minimized: nothing is live, so collapse to a slim card explaining what's coming.
     return (
-      <section className="flex items-center gap-3 rounded-lg border border-line bg-panel px-4 py-3">
-        <span className={`h-2 w-2 shrink-0 rounded-full ${s.status === "loading" ? "live-dot bg-muted" : "bg-muted"}`} />
-        <span className="font-display text-lg">
-          Live <span className="italic text-red">Tracking</span>
-        </span>
+      <section className="rounded-lg border border-line bg-panel px-4 py-3">
+        <div className="flex items-center gap-3">
+          <span className={`h-2 w-2 shrink-0 rounded-full ${s.status === "loading" ? "live-dot bg-muted" : "bg-muted"}`} />
+          <span className="font-display text-lg">
+            Live <span className="italic text-red">Tracking</span>
+          </span>
+        </div>
         {s.status === "loading" ? (
-          <span className="skeleton h-4 w-44" />
+          <span className="skeleton mt-2 block h-4 w-64" />
         ) : (
-          <span className="text-sm text-muted">no live session right now</span>
+          <div className="mt-2 pl-5 text-sm text-muted">
+            <p>No live Formula 1 session is currently running.</p>
+            <p className="mt-1">
+              Live driver tracking, telemetry, tyre strategy, and Race Control automatically
+              become available when an official F1 session starts.
+            </p>
+          </div>
         )}
       </section>
     );
