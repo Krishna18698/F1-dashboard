@@ -20,7 +20,7 @@ const g = globalThis as unknown as { WebSocket?: unknown };
 if (typeof g.WebSocket === "undefined") g.WebSocket = WsImpl;
 
 const HUB = "https://livetiming.formula1.com/signalrcore";
-const TOPICS = ["DriverList", "TimingData", "TimingAppData", "Position.z", "SessionInfo", "SessionStatus", "ChampionshipPrediction", "RaceControlMessages", "TrackStatus", "LapCount", "CarData.z"];
+const TOPICS = ["DriverList", "TimingData", "TimingAppData", "Position.z", "SessionInfo", "SessionStatus", "ChampionshipPrediction", "RaceControlMessages", "TrackStatus", "LapCount", "CarData.z", "SessionData"];
 const ENDED = new Set(["finished", "finalised", "ends"]);
 const BUFFER_MS = 45_000; // keep ~45s of position frames (covers a 20s playback delay)
 
@@ -80,6 +80,8 @@ let raceControl: Record<string, RcMessage> = {};
 let trackStatus: { Status?: string; Message?: string } | null = null;
 // Race lap counter (races only) — drives the tyre-strategy bar's lap axis.
 let lapCount: { CurrentLap?: number; TotalLaps?: number } | null = null;
+// Which qualifying segment is live (1=Q1, 2=Q2, 3=Q3) — from SessionData's QualifyingPart.
+let qualifyingPart: number | null = null;
 // Rolling buffer of timestamped car telemetry (CarData.z channels: 0=RPM 2=Speed 3=Gear
 // 4=Throttle) — ~4Hz per-sample Utc, played back by the client on the same delayed clock
 // as the position dots so the card matches the car on screen and updates continuously.
@@ -107,6 +109,7 @@ function resetOnNewSession(info: NonNullable<typeof sessionInfo>) {
     raceControl = {};
     trackStatus = null;
     lapCount = null;
+    qualifyingPart = null;
     telBuffer = [];
     endedAt = null;
     sawLive = false;
@@ -232,6 +235,11 @@ function applyFeed(topic: string, data: unknown) {
     trackStatus = data as typeof trackStatus;
   } else if (topic === "LapCount") {
     lapCount = { ...(lapCount ?? {}), ...(data as { CurrentLap?: number; TotalLaps?: number }) };
+  } else if (topic === "SessionData") {
+    // Series is index-keyed deltas: { "2": { Utc, QualifyingPart: 2 } }. Only Qualifying
+    // sessions carry this; keep the latest value seen (1=Q1, 2=Q2, 3=Q3).
+    const series = (data as { Series?: Record<string, { QualifyingPart?: number }> }).Series;
+    for (const v of Object.values(series ?? {})) if (v.QualifyingPart != null) qualifyingPart = v.QualifyingPart;
   } else if (topic === "Position.z") {
     pushFrames(data as string);
   } else if (topic === "CarData.z") {
@@ -247,6 +255,7 @@ function applySnapshot(snap: Record<string, unknown>) {
   if (snap.RaceControlMessages) applyFeed("RaceControlMessages", snap.RaceControlMessages);
   if (snap.TrackStatus) applyFeed("TrackStatus", snap.TrackStatus);
   if (snap.LapCount) applyFeed("LapCount", snap.LapCount);
+  if (snap.SessionData) applyFeed("SessionData", snap.SessionData);
   if (snap.DriverList) applyFeed("DriverList", snap.DriverList);
   if (snap.TimingData) applyFeed("TimingData", snap.TimingData);
   if (snap.TimingAppData) applyFeed("TimingAppData", snap.TimingAppData);
@@ -327,6 +336,7 @@ export interface F1LiveRow {
   tyre_laps: number;
   in_pit: boolean;
   retired: boolean; // crashed / DNF (feed Retired or Stopped)
+  knocked_out: boolean; // eliminated in a prior quali segment (feed KnockedOut)
   grid: number; // starting grid position (0 = unknown) — for gained/lost indicator
   stints: { compound: string; laps: number; age: number }[]; // full tyre history (strategy bar)
 }
@@ -349,6 +359,7 @@ export interface F1LiveState {
   fastestLap: FastestLap | null;
   trackStatus: string | null; // TrackStatus code (1 clear, 2 yellow, 4 SC, 5 red, 6 VSC, 7 VSC ending)
   telFrames: TelFrame[]; // recent timestamped telemetry window (client plays back at the map's clock)
+  qualifyingPart: number | null; // 1=Q1, 2=Q2, 3=Q3 (quali sessions only)
 }
 export interface SessionResult {
   session_name: string;
@@ -478,6 +489,7 @@ function classify() {
       InPit?: boolean;
       Retired?: boolean;
       Stopped?: boolean;
+      KnockedOut?: boolean;
     };
     const stint = currentStint(n);
     const best = parseLapTime(t.BestLapTime?.Value);
@@ -494,6 +506,7 @@ function classify() {
       tyre_laps: stint.laps,
       in_pit: Boolean(t.InPit),
       retired: Boolean(t.Retired || t.Stopped),
+      knocked_out: Boolean(t.KnockedOut),
       grid: Number((app[n] as { GridPos?: string | number })?.GridPos ?? 0),
       stints: clampStintsToLaps(allStints(n), numberOfLaps),
     };
@@ -535,6 +548,7 @@ export async function getRelayState(): Promise<F1LiveState | null> {
     fastestLap,
     trackStatus: trackStatus?.Status ?? null,
     telFrames: telBuffer.slice(-200), // ~45s at ~4Hz
+    qualifyingPart,
   };
 }
 

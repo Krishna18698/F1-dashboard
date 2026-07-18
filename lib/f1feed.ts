@@ -182,6 +182,7 @@ interface SessionCache {
   lap: { ts: number; data: Record<string, unknown> }[];
   track: { ts: number; status: string }[];
   rc: { ts: number; idx: string; msg: RcMessage }[]; // race control messages, flattened
+  qp: { ts: number; part: number }[]; // QualifyingPart transitions (1=Q1, 2=Q2, 3=Q3)
   car: { ts: number; raw: string }[]; // CarData.z lines, decoded lazily (window per request)
   posOffset: number | null; // absolute Utc → session-relative ms (shared by Position + CarData)
   frames: PosFrame[];
@@ -207,7 +208,7 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
   // Completed session → static, cache forever. Live → 2s TTL so polls see fresh data.
   if (cached && (!live || Date.now() - cached.loadedAt < 2000)) return cached;
 
-  const [driverTxt, timingTxt, appTxt, posTxt, lapTxt, trackTxt, carTxt, rcTxt] = await Promise.all([
+  const [driverTxt, timingTxt, appTxt, posTxt, lapTxt, trackTxt, carTxt, rcTxt, qpTxt] = await Promise.all([
     fetchText(sessionPath, "DriverList.jsonStream").catch(() => ""),
     fetchText(sessionPath, "TimingData.jsonStream").catch(() => ""),
     fetchText(sessionPath, "TimingAppData.jsonStream").catch(() => ""),
@@ -216,6 +217,7 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
     fetchText(sessionPath, "TrackStatus.jsonStream").catch(() => ""),
     fetchText(sessionPath, "CarData.z.jsonStream").catch(() => ""),
     fetchText(sessionPath, "RaceControlMessages.jsonStream").catch(() => ""),
+    fetchText(sessionPath, "SessionData.jsonStream").catch(() => ""),
   ]);
 
   const drivers: Record<string, RawDriver> = {};
@@ -248,6 +250,19 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
     try {
       const d = JSON.parse(raw.slice(TS_LEN)) as { Status?: string };
       if (d.Status != null) track.push({ ts: tsToMs(raw.slice(0, TS_LEN)), status: String(d.Status) });
+    } catch {}
+  }
+
+  // SessionData: sparse "Series" index-keyed deltas carrying QualifyingPart (1=Q1,2=Q2,3=Q3),
+  // present only in Qualifying sessions.
+  const qp: { ts: number; part: number }[] = [];
+  for (const raw of qpTxt.replace(/^﻿/, "").split(/\r?\n/)) {
+    if (!raw) continue;
+    try {
+      const d = JSON.parse(raw.slice(TS_LEN)) as { Series?: Record<string, { QualifyingPart?: number }> };
+      for (const v of Object.values(d.Series ?? {})) {
+        if (v.QualifyingPart != null) qp.push({ ts: tsToMs(raw.slice(0, TS_LEN)), part: v.QualifyingPart });
+      }
     } catch {}
   }
 
@@ -310,7 +325,7 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
   frames.sort((a, b) => a.ts - b.ts);
 
   const durationMs = Math.max(timing.at(-1)?.ts ?? 0, frames.at(-1)?.ts ?? 0);
-  const entry: SessionCache = { loadedAt: Date.now(), drivers, timing, app, lap, track, rc, car, posOffset, frames, durationMs };
+  const entry: SessionCache = { loadedAt: Date.now(), drivers, timing, app, lap, track, rc, qp, car, posOffset, frames, durationMs };
   cache.set(sessionPath, entry);
   return entry;
 }
@@ -332,6 +347,7 @@ export interface F1LiveRow {
   tyre_laps: number;
   in_pit: boolean;
   retired: boolean;
+  knocked_out: boolean;
   grid: number;
   stints: { compound: string; laps: number; age: number }[];
 }
@@ -355,6 +371,7 @@ export interface F1LiveState {
   fastestLap: { driver_number: number; tla: string; time: string; lap: number } | null;
   trackStatus: string | null;
   telFrames: { t: number; c: Record<string, [number, number, number, number]> }[];
+  qualifyingPart: number | null;
   durationMs: number;
 }
 
@@ -451,6 +468,7 @@ export async function getF1LiveState(
       tyre_laps: Number(cur?.TotalLaps ?? 0),
       in_pit: Boolean(t.InPit),
       retired: Boolean(t.Retired || t.Stopped),
+      knocked_out: Boolean(t.KnockedOut),
       grid: Number((appState[numStr]?.GridPos as string | number) ?? 0),
       stints,
     };
@@ -510,6 +528,13 @@ export async function getF1LiveState(
     trackStatus = t.status;
   }
 
+  // Which qualifying segment is live at this instant (1=Q1, 2=Q2, 3=Q3).
+  let qualifyingPart: number | null = null;
+  for (const p of s.qp) {
+    if (p.ts > uptoMs) break;
+    qualifyingPart = p.part;
+  }
+
   // Telemetry window [upto − 45s, upto]: decode only the CarData lines in the window
   // (lines are ~1.3s batches → ~35 tiny inflates) and keep each sample's OWN Utc
   // (mapped via posOffset onto the session clock) so the client can play it back on the
@@ -558,6 +583,7 @@ export async function getF1LiveState(
     fastestLap,
     trackStatus,
     telFrames,
+    qualifyingPart,
     durationMs: s.durationMs,
   };
 }

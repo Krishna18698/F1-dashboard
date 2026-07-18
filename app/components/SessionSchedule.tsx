@@ -107,7 +107,9 @@ export default function SessionSchedule({ sessions }: { sessions: WeekendSession
       <div className="mt-4 flex flex-wrap gap-1.5 lg:justify-end">
         {sessions.map((s, i) => {
           const isLive = ready && liveLabel === s.label;
-          const isNext = !isLive && i === nextIdx;
+          // Only badge "next" red when NOTHING is live right now — with something live,
+          // a red "next" chip next to the live one reads as a second live session.
+          const isNext = !isLive && !live && i === nextIdx;
           const done = ready && !isLive && Date.parse(s.iso) <= now!;
           return (
             <span

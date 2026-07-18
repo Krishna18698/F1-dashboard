@@ -52,9 +52,11 @@ export interface LiveState {
   grids?: Map<number, number>; // starting grid position per driver (gained/lost indicator)
   fastestLap?: { driver_number: number; tla: string; time: string; lap: number } | null;
   trackStatus?: string | null; // TrackStatus code — tints the map (yellow/SC/red)
+  qualifyingPart?: number | null; // 1=Q1, 2=Q2, 3=Q3 (quali sessions only)
   tyreLaps?: Map<number, number>; // laps on current tyre, per driver
   inPit?: Set<number>; // drivers currently in the pit lane
   retired?: Set<number>; // crashed / DNF drivers
+  knockedOut?: Set<number>; // eliminated in a prior quali segment
   locations: Map<number, LocationRow>;
   frames?: PosFrame[]; // recent position window for smooth playback
   laps: Map<number, LapSummary>;

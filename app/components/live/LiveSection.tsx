@@ -120,26 +120,31 @@ export default function LiveSection() {
           intervals={s.intervals}
           laps={s.laps}
           retired={s.retired}
+          qualifyingPart={s.qualifyingPart}
+          knockedOut={s.knockedOut}
           selectedNum={selected}
           onSelect={setSelected}
         />
       </div>
 
-      {/* Tyre Tracker — the rich board: gained/lost + gap/int + last + stint bars + fastest lap */}
-      <div className="mt-4">
-        <TyreTracker
-          order={s.order}
-          drivers={s.drivers}
-          positions={s.positions}
-          grids={s.grids}
-          intervals={s.intervals}
-          laps={s.laps}
-          retired={s.retired}
-          stints={s.tyreStints ?? new Map()}
-          totalLaps={s.totalLaps}
-          fastestLap={s.fastestLap}
-        />
-      </div>
+      {/* Tyre Tracker — the rich board: gained/lost + gap/int + last + stint bars + fastest lap.
+          Not needed in practice (no race strategy, no lap axis, nobody eliminating). */}
+      {s.mode !== "practice" && (
+        <div className="mt-4">
+          <TyreTracker
+            order={s.order}
+            drivers={s.drivers}
+            positions={s.positions}
+            grids={s.grids}
+            intervals={s.intervals}
+            laps={s.laps}
+            retired={s.retired}
+            stints={s.tyreStints ?? new Map()}
+            totalLaps={s.totalLaps}
+            fastestLap={s.fastestLap}
+          />
+        </div>
+      )}
     </section>
   );
 }

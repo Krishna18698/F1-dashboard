@@ -18,6 +18,7 @@ interface ApiRow {
   tyre_laps: number;
   in_pit: boolean;
   retired?: boolean;
+  knocked_out?: boolean;
   grid?: number;
   stints?: { compound: string; laps: number; age: number }[];
 }
@@ -50,6 +51,7 @@ interface ApiResponse {
   fastestLap?: ApiFastest | null;
   trackStatus?: string | null;
   telFrames?: { t: number; c: Record<string, [number, number, number, number]> }[];
+  qualifyingPart?: number | null;
 }
 
 const empty: LiveState = {
@@ -87,6 +89,7 @@ function toState(r: ApiResponse): LiveState {
   const tyreLaps = new Map<number, number>();
   const inPit = new Set<number>();
   const retired = new Set<number>();
+  const knockedOut = new Set<number>();
   const laps = new Map<number, LapSummary>();
   for (const [numStr, row] of Object.entries(r.rows ?? {})) {
     const num = +numStr;
@@ -94,6 +97,7 @@ function toState(r: ApiResponse): LiveState {
     grids.set(num, row.grid ?? 0);
     tyreLaps.set(num, row.tyre_laps ?? 0);
     if (row.retired) retired.add(num);
+    if (row.knocked_out) knockedOut.add(num);
     // Full history from the token feed; otherwise synthesize one stint from the current tyre.
     tyreStints.set(
       num,
@@ -138,9 +142,11 @@ function toState(r: ApiResponse): LiveState {
     currentLap: r.currentLap ?? 0,
     fastestLap: r.fastestLap ?? null,
     trackStatus: r.trackStatus ?? null,
+    qualifyingPart: r.qualifyingPart ?? null,
     tyreLaps,
     inPit,
     retired,
+    knockedOut,
     locations: new Map(),
     laps,
     trace: [],
