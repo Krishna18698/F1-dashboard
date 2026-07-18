@@ -76,6 +76,12 @@ export default function LiveSection() {
   }
 
   const leaderNum = s.order[0];
+  // Once eliminated in a prior quali segment (feed's KnockedOut flips true right as the
+  // NEXT segment starts), a driver drops off the boards entirely — Q2 only shows the 15
+  // who survived Q1, Q3 only the 10 who survived Q2. The map keeps everyone (a car's
+  // on-track position isn't about quali elimination).
+  const boardOrder =
+    s.mode === "quali" && s.knockedOut ? s.order.filter((n) => !s.knockedOut!.has(n)) : s.order;
   const sessionLabel = `${s.session?.location} · ${s.session?.session_name}`;
   const label = s.replay ? `Latest session · ${sessionLabel}` : `${sessionLabel} · on track now`;
 
@@ -114,7 +120,7 @@ export default function LiveSection() {
         </div>
         <TimingBoard
           mode={s.mode}
-          order={s.order}
+          order={boardOrder}
           drivers={s.drivers}
           positions={s.positions}
           intervals={s.intervals}
@@ -132,7 +138,7 @@ export default function LiveSection() {
       {s.mode !== "practice" && (
         <div className="mt-4">
           <TyreTracker
-            order={s.order}
+            order={boardOrder}
             drivers={s.drivers}
             positions={s.positions}
             grids={s.grids}
