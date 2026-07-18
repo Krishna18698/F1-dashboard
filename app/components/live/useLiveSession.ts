@@ -46,13 +46,14 @@ export interface LiveState {
   positions: Map<number, number>;
   intervals: Map<number, IntervalRow>;
   stints: Map<number, StintRow>;
-  tyreStints?: Map<number, { compound: string; laps: number; age: number; isNew: boolean }[]>; // full tyre history per driver
+  tyreStints?: Map<number, { compound: string; laps: number; age: number; isNew: boolean; segment: number | null }[]>; // full tyre history per driver
   totalLaps?: number; // race distance (strategy-bar axis)
   currentLap?: number;
   grids?: Map<number, number>; // starting grid position per driver (gained/lost indicator)
   fastestLap?: { driver_number: number; tla: string; time: string; lap: number } | null;
   trackStatus?: string | null; // TrackStatus code — tints the map (yellow/SC/red)
   qualifyingPart?: number | null; // 1=Q1, 2=Q2, 3=Q3 (quali sessions only)
+  qualifyingRemainingMs?: number | null; // live countdown in the current segment
   tyreLaps?: Map<number, number>; // laps on current tyre, per driver
   inPit?: Set<number>; // drivers currently in the pit lane
   retired?: Set<number>; // crashed / DNF drivers

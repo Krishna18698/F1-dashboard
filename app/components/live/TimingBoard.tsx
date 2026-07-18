@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { Driver, IntervalRow, LapSummary } from "@/lib/openf1";
 import { SessionMode } from "./useLiveSession";
 import { formatDelta, formatGap, formatInterval, formatLap, hex } from "@/lib/format";
@@ -13,6 +14,31 @@ function dangerZone(order: number[], knockedOut: Set<number> | undefined, part: 
   if (!cutoff) return new Set();
   const active = order.filter((n) => !knockedOut?.has(n));
   return active.length > cutoff ? new Set(active.slice(cutoff)) : new Set();
+}
+
+/** Ticks a "remaining ms as of the last poll" value down locally in real time, resyncing
+ *  whenever a fresh value arrives — same pattern as the hero countdown. */
+function useCountdown(remainingMs: number | null | undefined): string | null {
+  const [display, setDisplay] = useState<number | null>(null);
+  const base = useRef<{ ms: number; at: number } | null>(null);
+
+  // Only touch the ref here (refs are exempt from the "no setState during render/effect
+  // body" rule) — the interval below is the sole place that ever calls setDisplay, and it
+  // does so from a timer callback, not synchronously during the effect's own execution.
+  useEffect(() => {
+    base.current = remainingMs != null ? { ms: remainingMs, at: Date.now() } : null;
+  }, [remainingMs]);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      setDisplay(base.current ? Math.max(0, base.current.ms - (Date.now() - base.current.at)) : null);
+    }, 500);
+    return () => clearInterval(id);
+  }, []);
+
+  if (display == null) return null;
+  const totalSec = Math.floor(display / 1000);
+  return `${Math.floor(totalSec / 60)}:${String(totalSec % 60).padStart(2, "0")}`;
 }
 
 /**
@@ -29,6 +55,7 @@ export default function TimingBoard({
   laps,
   retired,
   qualifyingPart,
+  qualifyingRemainingMs,
   knockedOut,
   selectedNum,
   onSelect,
@@ -41,12 +68,14 @@ export default function TimingBoard({
   laps: Map<number, LapSummary>;
   retired?: Set<number>;
   qualifyingPart?: number | null;
+  qualifyingRemainingMs?: number | null;
   knockedOut?: Set<number>;
   selectedNum?: number | null;
   onSelect?: (num: number | null) => void;
 }) {
   const isRace = mode === "race";
   const isQuali = mode === "quali";
+  const countdown = useCountdown(qualifyingRemainingMs);
   const fastest = [...laps.values()].reduce<number | null>((m, l) => {
     if (l.best == null) return m;
     return m == null || l.best < m ? l.best : m;
@@ -65,6 +94,11 @@ export default function TimingBoard({
         {isQuali && qualifyingPart && (
           <span className="rounded-sm bg-ink px-1.5 py-0.5 text-[0.6rem] font-bold tracking-wider text-white">
             Q{qualifyingPart}
+          </span>
+        )}
+        {isQuali && countdown && (
+          <span className="tnum font-mono text-xs font-bold text-red" title="Time remaining in this segment">
+            {countdown}
           </span>
         )}
       </div>

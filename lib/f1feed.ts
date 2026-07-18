@@ -13,6 +13,8 @@ import { F1_LIVE } from "./f1liveConfig";
 
 const UA = { "User-Agent": "BestHTTP" };
 const TS_LEN = 12; // "HH:MM:SS.mmm"
+// Standard FIA qualifying segment durations.
+const QUALI_DURATION_MS: Record<number, number> = { 1: 18 * 60_000, 2: 15 * 60_000, 3: 12 * 60_000 };
 
 /* --------------------------------- parsing --------------------------------- */
 function tsToMs(ts: string): number {
@@ -31,6 +33,12 @@ function deepMerge(target: Record<string, unknown>, src: Record<string, unknown>
     const cur = target[k];
     if (v && typeof v === "object" && !Array.isArray(v) && cur && typeof cur === "object" && !Array.isArray(cur)) {
       deepMerge(cur as Record<string, unknown>, v as Record<string, unknown>);
+    } else if (v && typeof v === "object") {
+      // First time this key appears on target: clone rather than alias `v`, which is a
+      // piece of a cached, reused Delta object (mergeUpto runs on the same cached deltas
+      // on every request) — assigning by reference let later merges mutate that cached
+      // source object permanently, corrupting things like stint first-seen tracking.
+      target[k] = structuredClone(v);
     } else {
       target[k] = v;
     }
@@ -349,7 +357,7 @@ export interface F1LiveRow {
   retired: boolean;
   knocked_out: boolean;
   grid: number;
-  stints: { compound: string; laps: number; age: number; isNew: boolean }[];
+  stints: { compound: string; laps: number; age: number; isNew: boolean; segment: number | null }[];
 }
 export interface F1LiveDriver {
   driver_number: number;
@@ -372,6 +380,7 @@ export interface F1LiveState {
   trackStatus: string | null;
   telFrames: { t: number; c: Record<string, [number, number, number, number]> }[];
   qualifyingPart: number | null;
+  qualifyingRemainingMs: number | null;
   durationMs: number;
 }
 
@@ -384,6 +393,35 @@ function mergeUpto(deltas: Delta[], uptoMs: number): Record<string, Record<strin
     }
   }
   return state;
+}
+
+/** Which qualifying segment (1/2/3) was active at a given instant, from the full transition
+ *  history. Falls back to Q1 if the instant predates the first recorded transition. */
+function segmentAtTs(qp: { ts: number; part: number }[], ts: number): number | null {
+  if (!qp.length) return null;
+  let seg = qp[0].part;
+  for (const p of qp) {
+    if (p.ts <= ts) seg = p.part;
+    else break;
+  }
+  return seg;
+}
+
+/** For each driver+stint-index, the ts of the delta that FIRST introduced it — lets each
+ *  stint be attributed to the qualifying segment it began in. */
+function stintFirstSeenTimes(app: Delta[], uptoMs: number): Record<string, Record<string, number>> {
+  const seen: Record<string, Record<string, number>> = {};
+  for (const d of app) {
+    if (d.ts > uptoMs) break;
+    for (const [num, upd] of Object.entries(d.lines)) {
+      const stints = (upd as { Stints?: unknown })?.Stints;
+      if (!stints) continue;
+      const idxs = Array.isArray(stints) ? stints.map((_, i) => String(i)) : Object.keys(stints as object);
+      const store = (seen[num] ??= {});
+      for (const idx of idxs) if (store[idx] === undefined) store[idx] = d.ts;
+    }
+  }
+  return seen;
 }
 
 function mode(type: string): F1LiveState["mode"] {
@@ -416,6 +454,7 @@ export async function getF1LiveState(
   const s = await load(sessionPath, live);
   const timing = mergeUpto(s.timing, uptoMs);
   const appState = mergeUpto(s.app, uptoMs);
+  const stintFirstSeenAt = stintFirstSeenTimes(s.app, uptoMs);
 
   const drivers: F1LiveDriver[] = Object.values(s.drivers).map((d) => ({
     driver_number: +d.RacingNumber,
@@ -447,7 +486,9 @@ export async function getF1LiveState(
         const compound = String(st.Compound ?? "").toUpperCase() || "UNKNOWN";
         // "New" arrives as the STRING "true"/"false", not a real boolean.
         const isNew = String(st.New) === "true";
-        return { compound, laps: Math.max(0, total - start), age: total, isNew };
+        const firstSeen = stintFirstSeenAt[numStr]?.[String(k)];
+        const segment = firstSeen != null ? segmentAtTs(s.qp, firstSeen) : null;
+        return { compound, laps: Math.max(0, total - start), age: total, isNew, segment };
       })
       .filter((st) => st.compound !== "UNKNOWN" || st.laps > 0);
 
@@ -530,12 +571,19 @@ export async function getF1LiveState(
     trackStatus = t.status;
   }
 
-  // Which qualifying segment is live at this instant (1=Q1, 2=Q2, 3=Q3).
+  // Which qualifying segment is live at this instant (1=Q1, 2=Q2, 3=Q3), and when it began
+  // (for the live countdown — standard FIA durations: Q1 18min, Q2 15min, Q3 12min).
   let qualifyingPart: number | null = null;
+  let qualifyingPartStartTs: number | null = null;
   for (const p of s.qp) {
     if (p.ts > uptoMs) break;
     qualifyingPart = p.part;
+    qualifyingPartStartTs = p.ts;
   }
+  const qualifyingRemainingMs =
+    qualifyingPart && qualifyingPartStartTs != null
+      ? Math.max(0, QUALI_DURATION_MS[qualifyingPart] - (uptoMs - qualifyingPartStartTs))
+      : null;
 
   // Telemetry window [upto − 45s, upto]: decode only the CarData lines in the window
   // (lines are ~1.3s batches → ~35 tiny inflates) and keep each sample's OWN Utc
@@ -586,6 +634,7 @@ export async function getF1LiveState(
     trackStatus,
     telFrames,
     qualifyingPart,
+    qualifyingRemainingMs,
     durationMs: s.durationMs,
   };
 }

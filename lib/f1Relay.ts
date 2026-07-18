@@ -82,6 +82,13 @@ let trackStatus: { Status?: string; Message?: string } | null = null;
 let lapCount: { CurrentLap?: number; TotalLaps?: number } | null = null;
 // Which qualifying segment is live (1=Q1, 2=Q2, 3=Q3) — from SessionData's QualifyingPart.
 let qualifyingPart: number | null = null;
+// FULL history of when each segment began (epoch ms) — powers the live countdown AND lets
+// each tyre stint be attributed to the segment it started in (stintFirstSeenAt below).
+let qualifyingPartHistory: { startMs: number; part: number }[] = [];
+// driver num -> stint index -> epoch ms it was FIRST seen, so a stint can be matched to the
+// qualifyingPartHistory entry active at that moment (which Q1/Q2/Q3 it began in).
+let stintFirstSeenAt: Record<string, Record<string, number>> = {};
+const QUALI_DURATION_MS: Record<number, number> = { 1: 18 * 60_000, 2: 15 * 60_000, 3: 12 * 60_000 };
 // Rolling buffer of timestamped car telemetry (CarData.z channels: 0=RPM 2=Speed 3=Gear
 // 4=Throttle) — ~4Hz per-sample Utc, played back by the client on the same delayed clock
 // as the position dots so the card matches the car on screen and updates continuously.
@@ -110,6 +117,8 @@ function resetOnNewSession(info: NonNullable<typeof sessionInfo>) {
     trackStatus = null;
     lapCount = null;
     qualifyingPart = null;
+    qualifyingPartHistory = [];
+    stintFirstSeenAt = {};
     telBuffer = [];
     endedAt = null;
     sawLive = false;
@@ -195,7 +204,11 @@ function applyFeed(topic: string, data: unknown) {
             ? (v as unknown[]).map((s, i) => [String(i), s] as [string, unknown])
             : Object.entries(v as Dict);
           for (const [idx, s] of entries) {
-            if (s && typeof s === "object") deepMerge((store[idx] ??= {}), s as Dict);
+            if (s && typeof s === "object") {
+              deepMerge((store[idx] ??= {}), s as Dict);
+              const seen = (stintFirstSeenAt[n] ??= {});
+              if (seen[idx] === undefined) seen[idx] = Date.now();
+            }
           }
         } else if (v && typeof v === "object" && !Array.isArray(v)) {
           deepMerge((cur[k] ??= {}) as Dict, v as Dict);
@@ -237,9 +250,16 @@ function applyFeed(topic: string, data: unknown) {
     lapCount = { ...(lapCount ?? {}), ...(data as { CurrentLap?: number; TotalLaps?: number }) };
   } else if (topic === "SessionData") {
     // Series is index-keyed deltas: { "2": { Utc, QualifyingPart: 2 } }. Only Qualifying
-    // sessions carry this; keep the latest value seen (1=Q1, 2=Q2, 3=Q3).
-    const series = (data as { Series?: Record<string, { QualifyingPart?: number }> }).Series;
-    for (const v of Object.values(series ?? {})) if (v.QualifyingPart != null) qualifyingPart = v.QualifyingPart;
+    // sessions carry this; keep the latest value seen (1=Q1, 2=Q2, 3=Q3) and record when
+    // it started (for the live countdown + attributing stints to the segment they began in).
+    const series = (data as { Series?: Record<string, { Utc?: string; QualifyingPart?: number }> }).Series;
+    for (const v of Object.values(series ?? {})) {
+      if (v.QualifyingPart != null) {
+        qualifyingPart = v.QualifyingPart;
+        const startMs = v.Utc ? Date.parse(v.Utc) : Date.now();
+        qualifyingPartHistory.push({ startMs, part: v.QualifyingPart });
+      }
+    }
   } else if (topic === "Position.z") {
     pushFrames(data as string);
   } else if (topic === "CarData.z") {
@@ -338,7 +358,7 @@ export interface F1LiveRow {
   retired: boolean; // crashed / DNF (feed Retired or Stopped)
   knocked_out: boolean; // eliminated in a prior quali segment (feed KnockedOut)
   grid: number; // starting grid position (0 = unknown) — for gained/lost indicator
-  stints: { compound: string; laps: number; age: number; isNew: boolean }[]; // full tyre history (strategy bar)
+  stints: { compound: string; laps: number; age: number; isNew: boolean; segment: number | null }[]; // full tyre history (strategy bar)
 }
 export interface FastestLap {
   driver_number: number;
@@ -360,6 +380,7 @@ export interface F1LiveState {
   trackStatus: string | null; // TrackStatus code (1 clear, 2 yellow, 4 SC, 5 red, 6 VSC, 7 VSC ending)
   telFrames: TelFrame[]; // recent timestamped telemetry window (client plays back at the map's clock)
   qualifyingPart: number | null; // 1=Q1, 2=Q2, 3=Q3 (quali sessions only)
+  qualifyingRemainingMs: number | null; // live countdown in the current segment
 }
 export interface SessionResult {
   session_name: string;
@@ -376,26 +397,43 @@ function modeOf(type?: string): F1LiveState["mode"] {
   return "race";
 }
 
+/** Which qualifying segment (1/2/3) was active at a given epoch ms, from the history of
+ *  segment-start times. Falls back to Q1 if a stint predates the first recorded transition
+ *  (e.g. we connected mid-Q1, before any SessionData message had arrived). */
+function segmentAt(ms: number): number | null {
+  if (!qualifyingPartHistory.length) return null;
+  let seg = qualifyingPartHistory[0].part;
+  for (const h of qualifyingPartHistory) {
+    if (h.startMs <= ms) seg = h.part;
+    else break;
+  }
+  return seg;
+}
+
 /** Every stint a driver has run, in order (laps = race laps this stint, age = laps on tyre). */
-function allStints(numStr: string): { compound: string; laps: number; age: number; isNew: boolean }[] {
+function allStints(
+  numStr: string,
+): { compound: string; laps: number; age: number; isNew: boolean; segment: number | null }[] {
   const st = app[numStr]?.Stints as unknown;
-  let list: Dict[] = [];
-  if (Array.isArray(st)) list = st as Dict[];
+  let entries: [string, Dict][] = [];
+  if (Array.isArray(st)) entries = (st as Dict[]).map((s, i) => [String(i), s]);
   else if (st && typeof st === "object") {
-    list = Object.keys(st as Dict)
+    entries = Object.keys(st as Dict)
       .map(Number)
       .sort((a, b) => a - b)
-      .map((k) => (st as Dict)[k] as Dict);
+      .map((k) => [String(k), (st as Dict)[k] as Dict]);
   }
-  return list
-    .map((s) => {
+  return entries
+    .map(([idx, s]) => {
       const total = Number((s as { TotalLaps?: number }).TotalLaps ?? 0);
       const start = Number((s as { StartLaps?: number }).StartLaps ?? 0);
       const compound = String((s as { Compound?: string }).Compound ?? "").toUpperCase();
       // "New" arrives as the STRING "true"/"false", not a real boolean.
       const isNew = String((s as { New?: string | boolean }).New) === "true";
+      const firstSeen = stintFirstSeenAt[numStr]?.[idx];
+      const segment = firstSeen != null ? segmentAt(firstSeen) : null;
       // laps = race laps this stint (bar width); age = laps on that tyre (icon number).
-      return { compound: compound || "UNKNOWN", laps: Math.max(0, total - start), age: total, isNew };
+      return { compound: compound || "UNKNOWN", laps: Math.max(0, total - start), age: total, isNew, segment };
     })
     .filter((s) => s.compound !== "UNKNOWN" || s.laps > 0);
 }
@@ -551,6 +589,10 @@ export async function getRelayState(): Promise<F1LiveState | null> {
     trackStatus: trackStatus?.Status ?? null,
     telFrames: telBuffer.slice(-200), // ~45s at ~4Hz
     qualifyingPart,
+    qualifyingRemainingMs:
+      qualifyingPart && qualifyingPartHistory.length
+        ? Math.max(0, QUALI_DURATION_MS[qualifyingPart] - (Date.now() - qualifyingPartHistory.at(-1)!.startMs))
+        : null,
   };
 }
 

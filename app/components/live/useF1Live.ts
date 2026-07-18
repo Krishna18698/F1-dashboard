@@ -20,7 +20,7 @@ interface ApiRow {
   retired?: boolean;
   knocked_out?: boolean;
   grid?: number;
-  stints?: { compound: string; laps: number; age: number; isNew: boolean }[];
+  stints?: { compound: string; laps: number; age: number; isNew: boolean; segment: number | null }[];
 }
 interface ApiFastest {
   driver_number: number;
@@ -52,6 +52,7 @@ interface ApiResponse {
   trackStatus?: string | null;
   telFrames?: { t: number; c: Record<string, [number, number, number, number]> }[];
   qualifyingPart?: number | null;
+  qualifyingRemainingMs?: number | null;
 }
 
 const empty: LiveState = {
@@ -85,7 +86,7 @@ function toState(r: ApiResponse): LiveState {
   const grids = new Map<number, number>();
   const intervals = new Map<number, IntervalRow>();
   const stints = new Map<number, StintRow>();
-  const tyreStints = new Map<number, { compound: string; laps: number; age: number; isNew: boolean }[]>();
+  const tyreStints = new Map<number, { compound: string; laps: number; age: number; isNew: boolean; segment: number | null }[]>();
   const tyreLaps = new Map<number, number>();
   const inPit = new Set<number>();
   const retired = new Set<number>();
@@ -103,7 +104,7 @@ function toState(r: ApiResponse): LiveState {
       num,
       row.stints?.length
         ? row.stints
-        : [{ compound: row.compound, laps: row.tyre_laps ?? 0, age: row.tyre_laps ?? 0, isNew: false }],
+        : [{ compound: row.compound, laps: row.tyre_laps ?? 0, age: row.tyre_laps ?? 0, isNew: false, segment: null }],
     );
     if (row.in_pit) inPit.add(num);
     intervals.set(num, {
@@ -145,6 +146,7 @@ function toState(r: ApiResponse): LiveState {
     fastestLap: r.fastestLap ?? null,
     trackStatus: r.trackStatus ?? null,
     qualifyingPart: r.qualifyingPart ?? null,
+    qualifyingRemainingMs: r.qualifyingRemainingMs ?? null,
     tyreLaps,
     inPit,
     retired,

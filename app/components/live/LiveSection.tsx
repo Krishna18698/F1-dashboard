@@ -128,6 +128,7 @@ export default function LiveSection() {
           laps={s.laps}
           retired={s.retired}
           qualifyingPart={s.qualifyingPart}
+          qualifyingRemainingMs={s.qualifyingRemainingMs}
           knockedOut={s.knockedOut}
           selectedNum={selected}
           onSelect={setSelected}
@@ -161,6 +162,7 @@ export default function LiveSection() {
             drivers={s.drivers}
             positions={s.positions}
             stints={s.tyreStints ?? new Map()}
+            qualifyingPart={s.qualifyingPart}
           />
         </div>
       )}
