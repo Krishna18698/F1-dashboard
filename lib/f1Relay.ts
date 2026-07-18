@@ -338,7 +338,7 @@ export interface F1LiveRow {
   retired: boolean; // crashed / DNF (feed Retired or Stopped)
   knocked_out: boolean; // eliminated in a prior quali segment (feed KnockedOut)
   grid: number; // starting grid position (0 = unknown) — for gained/lost indicator
-  stints: { compound: string; laps: number; age: number }[]; // full tyre history (strategy bar)
+  stints: { compound: string; laps: number; age: number; isNew: boolean }[]; // full tyre history (strategy bar)
 }
 export interface FastestLap {
   driver_number: number;
@@ -377,7 +377,7 @@ function modeOf(type?: string): F1LiveState["mode"] {
 }
 
 /** Every stint a driver has run, in order (laps = race laps this stint, age = laps on tyre). */
-function allStints(numStr: string): { compound: string; laps: number; age: number }[] {
+function allStints(numStr: string): { compound: string; laps: number; age: number; isNew: boolean }[] {
   const st = app[numStr]?.Stints as unknown;
   let list: Dict[] = [];
   if (Array.isArray(st)) list = st as Dict[];
@@ -392,8 +392,10 @@ function allStints(numStr: string): { compound: string; laps: number; age: numbe
       const total = Number((s as { TotalLaps?: number }).TotalLaps ?? 0);
       const start = Number((s as { StartLaps?: number }).StartLaps ?? 0);
       const compound = String((s as { Compound?: string }).Compound ?? "").toUpperCase();
+      // "New" arrives as the STRING "true"/"false", not a real boolean.
+      const isNew = String((s as { New?: string | boolean }).New) === "true";
       // laps = race laps this stint (bar width); age = laps on that tyre (icon number).
-      return { compound: compound || "UNKNOWN", laps: Math.max(0, total - start), age: total };
+      return { compound: compound || "UNKNOWN", laps: Math.max(0, total - start), age: total, isNew };
     })
     .filter((s) => s.compound !== "UNKNOWN" || s.laps > 0);
 }

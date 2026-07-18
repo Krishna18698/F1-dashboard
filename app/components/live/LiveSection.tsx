@@ -5,6 +5,7 @@ import { useF1Live } from "./useF1Live";
 import TrackMap from "./TrackMap";
 import TimingBoard from "./TimingBoard";
 import TyreTracker from "./TyreTracker";
+import TyreAllocation from "./TyreAllocation";
 import TelemetryCard from "./TelemetryCard";
 
 function Header({
@@ -148,6 +149,18 @@ export default function LiveSection() {
             stints={s.tyreStints ?? new Map()}
             totalLaps={s.totalLaps}
             fastestLap={s.fastestLap}
+          />
+        </div>
+      )}
+
+      {/* Tyre Allocation — qualifying only: sets used per compound, split new vs scrubbed. */}
+      {s.mode === "quali" && (
+        <div className="mt-4">
+          <TyreAllocation
+            order={boardOrder}
+            drivers={s.drivers}
+            positions={s.positions}
+            stints={s.tyreStints ?? new Map()}
           />
         </div>
       )}

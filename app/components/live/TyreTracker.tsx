@@ -107,7 +107,6 @@ export default function TyreTracker({
             <span className="hidden w-14 shrink-0 text-right sm:block">Gap</span>
             <span className="hidden w-12 shrink-0 text-right sm:block">Int</span>
             <span className="hidden w-14 shrink-0 text-right sm:block">Last</span>
-            <span className="hidden w-9 shrink-0 text-center sm:block">Sets</span>
             <div className="relative h-3 flex-1">
               {ticks.map((t) => (
                 <span
@@ -157,12 +156,6 @@ export default function TyreTracker({
                     }`}
                   >
                     {formatLap(laps.get(num)?.last) || "—"}
-                  </span>
-                  <span
-                    className="tnum hidden w-9 shrink-0 text-center font-mono text-xs text-white/60 sm:block"
-                    title={`${list.length} tyre set${list.length === 1 ? "" : "s"} used`}
-                  >
-                    {list.length || "—"}
                   </span>
                   <div className="relative h-5 flex-1">
                     <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 overflow-hidden rounded-full bg-white/6">

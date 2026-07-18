@@ -349,7 +349,7 @@ export interface F1LiveRow {
   retired: boolean;
   knocked_out: boolean;
   grid: number;
-  stints: { compound: string; laps: number; age: number }[];
+  stints: { compound: string; laps: number; age: number; isNew: boolean }[];
 }
 export interface F1LiveDriver {
   driver_number: number;
@@ -435,7 +435,7 @@ export async function getF1LiveState(
     const iv = t.IntervalToPositionAhead as { Value?: string } | undefined;
     const stintsRaw = (appState[numStr]?.Stints ?? {}) as Record<
       string,
-      { Compound?: string; TotalLaps?: number; StartLaps?: number }
+      { Compound?: string; TotalLaps?: number; StartLaps?: number; New?: string | boolean }
     >;
     const keys = Object.keys(stintsRaw).map(Number).sort((a, b) => a - b);
     const cur = keys.length ? stintsRaw[keys[keys.length - 1]] : undefined;
@@ -445,7 +445,9 @@ export async function getF1LiveState(
         const total = Number(st.TotalLaps ?? 0);
         const start = Number(st.StartLaps ?? 0);
         const compound = String(st.Compound ?? "").toUpperCase() || "UNKNOWN";
-        return { compound, laps: Math.max(0, total - start), age: total };
+        // "New" arrives as the STRING "true"/"false", not a real boolean.
+        const isNew = String(st.New) === "true";
+        return { compound, laps: Math.max(0, total - start), age: total, isNew };
       })
       .filter((st) => st.compound !== "UNKNOWN" || st.laps > 0);
 

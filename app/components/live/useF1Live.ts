@@ -20,7 +20,7 @@ interface ApiRow {
   retired?: boolean;
   knocked_out?: boolean;
   grid?: number;
-  stints?: { compound: string; laps: number; age: number }[];
+  stints?: { compound: string; laps: number; age: number; isNew: boolean }[];
 }
 interface ApiFastest {
   driver_number: number;
@@ -85,7 +85,7 @@ function toState(r: ApiResponse): LiveState {
   const grids = new Map<number, number>();
   const intervals = new Map<number, IntervalRow>();
   const stints = new Map<number, StintRow>();
-  const tyreStints = new Map<number, { compound: string; laps: number; age: number }[]>();
+  const tyreStints = new Map<number, { compound: string; laps: number; age: number; isNew: boolean }[]>();
   const tyreLaps = new Map<number, number>();
   const inPit = new Set<number>();
   const retired = new Set<number>();
@@ -101,7 +101,9 @@ function toState(r: ApiResponse): LiveState {
     // Full history from the token feed; otherwise synthesize one stint from the current tyre.
     tyreStints.set(
       num,
-      row.stints?.length ? row.stints : [{ compound: row.compound, laps: row.tyre_laps ?? 0, age: row.tyre_laps ?? 0 }],
+      row.stints?.length
+        ? row.stints
+        : [{ compound: row.compound, laps: row.tyre_laps ?? 0, age: row.tyre_laps ?? 0, isNew: false }],
     );
     if (row.in_pit) inPit.add(num);
     intervals.set(num, {
