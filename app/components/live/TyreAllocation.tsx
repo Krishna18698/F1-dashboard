@@ -3,43 +3,33 @@
 import { Driver } from "@/lib/openf1";
 import { hex } from "@/lib/format";
 
-const COLOR: Record<string, string> = {
-  SOFT: "#e10600",
-  MEDIUM: "#f5c518",
-  HARD: "#ffffff",
-  INTERMEDIATE: "#3fa34d",
-  WET: "#1e6bd6",
-  UNKNOWN: "#5a5a62",
-};
-const LETTER: Record<string, string> = { SOFT: "S", MEDIUM: "M", HARD: "H", INTERMEDIATE: "I", WET: "W" };
-// Compound display order — the order teams typically move through in qualifying.
-const ORDER = ["SOFT", "MEDIUM", "HARD", "INTERMEDIATE", "WET"];
+const COLOR: Record<string, string> = { SOFT: "#e10600", MEDIUM: "#f5c518", HARD: "#ffffff" };
+const LETTER: Record<string, string> = { SOFT: "S", MEDIUM: "M", HARD: "H" };
+const ORDER = ["SOFT", "MEDIUM", "HARD"];
 function color(c: string) {
-  return COLOR[c] ?? COLOR.UNKNOWN;
+  return COLOR[c] ?? "#5a5a62";
 }
 
-type Stint = { compound: string; laps: number; age: number; isNew: boolean; segment: number | null };
-const PART_LABEL: Record<number, string> = { 1: "Q1", 2: "Q2", 3: "Q3" };
+type Left = { compound: string; left: number };
 
 /**
- * Qualifying-only: how many tyre sets each driver has used IN THE CURRENT SEGMENT, per
- * compound — split into how many were fresh ("New") vs already-scrubbed sets, from the
- * feed's per-stint `New` flag. Scoped to the live segment (not cumulative across Q1+Q2+Q3)
- * so it reads the way the FIA allocation rule does — e.g. Q3 runners usually show ~2 new.
- * Distinct from the Tyre Tracker's race-strategy bar, which is about lap distance.
+ * Qualifying-only: how many fresh sets of each dry compound a driver has LEFT from the
+ * weekend's tyre allocation — real usage (the feed's per-stint `New` flag, summed across
+ * FP1+FP2+FP3+this session) subtracted from the standard 13-set allocation (8S/3M/2H).
+ * The allocation split itself is an assumption (the feed has no topic for the FIA's actual
+ * per-round nomination); the usage subtracted from it is real. Distinct from the Tyre
+ * Tracker's race-strategy bar, which is about lap distance within one session.
  */
 export default function TyreAllocation({
   order,
   drivers,
   positions,
-  stints,
-  qualifyingPart,
+  weekendTyresLeft,
 }: {
   order: number[];
   drivers: Map<number, Driver>;
   positions: Map<number, number>;
-  stints: Map<number, Stint[]>;
-  qualifyingPart?: number | null;
+  weekendTyresLeft: Map<number, Left[]>;
 }) {
   return (
     <div className="self-start">
@@ -47,27 +37,20 @@ export default function TyreAllocation({
         <span className="eyebrow block text-[0.6rem] text-muted">
           Tyre <span className="text-red">Allocation</span>
         </span>
-        {qualifyingPart && (
-          <span className="rounded-sm bg-white/10 px-1.5 py-0.5 text-[0.6rem] font-bold tracking-wider text-ink-soft">
-            {PART_LABEL[qualifyingPart]} only
-          </span>
-        )}
+        <span
+          className="rounded-sm bg-white/10 px-1.5 py-0.5 text-[0.6rem] font-bold tracking-wider text-ink-soft"
+          title="New sets left vs. the standard 13-set weekend allocation (8 Soft / 3 Medium / 2 Hard) — real usage from FP1–FP3 + Qualifying, subtracted from the assumed allocation."
+        >
+          WEEKEND LEFT
+        </span>
       </div>
       <div className="carbon-bg overflow-x-auto rounded-lg p-3 ring-1 ring-white/10 sm:p-4">
         <div className="space-y-1.5 sm:min-w-md">
           {order.map((num, i) => {
             const d = drivers.get(num);
             const pos = positions.get(num) ?? i + 1;
-            const list = (stints.get(num) ?? []).filter((st) => st.segment === qualifyingPart);
-
-            const byCompound = new Map<string, { count: number; new: number }>();
-            for (const st of list) {
-              const g = byCompound.get(st.compound) ?? { count: 0, new: 0 };
-              g.count += 1;
-              if (st.isNew) g.new += 1;
-              byCompound.set(st.compound, g);
-            }
-            const compounds = ORDER.filter((c) => byCompound.has(c));
+            const byCompound = new Map<string, number>();
+            for (const l of weekendTyresLeft.get(num) ?? []) byCompound.set(l.compound, l.left);
 
             return (
               <div key={num} className="flex items-center gap-2.5">
@@ -77,20 +60,19 @@ export default function TyreAllocation({
                   <span className="truncate text-sm font-semibold text-white">{d?.name_acronym ?? num}</span>
                 </div>
                 <div className="flex flex-1 flex-wrap items-center gap-1.5">
-                  {compounds.length === 0 && <span className="text-xs text-white/30">—</span>}
-                  {compounds.map((c) => {
-                    const g = byCompound.get(c)!;
+                  {ORDER.map((c) => {
+                    const left = byCompound.get(c) ?? 0;
                     const dark = c === "HARD" || c === "MEDIUM";
+                    const empty = left === 0;
                     return (
                       <span
                         key={c}
-                        className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.65rem] font-semibold ring-1"
+                        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.65rem] font-semibold ring-1 ${empty ? "opacity-35" : ""}`}
                         style={{ backgroundColor: `${color(c)}22`, borderColor: color(c), color: dark ? "#e5e5e8" : "#fff" }}
-                        title={`${c}: ${g.count} set${g.count === 1 ? "" : "s"} used${g.new ? `, ${g.new} new` : ""}`}
+                        title={`${c}: ${left} new set${left === 1 ? "" : "s"} left this weekend`}
                       >
                         <span className="h-2 w-2 shrink-0 rounded-full ring-1 ring-black/30" style={{ backgroundColor: color(c) }} />
-                        {LETTER[c]} ×{g.count}
-                        {g.new > 0 && <span className="text-white/50">· {g.new} new</span>}
+                        {LETTER[c]} {left}
                       </span>
                     );
                   })}

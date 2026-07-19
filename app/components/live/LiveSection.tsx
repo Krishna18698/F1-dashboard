@@ -136,8 +136,9 @@ export default function LiveSection() {
       </div>
 
       {/* Tyre Tracker — the rich board: gained/lost + gap/int + last + stint bars + fastest lap.
-          Not needed in practice (no race strategy, no lap axis, nobody eliminating). */}
-      {s.mode !== "practice" && (
+          Race only — practice has no strategy/lap axis, and qualifying gets its own
+          Tyre Allocation card instead (segment-scoped, not the race-style stint bar). */}
+      {s.mode === "race" && (
         <div className="mt-4">
           <TyreTracker
             order={boardOrder}
@@ -154,15 +155,14 @@ export default function LiveSection() {
         </div>
       )}
 
-      {/* Tyre Allocation — qualifying only: sets used per compound, split new vs scrubbed. */}
+      {/* Tyre Allocation — qualifying only: fresh sets left per compound, vs. the weekend allocation. */}
       {s.mode === "quali" && (
         <div className="mt-4">
           <TyreAllocation
             order={boardOrder}
             drivers={s.drivers}
             positions={s.positions}
-            stints={s.tyreStints ?? new Map()}
-            qualifyingPart={s.qualifyingPart}
+            weekendTyresLeft={s.weekendTyresLeft ?? new Map()}
           />
         </div>
       )}

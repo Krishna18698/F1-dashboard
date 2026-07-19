@@ -47,6 +47,7 @@ export interface LiveState {
   intervals: Map<number, IntervalRow>;
   stints: Map<number, StintRow>;
   tyreStints?: Map<number, { compound: string; laps: number; age: number; isNew: boolean; segment: number | null }[]>; // full tyre history per driver
+  weekendTyresLeft?: Map<number, { compound: string; left: number }[]>; // sets remaining vs. the assumed weekend allocation, per compound
   totalLaps?: number; // race distance (strategy-bar axis)
   currentLap?: number;
   grids?: Map<number, number>; // starting grid position per driver (gained/lost indicator)

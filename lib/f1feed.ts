@@ -100,7 +100,7 @@ interface FlatSession extends ResolvedSession {
   endMs: number;
 }
 
-async function flatSessions(): Promise<FlatSession[]> {
+export async function flatSessions(): Promise<FlatSession[]> {
   const res = await fetch(`${F1_LIVE.base}/${new Date().getUTCFullYear()}/Index.json`, {
     headers: UA,
     cache: "no-store",
@@ -358,6 +358,7 @@ export interface F1LiveRow {
   knocked_out: boolean;
   grid: number;
   stints: { compound: string; laps: number; age: number; isNew: boolean; segment: number | null }[];
+  weekendTyresLeft: { compound: string; left: number }[];
 }
 export interface F1LiveDriver {
   driver_number: number;
@@ -445,6 +446,127 @@ function clampStintsToLaps<T extends { laps: number }>(stints: T[], totalLaps: n
   return out;
 }
 
+// Standard dry-tyre weekend allocation (13 sets) for a normal (non-alternative-tyre) event —
+// the live feed has no topic for the FIA's actual per-round nomination (a separate published
+// document, and the exact split can vary slightly by round), so this is the common default.
+export const WEEKEND_ALLOCATION: Record<string, number> = { SOFT: 8, MEDIUM: 3, HARD: 2 };
+export const DRY_COMPOUNDS = ["SOFT", "MEDIUM", "HARD"] as const;
+
+/** How many sets of each compound have been freshly mounted (feed's `New` flag) so far,
+ *  per driver — from a single session's merged TimingAppData state. */
+function countNewSetsByDriver(
+  appState: Record<string, Record<string, unknown>>,
+): Record<string, Record<string, number>> {
+  const out: Record<string, Record<string, number>> = {};
+  for (const [numStr, upd] of Object.entries(appState)) {
+    const stints = (upd.Stints ?? {}) as Record<string, { Compound?: string; New?: string | boolean }>;
+    for (const st of Object.values(stints)) {
+      if (String(st.New) !== "true") continue;
+      const compound = String(st.Compound ?? "").toUpperCase();
+      if (!DRY_COMPOUNDS.includes(compound as (typeof DRY_COMPOUNDS)[number])) continue;
+      const bucket = (out[numStr] ??= {});
+      bucket[compound] = (bucket[compound] ?? 0) + 1;
+    }
+  }
+  return out;
+}
+
+function addCounts(target: Record<string, Record<string, number>>, src: Record<string, Record<string, number>>) {
+  for (const [num, byCompound] of Object.entries(src)) {
+    const t = (target[num] ??= {});
+    for (const [c, n] of Object.entries(byCompound)) t[c] = (t[c] ?? 0) + n;
+  }
+}
+
+// Completed sessions are immutable — cache their new-set tally forever once computed, so
+// repeated polls of a later session (e.g. Qualifying) don't re-fetch+re-scan FP1/FP2/FP3
+// on every request.
+const priorSessionNewSetCache = new Map<string, Record<string, Record<string, number>>>();
+
+export async function newSetCountsForCompletedSession(sessionPath: string): Promise<Record<string, Record<string, number>>> {
+  const cached = priorSessionNewSetCache.get(sessionPath);
+  if (cached) return cached;
+  const s = await load(sessionPath, false);
+  const counts = countNewSetsByDriver(mergeUpto(s.app, Number.MAX_SAFE_INTEGER));
+  priorSessionNewSetCache.set(sessionPath, counts);
+  return counts;
+}
+
+/** Practice/Qualifying sessions of the same event (same meeting folder) that happened at or
+ *  before this one — the sessions whose tyre usage counts against the same weekend allocation. */
+async function weekendPriorSessions(sessionPath: string): Promise<string[]> {
+  const prefix = sessionPath.split("/").slice(0, 2).join("/") + "/";
+  const all = await flatSessions();
+  const mine = all.find((s) => s.path === sessionPath);
+  if (!mine) return [];
+  return all
+    .filter(
+      (s) =>
+        s.path !== sessionPath &&
+        s.path.startsWith(prefix) &&
+        s.startMs <= mine.startMs &&
+        /practice|qualifying/i.test(s.type),
+    )
+    .map((s) => s.path);
+}
+
+/** Sets remaining (of the weekend's assumed dry-tyre allocation) per driver, per compound —
+ *  weekend total usage (prior sessions, cached, + this session up to `uptoMs`) subtracted
+ *  from WEEKEND_ALLOCATION. Always returns all three dry compounds, even at 0 used. */
+async function weekendTyresLeft(
+  sessionPath: string,
+  currentAppState: Record<string, Record<string, unknown>>,
+): Promise<Record<string, { compound: string; left: number }[]>> {
+  const total: Record<string, Record<string, number>> = {};
+  const priors = await weekendPriorSessions(sessionPath).catch(() => []);
+  for (const p of priors) {
+    try {
+      addCounts(total, await newSetCountsForCompletedSession(p));
+    } catch {}
+  }
+  addCounts(total, countNewSetsByDriver(currentAppState));
+
+  const out: Record<string, { compound: string; left: number }[]> = {};
+  for (const numStr of Object.keys(currentAppState).concat(Object.keys(total))) {
+    if (out[numStr]) continue;
+    const used = total[numStr] ?? {};
+    out[numStr] = DRY_COMPOUNDS.map((c) => ({ compound: c, left: Math.max(0, WEEKEND_ALLOCATION[c] - (used[c] ?? 0)) }));
+  }
+  return out;
+}
+
+/**
+ * Same weekend-allocation math as `weekendTyresLeft`, for callers that don't have a static
+ * session path for the CURRENT session (the token relay runs the live one over its own
+ * WebSocket, not a static file) — matched by meeting name instead, against past FP/Quali
+ * sessions of the same event that DO have a published static feed. `liveSessionUsed` is the
+ * caller's own tally of fresh sets mounted so far in its live session.
+ */
+export async function weekendTyresLeftForMeeting(
+  meetingName: string,
+  beforeStartMs: number,
+  liveSessionUsed: Record<string, Record<string, number>>,
+): Promise<Record<string, { compound: string; left: number }[]>> {
+  const total: Record<string, Record<string, number>> = {};
+  const all = await flatSessions().catch(() => []);
+  const priors = all.filter(
+    (s) => s.name.startsWith(`${meetingName} · `) && s.startMs <= beforeStartMs && /practice|qualifying/i.test(s.type),
+  );
+  for (const p of priors) {
+    try {
+      addCounts(total, await newSetCountsForCompletedSession(p.path));
+    } catch {}
+  }
+  addCounts(total, liveSessionUsed);
+
+  const out: Record<string, { compound: string; left: number }[]> = {};
+  for (const numStr of Object.keys(total)) {
+    const used = total[numStr];
+    out[numStr] = DRY_COMPOUNDS.map((c) => ({ compound: c, left: Math.max(0, WEEKEND_ALLOCATION[c] - (used[c] ?? 0)) }));
+  }
+  return out;
+}
+
 export async function getF1LiveState(
   sessionPath: string,
   sessionType: string,
@@ -455,6 +577,9 @@ export async function getF1LiveState(
   const timing = mergeUpto(s.timing, uptoMs);
   const appState = mergeUpto(s.app, uptoMs);
   const stintFirstSeenAt = stintFirstSeenTimes(s.app, uptoMs);
+  const weekendMap = await weekendTyresLeft(sessionPath, appState).catch(
+    () => ({}) as Record<string, { compound: string; left: number }[]>,
+  );
 
   const drivers: F1LiveDriver[] = Object.values(s.drivers).map((d) => ({
     driver_number: +d.RacingNumber,
@@ -514,6 +639,7 @@ export async function getF1LiveState(
       knocked_out: Boolean(t.KnockedOut),
       grid: Number((appState[numStr]?.GridPos as string | number) ?? 0),
       stints,
+      weekendTyresLeft: weekendMap[numStr] ?? DRY_COMPOUNDS.map((c) => ({ compound: c, left: WEEKEND_ALLOCATION[c] })),
     };
     if (best != null && best < fastestMs && bt?.Value) {
       fastestMs = best;

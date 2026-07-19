@@ -21,6 +21,7 @@ interface ApiRow {
   knocked_out?: boolean;
   grid?: number;
   stints?: { compound: string; laps: number; age: number; isNew: boolean; segment: number | null }[];
+  weekendTyresLeft?: { compound: string; left: number }[];
 }
 interface ApiFastest {
   driver_number: number;
@@ -87,6 +88,7 @@ function toState(r: ApiResponse): LiveState {
   const intervals = new Map<number, IntervalRow>();
   const stints = new Map<number, StintRow>();
   const tyreStints = new Map<number, { compound: string; laps: number; age: number; isNew: boolean; segment: number | null }[]>();
+  const weekendTyresLeft = new Map<number, { compound: string; left: number }[]>();
   const tyreLaps = new Map<number, number>();
   const inPit = new Set<number>();
   const retired = new Set<number>();
@@ -106,6 +108,7 @@ function toState(r: ApiResponse): LiveState {
         ? row.stints
         : [{ compound: row.compound, laps: row.tyre_laps ?? 0, age: row.tyre_laps ?? 0, isNew: false, segment: null }],
     );
+    if (row.weekendTyresLeft) weekendTyresLeft.set(num, row.weekendTyresLeft);
     if (row.in_pit) inPit.add(num);
     intervals.set(num, {
       date: "",
@@ -141,6 +144,7 @@ function toState(r: ApiResponse): LiveState {
     intervals,
     stints,
     tyreStints,
+    weekendTyresLeft,
     totalLaps: r.totalLaps ?? 0,
     currentLap: r.currentLap ?? 0,
     fastestLap: r.fastestLap ?? null,

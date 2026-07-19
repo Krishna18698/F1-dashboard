@@ -14,7 +14,7 @@ import "server-only";
 import * as signalR from "@microsoft/signalr";
 import WsImpl from "ws";
 import zlib from "zlib";
-import { parseLapTime } from "./f1feed";
+import { DRY_COMPOUNDS, parseLapTime, weekendTyresLeftForMeeting, WEEKEND_ALLOCATION } from "./f1feed";
 
 const g = globalThis as unknown as { WebSocket?: unknown };
 if (typeof g.WebSocket === "undefined") g.WebSocket = WsImpl;
@@ -359,6 +359,7 @@ export interface F1LiveRow {
   knocked_out: boolean; // eliminated in a prior quali segment (feed KnockedOut)
   grid: number; // starting grid position (0 = unknown) — for gained/lost indicator
   stints: { compound: string; laps: number; age: number; isNew: boolean; segment: number | null }[]; // full tyre history (strategy bar)
+  weekendTyresLeft: { compound: string; left: number }[]; // fresh sets left vs. the weekend allocation
 }
 export interface FastestLap {
   driver_number: number;
@@ -436,6 +437,24 @@ function allStints(
       return { compound: compound || "UNKNOWN", laps: Math.max(0, total - start), age: total, isNew, segment };
     })
     .filter((s) => s.compound !== "UNKNOWN" || s.laps > 0);
+}
+
+/** How many fresh sets of each dry compound have been mounted so far THIS live session,
+ *  per driver — the live-session half of the weekend allocation tally (the other half,
+ *  FP1–3, comes from the free static feed via weekendTyresLeftForMeeting). */
+function countNewSetsLive(): Record<string, Record<string, number>> {
+  const out: Record<string, Record<string, number>> = {};
+  for (const [numStr, upd] of Object.entries(app)) {
+    const stints = (upd.Stints ?? {}) as Record<string, { Compound?: string; New?: string | boolean }>;
+    for (const st of Object.values(stints)) {
+      if (String(st.New) !== "true") continue;
+      const compound = String(st.Compound ?? "").toUpperCase();
+      if (!DRY_COMPOUNDS.includes(compound as (typeof DRY_COMPOUNDS)[number])) continue;
+      const bucket = (out[numStr] ??= {});
+      bucket[compound] = (bucket[compound] ?? 0) + 1;
+    }
+  }
+  return out;
 }
 
 /**
@@ -549,6 +568,7 @@ function classify() {
       knocked_out: Boolean(t.KnockedOut),
       grid: Number((app[n] as { GridPos?: string | number })?.GridPos ?? 0),
       stints: clampStintsToLaps(allStints(n), numberOfLaps),
+      weekendTyresLeft: DRY_COMPOUNDS.map((c) => ({ compound: c, left: WEEKEND_ALLOCATION[c] })), // filled in below
     };
     if (best != null && best < fastestMs && t.BestLapTime?.Value) {
       fastestMs = best;
@@ -574,6 +594,17 @@ export async function getRelayState(): Promise<F1LiveState | null> {
     team_name: d.TeamName ?? "",
     full_name: d.FullName ?? "",
   }));
+
+  // Weekend tyre allocation — qualifying only (matches the card's own visibility). Needs the
+  // current session's own start time to know which past FP1–3 sessions of the same meeting
+  // count against the same allocation.
+  if (mode === "quali" && sessionInfo.Meeting?.Name && sessionInfo.StartDate) {
+    const beforeStartMs = Date.parse(sessionInfo.StartDate + "Z") - offsetMs(sessionInfo.GmtOffset);
+    try {
+      const weekendMap = await weekendTyresLeftForMeeting(sessionInfo.Meeting.Name, beforeStartMs, countNewSetsLive());
+      for (const n of nums) if (weekendMap[n]) rows[+n].weekendTyresLeft = weekendMap[n];
+    } catch {}
+  }
 
   return {
     mode,
