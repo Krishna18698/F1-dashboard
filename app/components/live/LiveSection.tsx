@@ -118,6 +118,20 @@ export default function LiveSection() {
               onClose={() => setSelected(null)}
             />
           )}
+          {/* Race mode: the Driver Live Tracker column is usually taller than the map, so
+              the Tyre Allocation card fills that leftover space here instead of sitting in
+              its own full-width row further down. */}
+          {s.mode === "race" && (
+            <div className="mt-4">
+              <TyreAllocation
+                order={s.order}
+                drivers={s.drivers}
+                positions={s.positions}
+                weekendTyresLeft={s.weekendTyresLeft ?? new Map()}
+                columns={1}
+              />
+            </div>
+          )}
         </div>
         <TimingBoard
           mode={s.mode}
@@ -155,10 +169,11 @@ export default function LiveSection() {
         </div>
       )}
 
-      {/* Tyre Allocation — quali and race: fresh sets left per compound, vs. the weekend
-          allocation. Shows every driver, including those already knocked out in quali —
-          unlike the board above, this isn't about who's still fighting for a spot. */}
-      {(s.mode === "quali" || s.mode === "race") && (
+      {/* Tyre Allocation — qualifying: fresh sets left per compound, vs. the weekend
+          allocation. Shows every driver, including those already knocked out —
+          unlike the board above, this isn't about who's still fighting for a spot.
+          (Race mode renders this in the left column above instead — see there.) */}
+      {s.mode === "quali" && (
         <div className="mt-4">
           <TyreAllocation
             order={s.order}

@@ -26,14 +26,17 @@ export default function TyreAllocation({
   drivers,
   positions,
   weekendTyresLeft,
+  columns: columnCount = 2,
 }: {
   order: number[];
   drivers: Map<number, Driver>;
   positions: Map<number, number>;
   weekendTyresLeft: Map<number, Left[]>;
+  /** 2 for the full-width qualifying slot, 1 when squeezed into the narrower race-mode column. */
+  columns?: 1 | 2;
 }) {
-  const half = Math.ceil(order.length / 2);
-  const columns = [order.slice(0, half), order.slice(half)];
+  const half = Math.ceil(order.length / columnCount);
+  const columns = columnCount === 2 ? [order.slice(0, half), order.slice(half)] : [order];
 
   return (
     <div className="self-start">
@@ -49,7 +52,7 @@ export default function TyreAllocation({
         </span>
       </div>
       <div className="carbon-bg overflow-x-auto rounded-lg p-3 ring-1 ring-white/10 sm:p-4">
-        <div className="grid grid-cols-1 gap-x-6 gap-y-1.5 lg:grid-cols-2">
+        <div className={`grid grid-cols-1 gap-x-6 gap-y-1.5 ${columnCount === 2 ? "lg:grid-cols-2" : ""}`}>
           {columns.map((col, colIdx) => (
             <div key={colIdx} className="space-y-1.5">
               {col.map((num) => {
