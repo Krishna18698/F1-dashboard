@@ -128,7 +128,7 @@ export default function LiveSection() {
                 drivers={s.drivers}
                 positions={s.positions}
                 weekendTyresLeft={s.weekendTyresLeft ?? new Map()}
-                columns={1}
+                columns={2}
               />
             </div>
           )}

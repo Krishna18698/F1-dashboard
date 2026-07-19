@@ -51,10 +51,10 @@ export default function TyreAllocation({
           WEEKEND LEFT
         </span>
       </div>
-      <div className="carbon-bg overflow-x-auto rounded-lg p-3 ring-1 ring-white/10 sm:p-4">
-        <div className={`grid grid-cols-1 gap-x-6 gap-y-1.5 ${columnCount === 2 ? "lg:grid-cols-2" : ""}`}>
+      <div className="carbon-bg overflow-x-auto rounded-lg p-2.5 ring-1 ring-white/10 sm:p-3">
+        <div className={`grid grid-cols-1 gap-x-3 gap-y-1 ${columnCount === 2 ? "lg:grid-cols-2" : ""}`}>
           {columns.map((col, colIdx) => (
-            <div key={colIdx} className="space-y-1.5">
+            <div key={colIdx} className="space-y-1">
               {col.map((num) => {
                 const d = drivers.get(num);
                 const pos = positions.get(num) ?? order.indexOf(num) + 1;
@@ -62,13 +62,13 @@ export default function TyreAllocation({
                 for (const l of weekendTyresLeft.get(num) ?? []) byCompound.set(l.compound, l.left);
 
                 return (
-                  <div key={num} className="flex items-center gap-2.5">
+                  <div key={num} className="flex items-center gap-1.5">
                     <span className="tnum w-5 shrink-0 text-right font-mono text-xs text-white/40">{pos}</span>
-                    <div className="flex w-16 shrink-0 items-center gap-1.5 sm:w-24">
+                    <div className="flex w-14 shrink-0 items-center gap-1">
                       <span className="h-4 w-1 shrink-0 rounded-full" style={{ backgroundColor: hex(d?.team_colour) }} />
                       <span className="truncate text-sm font-semibold text-white">{d?.name_acronym ?? num}</span>
                     </div>
-                    <div className="flex flex-1 flex-wrap items-center gap-1.5">
+                    <div className="flex flex-1 flex-wrap items-center gap-1">
                       {ORDER.map((c) => {
                         const left = byCompound.get(c) ?? 0;
                         const dark = c === "HARD" || c === "MEDIUM";
@@ -76,7 +76,7 @@ export default function TyreAllocation({
                         return (
                           <span
                             key={c}
-                            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.65rem] font-semibold ring-1 ${empty ? "opacity-35" : ""}`}
+                            className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[0.65rem] font-semibold ring-1 ${empty ? "opacity-35" : ""}`}
                             style={{ backgroundColor: `${color(c)}22`, borderColor: color(c), color: dark ? "#e5e5e8" : "#fff" }}
                             title={`${c}: ${left} new set${left === 1 ? "" : "s"} left this weekend`}
                           >
