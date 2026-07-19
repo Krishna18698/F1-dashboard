@@ -595,10 +595,10 @@ export async function getRelayState(): Promise<F1LiveState | null> {
     full_name: d.FullName ?? "",
   }));
 
-  // Weekend tyre allocation — qualifying only (matches the card's own visibility). Needs the
-  // current session's own start time to know which past FP1–3 sessions of the same meeting
-  // count against the same allocation.
-  if (mode === "quali" && sessionInfo.Meeting?.Name && sessionInfo.StartDate) {
+  // Weekend tyre allocation — quali and race (matches the card's own visibility). Needs the
+  // current session's own start time to know which past FP1–3/Quali sessions of the same
+  // meeting count against the same allocation.
+  if ((mode === "quali" || mode === "race") && sessionInfo.Meeting?.Name && sessionInfo.StartDate) {
     const beforeStartMs = Date.parse(sessionInfo.StartDate + "Z") - offsetMs(sessionInfo.GmtOffset);
     try {
       const weekendMap = await weekendTyresLeftForMeeting(sessionInfo.Meeting.Name, beforeStartMs, countNewSetsLive());

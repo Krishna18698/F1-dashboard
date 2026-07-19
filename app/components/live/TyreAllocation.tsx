@@ -13,12 +13,13 @@ function color(c: string) {
 type Left = { compound: string; left: number };
 
 /**
- * Qualifying-only: how many fresh sets of each dry compound a driver has LEFT from the
+ * Quali and race: how many fresh sets of each dry compound a driver has LEFT from the
  * weekend's tyre allocation — real usage (the feed's per-stint `New` flag, summed across
- * FP1+FP2+FP3+this session) subtracted from the standard 13-set allocation (8S/3M/2H).
- * The allocation split itself is an assumption (the feed has no topic for the FIA's actual
- * per-round nomination); the usage subtracted from it is real. Distinct from the Tyre
- * Tracker's race-strategy bar, which is about lap distance within one session.
+ * every prior session of the weekend + this one) subtracted from the standard 13-set
+ * allocation (8S/3M/2H). The allocation split itself is an assumption (the feed has no
+ * topic for the FIA's actual per-round nomination); the usage subtracted from it is real.
+ * Distinct from the Tyre Tracker's race-strategy bar, which is about lap distance within
+ * one session.
  */
 export default function TyreAllocation({
   order,
