@@ -765,20 +765,22 @@ export async function getF1LiveState(
   };
 }
 
-/** Most-recent completed RACE's top finishers from the free feed (no token needed). */
+/** Most-recent completed session's (Race or Qualifying — no token needed) top finishers/times
+ *  from the free feed. Not just races: a session as recent as Qualifying should still show on
+ *  the results ticker until the next session (typically the Race) actually goes live. */
 export async function getStaticResults(): Promise<{
   session_name: string;
-  mode: "race";
+  mode: "race" | "quali" | "practice";
   complete: boolean;
   endedAtMs: number;
   top: { pos: number; tla: string; team_colour: string; best: number | null; gap: string }[];
 } | null> {
   const now = Date.now();
-  const race = (await flatSessions())
-    .filter((s) => /race/i.test(s.type) && !/sprint/i.test(s.type) && s.endMs <= now)
+  const session = (await flatSessions())
+    .filter((s) => /race|qualifying/i.test(s.type) && !/sprint/i.test(s.type) && s.endMs <= now)
     .sort((a, b) => b.endMs - a.endMs)[0];
-  if (!race) return null;
-  const st = await getF1LiveState(race.path, race.type, Number.MAX_SAFE_INTEGER, false);
+  if (!session) return null;
+  const st = await getF1LiveState(session.path, session.type, Number.MAX_SAFE_INTEGER, false);
   if (!st.order.length) return null;
   const byNum = new Map(st.drivers.map((d) => [d.driver_number, d]));
   const top = st.order.map((n) => {
@@ -786,7 +788,7 @@ export async function getStaticResults(): Promise<{
     const d = byNum.get(n);
     return { pos: r.position, tla: d?.name_acronym ?? String(n), team_colour: d?.team_colour ?? "", best: r.best, gap: r.gap_to_leader };
   });
-  return { session_name: race.name, mode: "race", complete: true, endedAtMs: race.endMs, top };
+  return { session_name: session.name, mode: mode(session.type), complete: true, endedAtMs: session.endMs, top };
 }
 
 /**
