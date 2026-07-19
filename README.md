@@ -24,10 +24,18 @@ An editorial (white & F1-red) Formula 1 dashboard built with **Next.js + TypeScr
   parked on track.
 - **Corner numbers**, drawn just outside the track line.
 - **Driver Live Tracker** — a clean running order: position, driver, gap to leader / interval
-  (race) or best lap (quali/practice).
-- **Tyre Tracker** — the full strategy board: gained/lost vs the starting grid (▲▼), gap /
-  interval / last lap, a fastest-lap footer, and a per-driver stint bar across the race's lap
-  axis with a tyre-compound token (and laps run) at the end of every stint.
+  (race) or best lap (quali/practice). During qualifying it shows which segment is live
+  (Q1/Q2/Q3) with a live-ticking countdown for that segment, and shades the elimination zone
+  red for drivers currently on the wrong side of the cut.
+- **Tyre Tracker** *(race only)* — the full strategy board: gained/lost vs the starting grid
+  (▲▼), gap / interval / last lap, a fastest-lap footer, and a per-driver stint bar across the
+  race's lap axis with a tyre-compound token (and laps run) at the end of every stint.
+- **Tyre Allocation** *(qualifying only)* — how many fresh sets of each dry compound
+  (Soft/Medium/Hard) every driver has left from the weekend's tyre allocation, in a compact
+  two-column layout covering the whole field (including drivers already knocked out in an
+  earlier segment). Computed from real usage — the feed's per-stint "new tyre" flag, summed
+  across Practice 1–3 and Qualifying — against the standard 13-set allocation (8 Soft / 3
+  Medium / 2 Hard).
 - **Race Control** — a right-side panel that pops the latest messages on anything new
   (flags, Safety Car/VSC, penalties, investigations) and opens into the full timestamped
   history for the session, with a live track-status banner.
