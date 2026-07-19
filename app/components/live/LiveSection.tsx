@@ -155,11 +155,13 @@ export default function LiveSection() {
         </div>
       )}
 
-      {/* Tyre Allocation — qualifying only: fresh sets left per compound, vs. the weekend allocation. */}
+      {/* Tyre Allocation — qualifying only: fresh sets left per compound, vs. the weekend
+          allocation. Shows every driver, including those already knocked out — unlike the
+          board above, this isn't about who's still fighting for a spot in the next segment. */}
       {s.mode === "quali" && (
         <div className="mt-4">
           <TyreAllocation
-            order={boardOrder}
+            order={s.order}
             drivers={s.drivers}
             positions={s.positions}
             weekendTyresLeft={s.weekendTyresLeft ?? new Map()}

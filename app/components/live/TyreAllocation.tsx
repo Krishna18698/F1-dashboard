@@ -45,7 +45,7 @@ export default function TyreAllocation({
         </span>
       </div>
       <div className="carbon-bg overflow-x-auto rounded-lg p-3 ring-1 ring-white/10 sm:p-4">
-        <div className="space-y-1.5 sm:min-w-md">
+        <div className="grid grid-cols-1 gap-x-6 gap-y-1.5 lg:grid-cols-2">
           {order.map((num, i) => {
             const d = drivers.get(num);
             const pos = positions.get(num) ?? i + 1;
