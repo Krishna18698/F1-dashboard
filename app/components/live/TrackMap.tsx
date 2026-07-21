@@ -310,7 +310,11 @@ export default function TrackMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dotsKey]);
 
-  if (!bounds) {
+  // Wait for BOTH the circuit outline AND the first driver data before showing anything —
+  // they resolve from separate requests (circuit outline vs. the live poll), and the
+  // circuit usually comes back first, so revealing an empty track for a couple seconds
+  // before dots appear read as broken. One skeleton covers the whole gap instead.
+  if (!bounds || drivers.size === 0) {
     return (
       <div className="self-start">
         <span className="eyebrow mb-2 block text-[0.6rem] text-muted">
@@ -324,7 +328,7 @@ export default function TrackMap({
           <div className="relative aspect-square overflow-hidden rounded-lg carbon-bg ring-1 ring-white/10">
             <div className="skeleton-dark absolute inset-6 rounded-full opacity-60" />
             <span className="absolute inset-0 flex items-center justify-center text-sm text-white/40">
-              Loading circuit…
+              {!bounds ? "Loading circuit…" : "Loading drivers…"}
             </span>
           </div>
         )}
