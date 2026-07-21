@@ -56,6 +56,7 @@ export interface LiveState {
   qualifyingPart?: number | null; // 1=Q1, 2=Q2, 3=Q3 (quali sessions only)
   qualifyingRemainingMs?: number | null; // live countdown in the current segment
   tokenIssue?: "invalid" | "busy" | null; // set when a visitor's own token couldn't be used
+  ownerTokenConfigured?: boolean; // does the SITE have its own F1_TV_TOKEN configured
   tyreLaps?: Map<number, number>; // laps on current tyre, per driver
   inPit?: Set<number>; // drivers currently in the pit lane
   retired?: Set<number>; // crashed / DNF drivers

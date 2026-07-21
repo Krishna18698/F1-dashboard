@@ -72,7 +72,7 @@ export default function LiveSection() {
               become available when an official F1 session starts.
             </p>
             <div className="mt-3 max-w-md">
-              <MyTokenCard tokenIssue={s.tokenIssue} />
+              <MyTokenCard tokenIssue={s.tokenIssue} ownerHasToken={s.ownerTokenConfigured} />
             </div>
           </div>
         )}
@@ -91,10 +91,6 @@ export default function LiveSection() {
   const label = s.replay ? `Latest session · ${sessionLabel}` : `${sessionLabel} · on track now`;
 
   const freeFeed = s.source === "free";
-  // Show the token card whenever the owner's own token isn't what's powering this view —
-  // i.e. the visitor could get real-time tracking by adding their own — or when their
-  // already-saved token hit a problem worth flagging regardless of what ended up showing.
-  const showTokenCard = s.source !== "token" || !!s.tokenIssue;
 
   return (
     <section>
@@ -104,11 +100,7 @@ export default function LiveSection() {
           Running on F1&apos;s free public feed — for real-time, smoother tracking, add an F1 TV token.
         </p>
       )}
-      {showTokenCard && (
-        <div className="mb-4">
-          <MyTokenCard tokenIssue={s.tokenIssue} />
-        </div>
-      )}
+      <MyTokenCard tokenIssue={s.tokenIssue} ownerHasToken={s.ownerTokenConfigured} />
 
       {/* Track map + clean running order side by side */}
       <div className="grid gap-4 lg:grid-cols-2">

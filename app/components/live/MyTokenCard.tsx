@@ -12,7 +12,16 @@ const code = "rounded bg-white/10 px-1.5 py-0.5 font-mono text-[0.68rem] text-wh
  * request header (never a URL) on live-data polls, used for exactly that one request, and
  * never logged or persisted server-side — see the handling notes in lib/f1Relay.ts.
  */
-export default function MyTokenCard({ tokenIssue }: { tokenIssue?: "invalid" | "busy" | null }) {
+export default function MyTokenCard({
+  tokenIssue,
+  ownerHasToken,
+}: {
+  tokenIssue?: "invalid" | "busy" | null;
+  /** The site already has its own F1_TV_TOKEN configured — nothing being live right now is
+   *  just a fact about the world, not something a visitor's own token would fix, so don't
+   *  invite them to add one. Still shows if THEY already saved one (their choice to keep). */
+  ownerHasToken?: boolean;
+}) {
   const [saved, setSaved] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [formatError, setFormatError] = useState(false);
@@ -47,10 +56,14 @@ export default function MyTokenCard({ tokenIssue }: { tokenIssue?: "invalid" | "
 
   const expiry = saved ? decodeTokenExpiry(saved) : null;
 
+  // The owner's own token already covers this site — no reason to invite a visitor to add
+  // theirs too unless they already have (in which case still show its status).
+  if (!saved && ownerHasToken) return null;
+
   if (saved) {
     const expired = expiry?.expired;
     return (
-      <div className="carbon-bg flex items-center gap-3 rounded-lg px-4 py-3 ring-1 ring-white/10">
+      <div className="carbon-bg mb-4 flex items-center gap-3 rounded-lg px-4 py-3 ring-1 ring-white/10">
         <span className={`h-2 w-2 shrink-0 rounded-full ${expired || tokenIssue ? "bg-amber-400" : "bg-emerald-400"}`} />
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold text-white">
@@ -88,7 +101,7 @@ export default function MyTokenCard({ tokenIssue }: { tokenIssue?: "invalid" | "
   }
 
   return (
-    <div className="carbon-bg rounded-lg px-4 py-3 ring-1 ring-white/10">
+    <div className="carbon-bg mb-4 rounded-lg px-4 py-3 ring-1 ring-white/10">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-sm font-semibold text-white">Add your own F1 TV token</p>

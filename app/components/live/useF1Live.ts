@@ -58,6 +58,7 @@ interface ApiResponse {
   qualifyingPart?: number | null;
   qualifyingRemainingMs?: number | null;
   tokenIssue?: "invalid" | "busy";
+  ownerTokenConfigured?: boolean;
 }
 
 const empty: LiveState = {
@@ -156,6 +157,7 @@ function toState(r: ApiResponse): LiveState {
     qualifyingPart: r.qualifyingPart ?? null,
     qualifyingRemainingMs: r.qualifyingRemainingMs ?? null,
     tokenIssue: r.tokenIssue ?? null,
+    ownerTokenConfigured: r.ownerTokenConfigured ?? false,
     tyreLaps,
     inPit,
     retired,
@@ -200,7 +202,12 @@ export function useF1Live(): LiveState {
         if (cancelled.current) return;
         status = data.status;
         if (data.status === "idle" || data.status === "error") {
-          setState((s) => ({ ...s, status: data.status, tokenIssue: data.tokenIssue ?? null }));
+          setState((s) => ({
+            ...s,
+            status: data.status,
+            tokenIssue: data.tokenIssue ?? null,
+            ownerTokenConfigured: data.ownerTokenConfigured ?? false,
+          }));
         } else {
           // Feed the map's animation buffer directly — NOT through React state — so the
           // heavy position payload never triggers a re-render or stalls the 60fps loop.

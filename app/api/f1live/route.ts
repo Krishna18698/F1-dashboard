@@ -38,7 +38,12 @@ export async function GET(req: NextRequest) {
   // ends up returning (their own live data, the owner's, the free feed, or idle) can still
   // carry a small "your token wasn't used" flag rather than blocking the page entirely.
   let tokenIssue: "invalid" | "busy" | null = null;
-  const respond = (body: Record<string, unknown>) => Response.json(tokenIssue ? { ...body, tokenIssue } : body);
+  // So the client can tell "nothing's live right now" apart from "no token is configured
+  // at all" — the token card should only invite a visitor to add their own in the latter
+  // case; the site owner's own env token being merely idle isn't a reason to ask for one.
+  const ownerTokenConfigured = Boolean(process.env.F1_TV_TOKEN?.trim());
+  const respond = (body: Record<string, unknown>) =>
+    Response.json({ ...body, ownerTokenConfigured, ...(tokenIssue ? { tokenIssue } : {}) });
 
   try {
     // 0) TEST replay — advance a past session against a real-time virtual clock.
@@ -110,6 +115,7 @@ export async function GET(req: NextRequest) {
           status: "live",
           replay: false,
           source: "free",
+          circuitKey: live.circuitKey,
           session: { location: live.location, session_name: live.name },
           ...state,
           frames: newFrames(state.frames, since),
@@ -131,6 +137,7 @@ export async function GET(req: NextRequest) {
           status: "live",
           replay: true,
           source: "free",
+          circuitKey: c.circuitKey,
           session: { location: c.location, session_name: c.name },
           ...state,
           frames: newFrames(state.frames, since),
@@ -141,6 +148,6 @@ export async function GET(req: NextRequest) {
 
     return respond({ status: "idle" });
   } catch {
-    return Response.json({ status: "error" }, { status: 200 });
+    return Response.json({ status: "error", ownerTokenConfigured: Boolean(process.env.F1_TV_TOKEN?.trim()) }, { status: 200 });
   }
 }

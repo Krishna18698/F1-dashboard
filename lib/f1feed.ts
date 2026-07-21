@@ -71,6 +71,7 @@ export interface ResolvedSession {
   location: string;
   live: boolean; // true only when the session is happening right now
   startWallMs?: number; // UTC ms of session start (used for the live clock)
+  circuitKey?: number; // MultiViewer circuit id, for the track-map outline
 }
 
 interface IdxSession {
@@ -84,7 +85,7 @@ interface IdxSession {
 interface IdxMeeting {
   Name: string;
   Location?: string;
-  Circuit?: { ShortName?: string };
+  Circuit?: { ShortName?: string; Key?: number };
   Sessions: IdxSession[];
 }
 
@@ -120,6 +121,7 @@ export async function flatSessions(): Promise<FlatSession[]> {
         name: `${m.Name} · ${s.Name}`,
         location,
         live: false,
+        circuitKey: m.Circuit?.Key,
         startMs: Date.parse(s.StartDate + "Z") - off,
         endMs: Date.parse(s.EndDate + "Z") - off,
       });
