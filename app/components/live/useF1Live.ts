@@ -3,6 +3,7 @@
 import { startTransition, useEffect, useRef, useState } from "react";
 import { Driver, IntervalRow, LapSummary, StintRow } from "@/lib/openf1";
 import { F1_LIVE } from "@/lib/f1liveConfig";
+import { getStoredVisitorToken } from "@/lib/visitorToken";
 import type { LiveState } from "./useLiveSession";
 import { newestFrameT, pushFrames, pushTel } from "./framesStore";
 
@@ -37,9 +38,11 @@ interface ApiDriver {
   full_name: string;
 }
 interface ApiResponse {
+  // "token_invalid"/"token_busy" never appear as the top-level status — a rejected visitor
+  // token still falls through to whatever the site would otherwise show; see `tokenIssue`.
   status: "live" | "idle" | "error";
   replay?: boolean;
-  source?: "token" | "free";
+  source?: "token" | "free" | "visitor";
   mode?: LiveState["mode"];
   circuitKey?: number;
   session?: { location: string; session_name: string };
@@ -54,6 +57,7 @@ interface ApiResponse {
   telFrames?: { t: number; c: Record<string, [number, number, number, number]> }[];
   qualifyingPart?: number | null;
   qualifyingRemainingMs?: number | null;
+  tokenIssue?: "invalid" | "busy";
 }
 
 const empty: LiveState = {
@@ -151,6 +155,7 @@ function toState(r: ApiResponse): LiveState {
     trackStatus: r.trackStatus ?? null,
     qualifyingPart: r.qualifyingPart ?? null,
     qualifyingRemainingMs: r.qualifyingRemainingMs ?? null,
+    tokenIssue: r.tokenIssue ?? null,
     tyreLaps,
     inPit,
     retired,
@@ -182,13 +187,20 @@ export function useF1Live(): LiveState {
       }
       try {
         // Incremental: ask only for frames newer than what we've buffered — keeps each
-        // poll's payload/parse tiny so it never steals an animation frame.
-        const res = await fetch(`/api/f1live?since=${newestFrameT()}`, { cache: "no-store" });
+        // poll's payload/parse tiny so it never steals an animation frame. Attach the
+        // visitor's own token (if they've saved one) as a header — never a query param —
+        // so it never lands in a URL/log; read fresh from localStorage every poll so
+        // saving/removing it in another tab takes effect on the next tick.
+        const myToken = getStoredVisitorToken();
+        const res = await fetch(`/api/f1live?since=${newestFrameT()}`, {
+          cache: "no-store",
+          headers: myToken ? { "X-F1-Token": myToken } : undefined,
+        });
         const data = (await res.json()) as ApiResponse;
         if (cancelled.current) return;
         status = data.status;
         if (data.status === "idle" || data.status === "error") {
-          setState((s) => ({ ...s, status: data.status }));
+          setState((s) => ({ ...s, status: data.status, tokenIssue: data.tokenIssue ?? null }));
         } else {
           // Feed the map's animation buffer directly — NOT through React state — so the
           // heavy position payload never triggers a re-render or stalls the 60fps loop.

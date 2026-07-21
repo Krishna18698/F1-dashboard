@@ -37,7 +37,7 @@ export interface LiveState {
   status: LiveStatus;
   mode: SessionMode;
   replay?: boolean; // true when showing a past session (nothing live right now)
-  source?: "token" | "free"; // which feed is powering this — token = real-time, free = public fallback
+  source?: "token" | "free" | "visitor"; // which feed is powering this — token = owner's, visitor = their own, free = public fallback
   circuitKey?: number;
   session?: Session;
   clockISO?: string;
@@ -55,6 +55,7 @@ export interface LiveState {
   trackStatus?: string | null; // TrackStatus code — tints the map (yellow/SC/red)
   qualifyingPart?: number | null; // 1=Q1, 2=Q2, 3=Q3 (quali sessions only)
   qualifyingRemainingMs?: number | null; // live countdown in the current segment
+  tokenIssue?: "invalid" | "busy" | null; // set when a visitor's own token couldn't be used
   tyreLaps?: Map<number, number>; // laps on current tyre, per driver
   inPit?: Set<number>; // drivers currently in the pit lane
   retired?: Set<number>; // crashed / DNF drivers

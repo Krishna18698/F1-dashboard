@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { fallbackCandidates, getF1LiveState, getSessionDuration, resolveLiveSession } from "@/lib/f1feed";
-import { getRelayState } from "@/lib/f1Relay";
+import { getRelayState, getVisitorRelayState } from "@/lib/f1Relay";
 import { F1_LIVE } from "@/lib/f1liveConfig";
 
 export const runtime = "nodejs";
@@ -26,12 +26,20 @@ function newTel<T extends { t: number }>(frames: T[], since: number): T[] {
 
 /**
  * Serves live map + timing.
- * 1) If F1_TV_TOKEN is set → F1's real-time SignalR feed (authenticated, live now).
- * 2) Else → F1's free static feed (only a genuinely-live, published session).
+ * 1) If the visitor supplied their own F1 TV token (X-F1-Token header) → a fresh, isolated
+ *    connection using THEIR token, torn down after this one request.
+ * 2) Else if F1_TV_TOKEN is set → F1's real-time SignalR feed (authenticated, live now).
+ * 3) Else → F1's free static feed (only a genuinely-live, published session).
  * Otherwise the client minimizes to "no live session".
  */
 export async function GET(req: NextRequest) {
   const since = Number(req.nextUrl.searchParams.get("since") ?? 0) || 0;
+  // Set when a visitor-supplied token couldn't be used, so whatever the rest of the chain
+  // ends up returning (their own live data, the owner's, the free feed, or idle) can still
+  // carry a small "your token wasn't used" flag rather than blocking the page entirely.
+  let tokenIssue: "invalid" | "busy" | null = null;
+  const respond = (body: Record<string, unknown>) => Response.json(tokenIssue ? { ...body, tokenIssue } : body);
+
   try {
     // 0) TEST replay — advance a past session against a real-time virtual clock.
     if (F1_LIVE.replay.enabled) {
@@ -41,7 +49,7 @@ export async function GET(req: NextRequest) {
       const span = Math.max(1, dur - anchor);
       const upto = anchor + ((Date.now() - r.restartedAtMs) % span);
       const state = await getF1LiveState(r.sessionPath, r.sessionType, upto, false);
-      return Response.json({
+      return respond({
         status: "live",
         replay: true,
         circuitKey: r.circuitKey,
@@ -52,13 +60,37 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // 1) Real-time via the viewer's F1 TV token. This is AUTHORITATIVE — it knows the
-    //    true session status (pre-show / green / ended), so if it says "not live" we
-    //    minimize rather than falling back to the time-window static feed.
+    // 1) Visitor's own token — highest priority when supplied. Never logged, never
+    //    persisted; exists only for the duration of this one request (see f1Relay.ts).
+    const visitorToken = req.headers.get("x-f1-token");
+    if (visitorToken) {
+      const result = await getVisitorRelayState(visitorToken);
+      if (result.status === "ok") {
+        return respond({
+          status: "live",
+          replay: false,
+          source: "visitor",
+          ...result.state,
+          frames: newFrames(result.state.frames, since),
+          telFrames: newTel(result.state.telFrames, since),
+        });
+      }
+      // Not usable — flag it, but still fall through to whatever everyone else would see
+      // (their own live data, the owner's, the free feed, or idle) rather than a dead end.
+      if (result.status === "invalid_token") tokenIssue = "invalid";
+      else if (result.status === "too_many") tokenIssue = "busy";
+      // "no_session" — their token connected fine, just nothing live right now for it —
+      // falls through silently, no issue to flag.
+    }
+
+    // 2) Real-time via the site's own F1 TV token — AUTHORITATIVE about live status when
+    //    it does have a session. If it says nothing's live, fall through to the free-feed
+    //    checks below instead of stopping here, so a replay of the latest race still shows
+    //    rather than a bare "idle".
     if (process.env.F1_TV_TOKEN?.trim()) {
       const relay = await getRelayState();
       if (relay && relay.drivers.length > 0) {
-        return Response.json({
+        return respond({
           status: "live",
           replay: false,
           source: "token",
@@ -67,7 +99,6 @@ export async function GET(req: NextRequest) {
           telFrames: newTel(relay.telFrames, since),
         });
       }
-      return Response.json({ status: "idle" });
     }
 
     const live = await resolveLiveSession();
@@ -75,7 +106,7 @@ export async function GET(req: NextRequest) {
       const upto = Date.now() - live.startWallMs;
       const state = await getF1LiveState(live.path, live.type, upto, true);
       if (state.drivers.length > 0) {
-        return Response.json({
+        return respond({
           status: "live",
           replay: false,
           source: "free",
@@ -96,7 +127,7 @@ export async function GET(req: NextRequest) {
       const upto = anchor + (Date.now() % span);
       const state = await getF1LiveState(c.path, c.type, upto, false);
       if (state.drivers.length > 0) {
-        return Response.json({
+        return respond({
           status: "live",
           replay: true,
           source: "free",
@@ -108,7 +139,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    return Response.json({ status: "idle" });
+    return respond({ status: "idle" });
   } catch {
     return Response.json({ status: "error" }, { status: 200 });
   }

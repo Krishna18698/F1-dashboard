@@ -7,6 +7,7 @@ import TimingBoard from "./TimingBoard";
 import TyreTracker from "./TyreTracker";
 import TyreAllocation from "./TyreAllocation";
 import TelemetryCard from "./TelemetryCard";
+import MyTokenCard from "./MyTokenCard";
 
 function Header({
   badge,
@@ -70,6 +71,9 @@ export default function LiveSection() {
               Live driver tracking, telemetry, tyre strategy, and Race Control automatically
               become available when an official F1 session starts.
             </p>
+            <div className="mt-3 max-w-md">
+              <MyTokenCard tokenIssue={s.tokenIssue} />
+            </div>
           </div>
         )}
       </section>
@@ -87,6 +91,10 @@ export default function LiveSection() {
   const label = s.replay ? `Latest session · ${sessionLabel}` : `${sessionLabel} · on track now`;
 
   const freeFeed = s.source === "free";
+  // Show the token card whenever the owner's own token isn't what's powering this view —
+  // i.e. the visitor could get real-time tracking by adding their own — or when their
+  // already-saved token hit a problem worth flagging regardless of what ended up showing.
+  const showTokenCard = s.source !== "token" || !!s.tokenIssue;
 
   return (
     <section>
@@ -95,6 +103,11 @@ export default function LiveSection() {
         <p className="-mt-3 mb-4 text-xs text-muted">
           Running on F1&apos;s free public feed — for real-time, smoother tracking, add an F1 TV token.
         </p>
+      )}
+      {showTokenCard && (
+        <div className="mb-4">
+          <MyTokenCard tokenIssue={s.tokenIssue} />
+        </div>
       )}
 
       {/* Track map + clean running order side by side */}

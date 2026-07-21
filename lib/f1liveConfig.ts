@@ -11,9 +11,13 @@
  * type so you see that format. "Qualifying" showcases the best-lap board.
  */
 export const F1_LIVE = {
-  // "live" = only ever show a genuinely-live session; minimize otherwise.
-  mode: "live" as "auto" | "live" | "replay",
-  preferType: "Qualifying",
+  // "auto" = show genuinely-live if it exists, else fall back to the latest completed
+  // session (clearly labeled as replay/"LATEST", never claimed as live) — the free static
+  // feed isn't real-time for races (confirmed: it published many hours after one actually
+  // ended), so pretending to wait for "live" and showing nothing in the meantime isn't
+  // honest. Visitors without any token still get to see the last race, just not live.
+  mode: "auto" as "auto" | "live" | "replay",
+  preferType: "Race",
   // When replaying a completed session, skip the pre-session build-up and start the
   // virtual clock this far into the session (fraction of its total length).
   replayAnchorFrac: 0.45,
