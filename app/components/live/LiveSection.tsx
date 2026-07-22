@@ -105,12 +105,9 @@ export default function LiveSection() {
     // Minimized: nothing is live, so collapse to a slim card explaining what's coming.
     return (
       <div>
-        <div className="mb-3 flex items-center gap-3">
-          <span className={`h-2 w-2 shrink-0 rounded-full ${s.status === "loading" ? "live-dot bg-muted" : "bg-muted"}`} />
-          <h3 className="font-display text-2xl sm:text-3xl">
-            Live <span className="italic text-red">Tracking</span>
-          </h3>
-        </div>
+        <h3 className="font-display mb-3 text-2xl sm:text-3xl">
+          Live <span className="italic text-red">Tracking</span>
+        </h3>
         <section className="rounded-lg border border-line bg-panel px-4 py-3">
           <ViewToggle view={view} onChange={changeView} />
           {s.status === "loading" ? (
