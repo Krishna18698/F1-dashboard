@@ -384,7 +384,7 @@ export default function TrackMap({
             {name}
           </span>
         )}
-        {laps && laps.total > 0 && (
+        {laps && laps.total > 0 && !formationLap && (
           <span
             className="tnum absolute right-3 top-3 z-10 rounded-full bg-black/60 px-2.5 py-1 font-mono text-[0.65rem] font-bold tracking-wider text-white/85"
             title="Progress through the race — lap X of Y"
