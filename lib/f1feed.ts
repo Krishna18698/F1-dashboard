@@ -849,13 +849,23 @@ export async function getStaticResults(): Promise<{
  * so `/api/racecontrol` can serve messages for that SAME session/instant without a token.
  * `view`/`replayT0` must be passed through from the client exactly as `/api/f1live` received
  * them, or Race Control ends up narrating a different point in the session than the map.
+ *
+ * `asOfMs`, when given, is the client's own map-playback clock (`getPlaybackT()` — the exact
+ * session-relative instant the car dots are CURRENTLY rendering, which runs ~20s behind the
+ * freshest fetched frame for smooth interpolation). Using it directly instead of recomputing
+ * elapsed-time-since-t0 is what keeps Race Control's "as of" instant matched to what's on
+ * screen — recomputing independently only kept the two loosely aligned (each polls on its own
+ * cadence and neither accounts for the map's own render delay), which read as Race Control
+ * running ahead of the drivers.
  */
 export async function resolveFreeInstant(
   view: "live" | "replay" = "live",
   replayT0?: number,
+  asOfMs?: number,
 ): Promise<{ path: string; uptoMs: number; live: boolean } | null> {
   if (F1_LIVE.replay.enabled) {
     const r = F1_LIVE.replay;
+    if (asOfMs != null) return { path: r.sessionPath, uptoMs: asOfMs, live: false };
     const dur = await getSessionDuration(r.sessionPath, false);
     const anchor = Math.floor(dur * r.anchorFrac);
     const span = Math.max(1, dur - anchor);
@@ -866,15 +876,16 @@ export async function resolveFreeInstant(
   if (view === "live") {
     const live = await resolveLiveSession();
     if (live && live.startWallMs != null) {
-      return { path: live.path, uptoMs: Date.now() - live.startWallMs, live: true };
+      return { path: live.path, uptoMs: asOfMs ?? Date.now() - live.startWallMs, live: true };
     }
     return null;
   }
 
-  const t0 = replayT0 ?? Date.now();
   for (const c of await fallbackCandidates()) {
     const dur = await getSessionDuration(c.path, false);
     if (!dur) continue;
+    if (asOfMs != null) return { path: c.path, uptoMs: asOfMs, live: false };
+    const t0 = replayT0 ?? Date.now();
     const anchor = await getReplayAnchorMs(c.path, false);
     const span = Math.max(1, dur - anchor);
     const upto = anchor + ((Date.now() - t0) % span);

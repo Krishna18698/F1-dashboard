@@ -16,7 +16,8 @@ export async function GET(req: NextRequest) {
     }
     const view = req.nextUrl.searchParams.get("view") === "replay" ? "replay" : "live";
     const t0 = Number(req.nextUrl.searchParams.get("t0")) || undefined;
-    const instant = await resolveFreeInstant(view, t0);
+    const asOf = Number(req.nextUrl.searchParams.get("asOf")) || undefined;
+    const instant = await resolveFreeInstant(view, t0, asOf);
     if (!instant) return Response.json({ available: false });
     return Response.json(await getStaticRaceControl(instant.path, instant.uptoMs, instant.live));
   } catch {

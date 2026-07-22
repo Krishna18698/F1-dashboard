@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { usePolling } from "../usePolling";
 import { trackStatusInfo } from "@/lib/trackStatus";
+import { getPlaybackT } from "./framesStore";
 
 interface RcMessage {
   Utc?: string;
@@ -67,12 +68,17 @@ export default function RaceControl({
 
   // Keeps polling regardless of `ready` (so data's already warm the moment it's shown) —
   // only relevant during a live session → 5s while active, 30s idle (pauses when hidden).
-  // `view`/`replayT0` must match what the map/timing poll (`useF1Live`) sends, or this ends
-  // up narrating a different point in the replay than what's on screen.
+  // Once the map has real frames, ask for messages as of its OWN playback clock (the exact
+  // instant the car dots are currently rendering, ~20s behind the freshest fetch for smooth
+  // interpolation) rather than recomputing "now" independently — two clocks polling on
+  // different cadences never quite agreed, which read as Race Control running ahead of the
+  // drivers. `view`/`replayT0` remain the fallback before the map has any frames yet.
   usePolling(async () => {
     try {
+      const t = getPlaybackT();
+      const asOfParam = t > 0 ? `&asOf=${Math.floor(t)}` : "";
       const t0Param = view === "replay" && replayT0 ? `&t0=${replayT0}` : "";
-      const d = (await (await fetch(`/api/racecontrol?view=${view}${t0Param}`, { cache: "no-store" })).json()) as RaceControl;
+      const d = (await (await fetch(`/api/racecontrol?view=${view}${t0Param}${asOfParam}`, { cache: "no-store" })).json()) as RaceControl;
       setData(d);
     } catch {}
   }, data?.available ? 5_000 : 30_000);
