@@ -25,6 +25,7 @@ export default function TrackMap({
   retired,
   name,
   trackStatus,
+  formationLap,
   laps,
   selectedNum,
   onSelect,
@@ -36,6 +37,7 @@ export default function TrackMap({
   retired?: Set<number>;
   name?: string;
   trackStatus?: string | null;
+  formationLap?: boolean;
   laps?: { current: number; total: number };
   selectedNum?: number | null;
   onSelect?: (num: number | null) => void;
@@ -347,8 +349,14 @@ export default function TrackMap({
   }
 
   // Track-status tint: yellow / SC-orange / red glow around the map while not clear.
+  // Formation lap gets the same treatment (yellow, like a Yellow Flag) — the race hasn't
+  // gone green yet, and trackStatus itself is usually still "clear" at that point.
   const ts = trackStatusInfo(trackStatus ?? undefined);
-  const tinted = !!trackStatus && !ts.calm;
+  const tint = formationLap
+    ? { color: "#f5c518", label: "Formation Lap", dark: true }
+    : trackStatus && !ts.calm
+      ? { color: ts.color, label: ts.label, dark: trackStatus === "2" || trackStatus === "7" }
+      : null;
 
   return (
     <div className="self-start">
@@ -358,17 +366,17 @@ export default function TrackMap({
       <div
         className="relative aspect-square overflow-hidden rounded-lg carbon-bg ring-1 ring-white/10"
         style={{
-          boxShadow: tinted ? `inset 0 0 0 3px ${ts.color}, inset 0 0 60px ${ts.color}33` : "none",
+          boxShadow: tint ? `inset 0 0 0 3px ${tint.color}, inset 0 0 60px ${tint.color}33` : "none",
           transition: "box-shadow 0.6s ease",
         }}
       >
-        {tinted && (
+        {tint && (
           <span
             className="absolute left-3 top-3 z-10 flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[0.6rem] font-bold tracking-wider"
-            style={{ backgroundColor: ts.color, color: trackStatus === "2" || trackStatus === "7" ? "#15151a" : "#fff" }}
+            style={{ backgroundColor: tint.color, color: tint.dark ? "#15151a" : "#fff" }}
           >
             <span className="live-dot h-1.5 w-1.5 rounded-full bg-current" />
-            {ts.label.toUpperCase()}
+            {tint.label.toUpperCase()}
           </span>
         )}
         {name && (

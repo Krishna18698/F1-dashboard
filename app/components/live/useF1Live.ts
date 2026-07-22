@@ -54,6 +54,7 @@ interface ApiResponse {
   currentLap?: number;
   fastestLap?: ApiFastest | null;
   trackStatus?: string | null;
+  formationLap?: boolean;
   telFrames?: { t: number; c: Record<string, [number, number, number, number]> }[];
   qualifyingPart?: number | null;
   qualifyingRemainingMs?: number | null;
@@ -154,6 +155,7 @@ function toState(r: ApiResponse): LiveState {
     currentLap: r.currentLap ?? 0,
     fastestLap: r.fastestLap ?? null,
     trackStatus: r.trackStatus ?? null,
+    formationLap: r.formationLap ?? false,
     qualifyingPart: r.qualifyingPart ?? null,
     qualifyingRemainingMs: r.qualifyingRemainingMs ?? null,
     tokenIssue: r.tokenIssue ?? null,

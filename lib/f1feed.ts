@@ -429,6 +429,7 @@ export interface F1LiveState {
   telFrames: { t: number; c: Record<string, [number, number, number, number]> }[];
   qualifyingPart: number | null;
   qualifyingRemainingMs: number | null;
+  formationLap: boolean;
   durationMs: number;
 }
 
@@ -695,6 +696,9 @@ export async function getF1LiveState(
   }
 
   const m = mode(sessionType);
+  // Formation lap: after the anchor (which already backs off from SessionStatus:"Started"
+  // to include it) but before the race has actually gone green — races only.
+  const formationLap = m === "race" && s.sessionStartedTs != null && uptoMs < s.sessionStartedTs;
   const order = Object.keys(rows)
     .map(Number)
     .sort((a, b) => {
@@ -808,6 +812,7 @@ export async function getF1LiveState(
     telFrames,
     qualifyingPart,
     qualifyingRemainingMs,
+    formationLap,
     durationMs: s.durationMs,
   };
 }

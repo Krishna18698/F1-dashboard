@@ -179,6 +179,7 @@ export default function LiveSection() {
             retired={s.retired}
             name={s.session?.location}
             trackStatus={s.trackStatus}
+            formationLap={s.formationLap}
             laps={s.mode === "race" ? { current: s.currentLap ?? 0, total: s.totalLaps ?? 0 } : undefined}
             selectedNum={selected}
             onSelect={setSelected}
