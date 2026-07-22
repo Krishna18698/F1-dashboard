@@ -15,10 +15,12 @@ function Header({
   badge,
   label,
   freeFeed,
+  laps,
 }: {
   badge?: "live" | "replay";
   label: string;
   freeFeed?: boolean;
+  laps?: { current: number; total: number };
 }) {
   return (
     <div className="mb-4 flex items-end justify-between gap-4 border-b-2 border-ink pb-2">
@@ -44,6 +46,14 @@ function Header({
             title="Running on F1's free public feed — add an F1 TV token (F1_TV_TOKEN) for real-time, smoother tracking."
           >
             FREE FEED
+          </span>
+        )}
+        {laps && laps.total > 0 && (
+          <span
+            className="tnum rounded-full border border-line px-2.5 py-1 font-mono text-[0.6rem] font-bold tracking-wider text-muted"
+            title="Progress through the race — lap X of Y"
+          >
+            LAP {laps.current}/{laps.total}
           </span>
         )}
       </h3>
@@ -104,7 +114,12 @@ export default function LiveSection() {
 
   return (
     <section>
-      <Header badge={s.replay ? "replay" : "live"} label={label} freeFeed={freeFeed} />
+      <Header
+        badge={s.replay ? "replay" : "live"}
+        label={label}
+        freeFeed={freeFeed}
+        laps={s.mode === "race" ? { current: s.currentLap ?? 0, total: s.totalLaps ?? 0 } : undefined}
+      />
       {s.replay && (
         <p className="-mt-3 mb-4 text-xs text-muted">
           Nothing&apos;s live right now — this is a replay of the most recent session, not real-time.
