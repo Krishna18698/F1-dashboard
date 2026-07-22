@@ -104,44 +104,46 @@ export default function LiveSection() {
   if (s.status === "error" || s.status === "idle" || s.status === "loading") {
     // Minimized: nothing is live, so collapse to a slim card explaining what's coming.
     return (
-      <section className="rounded-lg border border-line bg-panel px-4 py-3">
-        <ViewToggle view={view} onChange={changeView} />
-        <div className="flex items-center gap-3">
+      <div>
+        <div className="mb-3 flex items-center gap-3">
           <span className={`h-2 w-2 shrink-0 rounded-full ${s.status === "loading" ? "live-dot bg-muted" : "bg-muted"}`} />
           <span className="font-display text-lg">
             Live <span className="italic text-red">Tracking</span>
           </span>
         </div>
-        {s.status === "loading" ? (
-          <span className="skeleton mt-2 block h-4 w-64" />
-        ) : view === "replay" ? (
-          <div className="mt-2 pl-5 text-sm">
-            <p className="font-medium text-ink-soft">No past session is available to replay yet.</p>
-          </div>
-        ) : (
-          <div className="mt-2 pl-5 text-sm">
-            <p className="font-medium text-ink-soft">No live Formula 1 session is currently running.</p>
-            <p className="mt-1 text-ink-soft/80">
-              Live driver tracking, telemetry, tyre strategy, and Race Control automatically
-              become available when an official F1 session starts.{" "}
-              <button onClick={() => changeView("replay")} className="font-semibold text-red underline underline-offset-2">
-                Click here
-              </button>{" "}
-              to watch a replay of the most recent session instead.
-            </p>
-            {showLiveFeedBanner && (
-              <p className="mt-3 rounded-md border border-line bg-white/50 px-3 py-2 text-ink-soft/90">
-                <span className="font-semibold text-ink">Live feed is available</span> — tracking will start
-                automatically the moment an official session goes live, no action needed.
-              </p>
-            )}
-            <div className="mt-3 max-w-md">
-              <MyTokenCard tokenIssue={s.tokenIssue} ownerHasToken={s.ownerTokenConfigured} />
+        <section className="rounded-lg border border-line bg-panel px-4 py-3">
+          <ViewToggle view={view} onChange={changeView} />
+          {s.status === "loading" ? (
+            <span className="skeleton mt-2 block h-4 w-64" />
+          ) : view === "replay" ? (
+            <div className="mt-2 pl-5 text-sm">
+              <p className="font-medium text-ink-soft">No past session is available to replay yet.</p>
             </div>
-          </div>
-        )}
-        <RaceControl ready={false} view={view} replayT0={replayT0} />
-      </section>
+          ) : (
+            <div className="mt-2 pl-5 text-sm">
+              <p className="font-medium text-ink-soft">No live Formula 1 session is currently running.</p>
+              <p className="mt-1 text-ink-soft/80">
+                Live driver tracking, telemetry, tyre strategy, and Race Control automatically
+                become available when an official F1 session starts.{" "}
+                <button onClick={() => changeView("replay")} className="font-semibold text-red underline underline-offset-2">
+                  Click here
+                </button>{" "}
+                to watch a replay of the most recent session instead.
+              </p>
+              {showLiveFeedBanner && (
+                <p className="mt-3 rounded-md border border-line bg-white/50 px-3 py-2 text-ink-soft/90">
+                  <span className="font-semibold text-ink">Live feed is available</span> — tracking will start
+                  automatically the moment an official session goes live, no action needed.
+                </p>
+              )}
+              <div className="mt-3 max-w-md">
+                <MyTokenCard tokenIssue={s.tokenIssue} ownerHasToken={s.ownerTokenConfigured} />
+              </div>
+            </div>
+          )}
+          <RaceControl ready={false} view={view} replayT0={replayT0} />
+        </section>
+      </div>
     );
   }
 
@@ -159,8 +161,8 @@ export default function LiveSection() {
 
   return (
     <section>
-      <ViewToggle view={view} onChange={changeView} />
       <Header live={!s.replay} label={label} freeFeed={freeFeed} />
+      <ViewToggle view={view} onChange={changeView} />
       {s.replay && (
         <p className="-mt-3 mb-4 text-xs text-muted">
           Showing a replay of the most recent session, from lights out — not real-time.
