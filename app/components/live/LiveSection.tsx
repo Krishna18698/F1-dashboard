@@ -47,7 +47,9 @@ function Header({
   return (
     <div className="mb-4 flex items-end justify-between gap-4 border-b-2 border-ink pb-2">
       <h3 className="font-display flex items-center gap-3 text-2xl sm:text-3xl">
-        Live <span className="italic text-red">Tracking</span>
+        <span>
+          Live <span className="italic text-red">Tracking</span>
+        </span>
         {live && (
           <span className="flex items-center gap-1.5 rounded-full bg-red px-2.5 py-1 text-[0.6rem] font-bold tracking-wider text-white">
             <span className="live-dot h-1.5 w-1.5 rounded-full bg-white" />
