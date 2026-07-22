@@ -6,6 +6,7 @@
 // animation ("slight slow every few seconds", locked to the poll). By parking the
 // frames in this module and letting the map's requestAnimationFrame loop read them
 // directly, the moving dots are fully decoupled from React: no setState, no re-render.
+import { useEffect, useState } from "react";
 
 export type Frame = { t: number; c: Record<string, [number, number]> };
 
@@ -108,4 +109,23 @@ export function subscribeFrames(fn: () => void): () => void {
   return () => {
     subs.delete(fn);
   };
+}
+
+/** Reactively true once the buffer has `min` samples — the point the map's animation loop
+ *  can actually interpolate a position. Shared so anything gating on "is driver tracking
+ *  really showing yet" (the map itself, Race Control's reveal timing, ...) agrees exactly. */
+export function useHasFrames(min = 2): boolean {
+  const [has, setHas] = useState(false);
+  useEffect(() => {
+    const check = () => setHas(getFrames().length >= min);
+    const unsub = subscribeFrames(check);
+    // Deferred to a timer callback, not called synchronously in the effect body — covers
+    // frames that already exist by the time this mounts (e.g. a fast remount).
+    const id = setTimeout(check, 0);
+    return () => {
+      unsub();
+      clearTimeout(id);
+    };
+  }, [min]);
+  return has;
 }

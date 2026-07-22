@@ -53,11 +53,12 @@ function Msg({ m }: { m: RcMessage }) {
   );
 }
 
-export default function RaceControl() {
+export default function RaceControl({ ready }: { ready: boolean }) {
   const [data, setData] = useState<RaceControl | null>(null);
   const [open, setOpen] = useState(false);
 
-  // Only relevant during a live session → 5s while active, 30s idle (pauses when hidden).
+  // Keeps polling regardless of `ready` (so data's already warm the moment it's shown) —
+  // only relevant during a live session → 5s while active, 30s idle (pauses when hidden).
   usePolling(async () => {
     try {
       const d = (await (await fetch("/api/racecontrol", { cache: "no-store" })).json()) as RaceControl;
@@ -65,7 +66,9 @@ export default function RaceControl() {
     } catch {}
   }, data?.available ? 5_000 : 30_000);
 
-  if (!data?.available) return null;
+  // Don't appear before the Driver Live Tracker itself does — it was popping in well
+  // before the map/board finished loading, which read as out of order.
+  if (!ready || !data?.available) return null;
   const messages = data.messages ?? [];
   const ts = trackStatusInfo(data.trackStatus?.Status);
 

@@ -8,6 +8,8 @@ import TyreTracker from "./TyreTracker";
 import TyreAllocation from "./TyreAllocation";
 import TelemetryCard from "./TelemetryCard";
 import MyTokenCard from "./MyTokenCard";
+import RaceControl from "./RaceControl";
+import { useHasFrames } from "./framesStore";
 
 function Header({
   badge,
@@ -29,8 +31,11 @@ function Header({
           </span>
         )}
         {badge === "replay" && (
-          <span className="rounded-full bg-ink px-2.5 py-1 text-[0.6rem] font-bold tracking-wider text-white">
-            LATEST
+          <span
+            className="rounded-full bg-ink px-2.5 py-1 text-[0.6rem] font-bold tracking-wider text-white"
+            title="Not live — replaying the most recently completed session."
+          >
+            REPLAY
           </span>
         )}
         {freeFeed && (
@@ -51,6 +56,10 @@ export default function LiveSection() {
   const s = useF1Live();
   // Click-to-follow: selected driver is highlighted on the map + gets a telemetry card.
   const [selected, setSelected] = useState<number | null>(null);
+  // Same signal TrackMap gates its own reveal on — Race Control was popping in well before
+  // the map/board actually had anything to show, which read as out of order. Called
+  // unconditionally (rules of hooks) even though it only matters in the branch below.
+  const trackingReady = useHasFrames();
 
   if (s.status === "error" || s.status === "idle" || s.status === "loading") {
     // Minimized: nothing is live, so collapse to a slim card explaining what's coming.
@@ -76,6 +85,7 @@ export default function LiveSection() {
             </div>
           </div>
         )}
+        <RaceControl ready={false} />
       </section>
     );
   }
@@ -88,13 +98,18 @@ export default function LiveSection() {
   const boardOrder =
     s.mode === "quali" && s.knockedOut ? s.order.filter((n) => !s.knockedOut!.has(n)) : s.order;
   const sessionLabel = `${s.session?.location} · ${s.session?.session_name}`;
-  const label = s.replay ? `Latest session · ${sessionLabel}` : `${sessionLabel} · on track now`;
+  const label = s.replay ? `Replay · ${sessionLabel}` : `${sessionLabel} · on track now`;
 
   const freeFeed = s.source === "free";
 
   return (
     <section>
       <Header badge={s.replay ? "replay" : "live"} label={label} freeFeed={freeFeed} />
+      {s.replay && (
+        <p className="-mt-3 mb-4 text-xs text-muted">
+          Nothing&apos;s live right now — this is a replay of the most recent session, not real-time.
+        </p>
+      )}
       {freeFeed && (
         <p className="-mt-3 mb-4 text-xs text-muted">
           Running on F1&apos;s free public feed — for real-time, smoother tracking, add an F1 TV token.
@@ -188,6 +203,7 @@ export default function LiveSection() {
           />
         </div>
       )}
+      <RaceControl ready={trackingReady} />
     </section>
   );
 }

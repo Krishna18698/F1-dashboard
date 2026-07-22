@@ -21,7 +21,6 @@ import Calendar from "./components/Calendar";
 import PaddockIntel from "./components/PaddockIntel";
 import TokenBanner from "./components/TokenBanner";
 import LiveSection from "./components/live/LiveSection";
-import RaceControl from "./components/live/RaceControl";
 
 // Dynamic: the hero consults the live relay to decide when a finished race weekend should
 // flip to the next round. Standings/news stay cached at the fetch layer.
@@ -120,9 +119,6 @@ export default async function Page() {
           For the fans, <span className="text-red">from a fan</span>.
         </p>
       </footer>
-
-      {/* Fixed right-side overlay — self-hides unless a session is live */}
-      <RaceControl />
     </main>
   );
 }

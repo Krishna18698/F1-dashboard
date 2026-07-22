@@ -5,7 +5,7 @@ import { Driver } from "@/lib/openf1";
 import { Bounds, computeBounds, rotate, tracePath } from "@/lib/geo";
 import { hex } from "@/lib/format";
 import { trackStatusInfo } from "@/lib/trackStatus";
-import { getFrames, resetFrames, setPlaybackT, subscribeFrames } from "./framesStore";
+import { getFrames, resetFrames, setPlaybackT, subscribeFrames, useHasFrames } from "./framesStore";
 
 const SIZE = 1000;
 const DELAY_MS = 20000; // play back this far behind the latest data → smooth, F1-TV-style
@@ -63,29 +63,24 @@ export default function TrackMap({
 
   // The frame buffer lives in framesStore (fed straight from the poll, no React state).
   // We just hold a live reference to it for the animation loop; resetting on unmount so
-  // the next session starts clean. Also track (reactively, unlike the ref) whether there
-  // are enough samples to actually interpolate a position yet — the animation loop needs
-  // 2+ frames, which usually only exist after the SECOND poll (driver identities arrive on
-  // the first), so gating the skeleton on driver data alone still let an empty track show
-  // for one whole poll interval before any dot had real coordinates.
+  // the next session starts clean.
   const bufRef = useRef(getFrames());
-  const [hasFrames, setHasFrames] = useState(false);
   useEffect(() => {
-    const check = () => {
+    bufRef.current = getFrames();
+    const unsub = subscribeFrames(() => {
       bufRef.current = getFrames();
-      setHasFrames(bufRef.current.length >= 2);
-    };
-    const unsub = subscribeFrames(check);
-    // Deferred to a timer callback, not called synchronously in the effect body (same
-    // pattern as elsewhere in this codebase) — covers the case frames already exist by
-    // the time this mounts (e.g. a fast remount).
-    const id = setTimeout(check, 0);
+    });
     return () => {
       unsub();
-      clearTimeout(id);
       resetFrames();
     };
   }, []);
+  // Reactive (unlike the ref above) — the animation loop needs 2+ frames to interpolate a
+  // position, which usually only exists after the SECOND poll (driver identities arrive on
+  // the first), so gating the skeleton on driver data alone still let an empty track show
+  // for one whole poll interval before any dot had real coordinates. Shared with
+  // RaceControl's reveal timing (via LiveSection) so both agree on "tracking is really up".
+  const hasFrames = useHasFrames();
 
   const rot = circuit?.rotation ?? 0;
   const outline = useMemo(
