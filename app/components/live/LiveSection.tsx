@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useF1Live } from "./useF1Live";
 import TrackMap from "./TrackMap";
 import TimingBoard from "./TimingBoard";
@@ -10,13 +10,37 @@ import TelemetryCard from "./TelemetryCard";
 import MyTokenCard from "./MyTokenCard";
 import RaceControl from "./RaceControl";
 import { useHasFrames } from "./framesStore";
+import { getStoredVisitorToken } from "@/lib/visitorToken";
+
+type View = "live" | "replay";
+
+/** Live/Replay switch — sits above the whole section so it's reachable regardless of
+ *  whether anything's currently live. Defaults to "live"; switching is the user's own
+ *  explicit choice, never automatic. */
+function ViewToggle({ view, onChange }: { view: View; onChange: (v: View) => void }) {
+  return (
+    <div className="mb-3 inline-flex rounded-full border border-line p-0.5">
+      {(["live", "replay"] as const).map((v) => (
+        <button
+          key={v}
+          onClick={() => onChange(v)}
+          className={`rounded-full px-3 py-1 text-[0.65rem] font-bold tracking-wider transition-colors ${
+            view === v ? (v === "live" ? "bg-red text-white" : "bg-ink text-white") : "text-muted hover:text-ink"
+          }`}
+        >
+          {v.toUpperCase()}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 function Header({
-  badge,
+  live,
   label,
   freeFeed,
 }: {
-  badge?: "live" | "replay";
+  live?: boolean;
   label: string;
   freeFeed?: boolean;
 }) {
@@ -24,18 +48,10 @@ function Header({
     <div className="mb-4 flex items-end justify-between gap-4 border-b-2 border-ink pb-2">
       <h3 className="font-display flex items-center gap-3 text-2xl sm:text-3xl">
         Live <span className="italic text-red">Tracking</span>
-        {badge === "live" && (
+        {live && (
           <span className="flex items-center gap-1.5 rounded-full bg-red px-2.5 py-1 text-[0.6rem] font-bold tracking-wider text-white">
             <span className="live-dot h-1.5 w-1.5 rounded-full bg-white" />
             LIVE
-          </span>
-        )}
-        {badge === "replay" && (
-          <span
-            className="rounded-full bg-ink px-2.5 py-1 text-[0.6rem] font-bold tracking-wider text-white"
-            title="Not live — replaying the most recently completed session."
-          >
-            REPLAY
           </span>
         )}
         {freeFeed && (
@@ -53,7 +69,8 @@ function Header({
 }
 
 export default function LiveSection() {
-  const s = useF1Live();
+  const [view, setView] = useState<View>("live");
+  const s = useF1Live(view);
   // Click-to-follow: selected driver is highlighted on the map + gets a telemetry card.
   const [selected, setSelected] = useState<number | null>(null);
   // Same signal TrackMap gates its own reveal on — Race Control was popping in well before
@@ -61,10 +78,24 @@ export default function LiveSection() {
   // unconditionally (rules of hooks) even though it only matters in the branch below.
   const trackingReady = useHasFrames();
 
+  // Whether EITHER a token is available — the owner's (server-known) or a visitor's own
+  // (their browser's localStorage) — so the idle state can say "live feed is ready" instead
+  // of implying tracking is unavailable when it's really just that nothing's on track yet.
+  const [hasVisitorToken, setHasVisitorToken] = useState(false);
+  useEffect(() => {
+    const id = setTimeout(() => setHasVisitorToken(!!getStoredVisitorToken()), 0);
+    return () => clearTimeout(id);
+  }, []);
+  // Only when the OWNER's token covers it and the visitor hasn't added their own — if they
+  // have, MyTokenCard below already tells them its status ("active"/expired/issue), and
+  // showing this banner too would just repeat the same reassurance twice.
+  const showLiveFeedBanner = s.ownerTokenConfigured && !hasVisitorToken;
+
   if (s.status === "error" || s.status === "idle" || s.status === "loading") {
     // Minimized: nothing is live, so collapse to a slim card explaining what's coming.
     return (
       <section className="rounded-lg border border-line bg-panel px-4 py-3">
+        <ViewToggle view={view} onChange={setView} />
         <div className="flex items-center gap-3">
           <span className={`h-2 w-2 shrink-0 rounded-full ${s.status === "loading" ? "live-dot bg-muted" : "bg-muted"}`} />
           <span className="font-display text-lg">
@@ -73,13 +104,27 @@ export default function LiveSection() {
         </div>
         {s.status === "loading" ? (
           <span className="skeleton mt-2 block h-4 w-64" />
+        ) : view === "replay" ? (
+          <div className="mt-2 pl-5 text-sm">
+            <p className="font-medium text-ink-soft">No past session is available to replay yet.</p>
+          </div>
         ) : (
           <div className="mt-2 pl-5 text-sm">
             <p className="font-medium text-ink-soft">No live Formula 1 session is currently running.</p>
             <p className="mt-1 text-ink-soft/80">
               Live driver tracking, telemetry, tyre strategy, and Race Control automatically
-              become available when an official F1 session starts.
+              become available when an official F1 session starts.{" "}
+              <button onClick={() => setView("replay")} className="font-semibold text-red underline underline-offset-2">
+                Click here
+              </button>{" "}
+              to watch a replay of the most recent session instead.
             </p>
+            {showLiveFeedBanner && (
+              <p className="mt-3 rounded-md border border-line bg-white/50 px-3 py-2 text-ink-soft/90">
+                <span className="font-semibold text-ink">Live feed is available</span> — tracking will start
+                automatically the moment an official session goes live, no action needed.
+              </p>
+            )}
             <div className="mt-3 max-w-md">
               <MyTokenCard tokenIssue={s.tokenIssue} ownerHasToken={s.ownerTokenConfigured} />
             </div>
@@ -104,18 +149,14 @@ export default function LiveSection() {
 
   return (
     <section>
-      <Header badge={s.replay ? "replay" : "live"} label={label} freeFeed={freeFeed} />
+      <ViewToggle view={view} onChange={setView} />
+      <Header live={!s.replay} label={label} freeFeed={freeFeed} />
       {s.replay && (
         <p className="-mt-3 mb-4 text-xs text-muted">
-          Nothing&apos;s live right now — this is a replay of the most recent session, not real-time.
+          Showing a replay of the most recent session, from lights out — not real-time.
         </p>
       )}
-      {freeFeed && (
-        <p className="-mt-3 mb-4 text-xs text-muted">
-          Running on F1&apos;s free public feed — for real-time, smoother tracking, add an F1 TV token.
-        </p>
-      )}
-      <MyTokenCard tokenIssue={s.tokenIssue} ownerHasToken={s.ownerTokenConfigured} />
+      {!s.replay && <MyTokenCard tokenIssue={s.tokenIssue} ownerHasToken={s.ownerTokenConfigured} />}
 
       {/* Track map + clean running order side by side */}
       <div className="grid gap-4 lg:grid-cols-2">

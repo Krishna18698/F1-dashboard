@@ -18,9 +18,9 @@ export const F1_LIVE = {
   // honest. Visitors without any token still get to see the last race, just not live.
   mode: "auto" as "auto" | "live" | "replay",
   preferType: "Race",
-  // When replaying a completed session, skip the pre-session build-up and start the
-  // virtual clock this far into the session (fraction of its total length).
-  replayAnchorFrac: 0.45,
+  // When replaying a completed session, start the virtual clock from lights out (0 = the
+  // very start) rather than partway through, so a replay always shows the whole race.
+  replayAnchorFrac: 0,
   pollMs: 3000, // paired with the ~4s car-dot glide for continuous, non-stop motion
   base: "https://livetiming.formula1.com/static",
 

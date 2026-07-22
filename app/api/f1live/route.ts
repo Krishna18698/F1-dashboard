@@ -25,15 +25,27 @@ function newTel<T extends { t: number }>(frames: T[], since: number): T[] {
 }
 
 /**
- * Serves live map + timing.
- * 1) If the visitor supplied their own F1 TV token (X-F1-Token header) → a fresh, isolated
- *    connection using THEIR token, torn down after this one request.
- * 2) Else if F1_TV_TOKEN is set → F1's real-time SignalR feed (authenticated, live now).
- * 3) Else → F1's free static feed (only a genuinely-live, published session).
- * Otherwise the client minimizes to "no live session".
+ * Serves live map + timing. The client explicitly picks a view via `?view=live|replay`
+ * (default live) — this route no longer silently substitutes one for the other.
+ *
+ * view=live (default):
+ *   1) Visitor's own token (X-F1-Token header) → a fresh, isolated connection, torn down
+ *      after this one request.
+ *   2) Else the site's own F1_TV_TOKEN, if set → real-time SignalR feed.
+ *   3) Else F1's free static feed, but ONLY if something is genuinely live right now.
+ *   Nothing live → idle (never substitutes a replay here; that's what view=replay is for).
+ *
+ * view=replay:
+ *   Always shows the most recently completed session from lights out, looping, via F1's
+ *   free static feed — regardless of tokens or whether something happens to be live.
  */
 export async function GET(req: NextRequest) {
   const since = Number(req.nextUrl.searchParams.get("since") ?? 0) || 0;
+  const view = req.nextUrl.searchParams.get("view") === "replay" ? "replay" : "live";
+  // Client-supplied "when this replay view session started" — anchors the virtual clock so
+  // switching into replay always begins at lights out, instead of joining a clock shared
+  // across all visitors regardless of when they tuned in. Falls back to now if omitted.
+  const replayT0 = Number(req.nextUrl.searchParams.get("t0")) || Date.now();
   // Set when a visitor-supplied token couldn't be used, so whatever the rest of the chain
   // ends up returning (their own live data, the owner's, the free feed, or idle) can still
   // carry a small "your token wasn't used" flag rather than blocking the page entirely.
@@ -46,7 +58,7 @@ export async function GET(req: NextRequest) {
     Response.json({ ...body, ownerTokenConfigured, ...(tokenIssue ? { tokenIssue } : {}) });
 
   try {
-    // 0) TEST replay — advance a past session against a real-time virtual clock.
+    // 0) TEST replay — dev-only override, wins regardless of the requested view.
     if (F1_LIVE.replay.enabled) {
       const r = F1_LIVE.replay;
       const dur = await getSessionDuration(r.sessionPath, false);
@@ -65,72 +77,77 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // 1) Visitor's own token — highest priority when supplied. Never logged, never
-    //    persisted; exists only for the duration of this one request (see f1Relay.ts).
-    const visitorToken = req.headers.get("x-f1-token");
-    if (visitorToken) {
-      const result = await getVisitorRelayState(visitorToken);
-      if (result.status === "ok") {
-        return respond({
-          status: "live",
-          replay: false,
-          source: "visitor",
-          ...result.state,
-          frames: newFrames(result.state.frames, since),
-          telFrames: newTel(result.state.telFrames, since),
-        });
+    if (view === "live") {
+      // 1) Visitor's own token — highest priority when supplied. Never logged, never
+      //    persisted; exists only for the duration of this one request (see f1Relay.ts).
+      const visitorToken = req.headers.get("x-f1-token");
+      if (visitorToken) {
+        const result = await getVisitorRelayState(visitorToken);
+        if (result.status === "ok") {
+          return respond({
+            status: "live",
+            replay: false,
+            source: "visitor",
+            ...result.state,
+            frames: newFrames(result.state.frames, since),
+            telFrames: newTel(result.state.telFrames, since),
+          });
+        }
+        // Not usable — flag it, but still fall through to whatever everyone else would see
+        // (the owner's token, the free feed, or idle) rather than a dead end.
+        if (result.status === "invalid_token") tokenIssue = "invalid";
+        else if (result.status === "too_many") tokenIssue = "busy";
+        // "no_session" — their token connected fine, just nothing live right now for it —
+        // falls through silently, no issue to flag.
       }
-      // Not usable — flag it, but still fall through to whatever everyone else would see
-      // (their own live data, the owner's, the free feed, or idle) rather than a dead end.
-      if (result.status === "invalid_token") tokenIssue = "invalid";
-      else if (result.status === "too_many") tokenIssue = "busy";
-      // "no_session" — their token connected fine, just nothing live right now for it —
-      // falls through silently, no issue to flag.
+
+      // 2) Real-time via the site's own F1 TV token.
+      if (process.env.F1_TV_TOKEN?.trim()) {
+        const relay = await getRelayState();
+        if (relay && relay.drivers.length > 0) {
+          return respond({
+            status: "live",
+            replay: false,
+            source: "token",
+            ...relay,
+            frames: newFrames(relay.frames, since),
+            telFrames: newTel(relay.telFrames, since),
+          });
+        }
+      }
+
+      // 3) Free feed — only a genuinely-live, published session. No fallback replay here;
+      //    view=replay is the explicit way to see the most recent session instead.
+      const live = await resolveLiveSession();
+      if (live && live.startWallMs != null) {
+        const upto = Date.now() - live.startWallMs;
+        const state = await getF1LiveState(live.path, live.type, upto, true);
+        if (state.drivers.length > 0) {
+          return respond({
+            status: "live",
+            replay: false,
+            source: "free",
+            circuitKey: live.circuitKey,
+            session: { location: live.location, session_name: live.name },
+            ...state,
+            frames: newFrames(state.frames, since),
+            telFrames: newTel(state.telFrames, since),
+          });
+        }
+      }
+
+      return respond({ status: "idle" });
     }
 
-    // 2) Real-time via the site's own F1 TV token — AUTHORITATIVE about live status when
-    //    it does have a session. If it says nothing's live, fall through to the free-feed
-    //    checks below instead of stopping here, so a replay of the latest race still shows
-    //    rather than a bare "idle".
-    if (process.env.F1_TV_TOKEN?.trim()) {
-      const relay = await getRelayState();
-      if (relay && relay.drivers.length > 0) {
-        return respond({
-          status: "live",
-          replay: false,
-          source: "token",
-          ...relay,
-          frames: newFrames(relay.frames, since),
-          telFrames: newTel(relay.telFrames, since),
-        });
-      }
-    }
-
-    const live = await resolveLiveSession();
-    if (live && live.startWallMs != null) {
-      const upto = Date.now() - live.startWallMs;
-      const state = await getF1LiveState(live.path, live.type, upto, true);
-      if (state.drivers.length > 0) {
-        return respond({
-          status: "live",
-          replay: false,
-          source: "free",
-          circuitKey: live.circuitKey,
-          session: { location: live.location, session_name: live.name },
-          ...state,
-          frames: newFrames(state.frames, since),
-          telFrames: newTel(state.telFrames, since),
-        });
-      }
-    }
-
-    // Fallback candidates (empty in "live" mode) — advance a virtual clock in real time.
+    // view === "replay" — always the most recently completed session, from lights out,
+    // looping, via the free feed. Deliberate, user-requested view — never idle just
+    // because something else happens to be live; that's what view=live is for.
     for (const c of await fallbackCandidates()) {
       const dur = await getSessionDuration(c.path, false);
       if (!dur) continue;
       const anchor = Math.floor(dur * F1_LIVE.replayAnchorFrac);
       const span = Math.max(1, dur - anchor);
-      const upto = anchor + (Date.now() % span);
+      const upto = anchor + ((Date.now() - replayT0) % span);
       const state = await getF1LiveState(c.path, c.type, upto, false);
       if (state.drivers.length > 0) {
         return respond({
@@ -148,6 +165,6 @@ export async function GET(req: NextRequest) {
 
     return respond({ status: "idle" });
   } catch {
-    return Response.json({ status: "error", ownerTokenConfigured: Boolean(process.env.F1_TV_TOKEN?.trim()) }, { status: 200 });
+    return Response.json({ status: "error", ownerTokenConfigured }, { status: 200 });
   }
 }

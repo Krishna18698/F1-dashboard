@@ -5,7 +5,7 @@ import { Driver, IntervalRow, LapSummary, StintRow } from "@/lib/openf1";
 import { F1_LIVE } from "@/lib/f1liveConfig";
 import { getStoredVisitorToken } from "@/lib/visitorToken";
 import type { LiveState } from "./useLiveSession";
-import { newestFrameT, pushFrames, pushTel } from "./framesStore";
+import { newestFrameT, pushFrames, pushTel, resetFrames } from "./framesStore";
 
 interface ApiRow {
   driver_number: number;
@@ -168,13 +168,25 @@ function toState(r: ApiResponse): LiveState {
   };
 }
 
-export function useF1Live(): LiveState {
+export function useF1Live(view: "live" | "replay" = "live"): LiveState {
   const [state, setState] = useState<LiveState>(empty);
   const cancelled = useRef(false);
 
   useEffect(() => {
     cancelled.current = false;
     let timer: ReturnType<typeof setTimeout>;
+    // Switching view (live <-> replay) is a different data stream/clock entirely — drop
+    // any buffered positions and show "loading" instead of a stale frame from the other
+    // view while the first poll for the new one is in flight. Deferred to a timer callback,
+    // not called synchronously in the effect body (same pattern as elsewhere in this file's
+    // sibling components).
+    resetFrames();
+    const resetId = setTimeout(() => setState(empty), 0);
+
+    // Replay's virtual clock is anchored to when THIS view session started, so switching
+    // into replay always begins at lights out (lap 1) rather than joining a clock that's
+    // shared/looping across all visitors regardless of when they tuned in.
+    const replayT0 = Date.now();
 
     // Poll fast only while a session is live; back off hard when idle so we're not
     // hammering the feed when nothing is happening.
@@ -194,7 +206,8 @@ export function useF1Live(): LiveState {
         // so it never lands in a URL/log; read fresh from localStorage every poll so
         // saving/removing it in another tab takes effect on the next tick.
         const myToken = getStoredVisitorToken();
-        const res = await fetch(`/api/f1live?since=${newestFrameT()}`, {
+        const t0Param = view === "replay" ? `&t0=${replayT0}` : "";
+        const res = await fetch(`/api/f1live?since=${newestFrameT()}&view=${view}${t0Param}`, {
           cache: "no-store",
           headers: myToken ? { "X-F1-Token": myToken } : undefined,
         });
@@ -228,8 +241,9 @@ export function useF1Live(): LiveState {
     return () => {
       cancelled.current = true;
       clearTimeout(timer);
+      clearTimeout(resetId);
     };
-  }, []);
+  }, [view]);
 
   return state;
 }
