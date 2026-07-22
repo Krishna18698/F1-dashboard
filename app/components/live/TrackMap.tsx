@@ -25,6 +25,7 @@ export default function TrackMap({
   retired,
   name,
   trackStatus,
+  laps,
   selectedNum,
   onSelect,
 }: {
@@ -35,6 +36,7 @@ export default function TrackMap({
   retired?: Set<number>;
   name?: string;
   trackStatus?: string | null;
+  laps?: { current: number; total: number };
   selectedNum?: number | null;
   onSelect?: (num: number | null) => void;
 }) {
@@ -372,6 +374,14 @@ export default function TrackMap({
         {name && (
           <span className="eyebrow absolute bottom-3 left-4 z-10 text-[0.7rem] font-semibold text-white/50">
             {name}
+          </span>
+        )}
+        {laps && laps.total > 0 && (
+          <span
+            className="tnum absolute right-3 top-3 z-10 rounded-full bg-black/60 px-2.5 py-1 font-mono text-[0.65rem] font-bold tracking-wider text-white/85"
+            title="Progress through the race — lap X of Y"
+          >
+            LAP {laps.current}/{laps.total}
           </span>
         )}
         <svg viewBox={`0 0 ${SIZE} ${SIZE}`} className="h-full w-full">
