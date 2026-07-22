@@ -63,15 +63,26 @@ export default function TrackMap({
 
   // The frame buffer lives in framesStore (fed straight from the poll, no React state).
   // We just hold a live reference to it for the animation loop; resetting on unmount so
-  // the next session starts clean.
+  // the next session starts clean. Also track (reactively, unlike the ref) whether there
+  // are enough samples to actually interpolate a position yet — the animation loop needs
+  // 2+ frames, which usually only exist after the SECOND poll (driver identities arrive on
+  // the first), so gating the skeleton on driver data alone still let an empty track show
+  // for one whole poll interval before any dot had real coordinates.
   const bufRef = useRef(getFrames());
+  const [hasFrames, setHasFrames] = useState(false);
   useEffect(() => {
-    bufRef.current = getFrames();
-    const unsub = subscribeFrames(() => {
+    const check = () => {
       bufRef.current = getFrames();
-    });
+      setHasFrames(bufRef.current.length >= 2);
+    };
+    const unsub = subscribeFrames(check);
+    // Deferred to a timer callback, not called synchronously in the effect body (same
+    // pattern as elsewhere in this codebase) — covers the case frames already exist by
+    // the time this mounts (e.g. a fast remount).
+    const id = setTimeout(check, 0);
     return () => {
       unsub();
+      clearTimeout(id);
       resetFrames();
     };
   }, []);
@@ -310,11 +321,13 @@ export default function TrackMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dotsKey]);
 
-  // Wait for BOTH the circuit outline AND the first driver data before showing anything —
-  // they resolve from separate requests (circuit outline vs. the live poll), and the
-  // circuit usually comes back first, so revealing an empty track for a couple seconds
-  // before dots appear read as broken. One skeleton covers the whole gap instead.
-  if (!bounds || drivers.size === 0) {
+  // Wait for the circuit outline, driver identities, AND enough position samples to
+  // actually place a dot — three separate things that resolve at different times (the
+  // circuit outline is its own fetch; driver identities arrive on the first live poll, but
+  // the animation loop needs 2+ position frames to interpolate, which usually only exists
+  // after the SECOND poll ~3s later). Revealing the track before all three are ready showed
+  // an empty (or driver-less) track for a couple seconds before any dot appeared.
+  if (!bounds || drivers.size === 0 || !hasFrames) {
     return (
       <div className="self-start">
         <span className="eyebrow mb-2 block text-[0.6rem] text-muted">
