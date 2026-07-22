@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { fallbackCandidates, getF1LiveState, getSessionDuration, resolveLiveSession } from "@/lib/f1feed";
+import { fallbackCandidates, getF1LiveState, getReplayAnchorMs, getSessionDuration, resolveLiveSession } from "@/lib/f1feed";
 import { getRelayState, getVisitorRelayState } from "@/lib/f1Relay";
 import { F1_LIVE } from "@/lib/f1liveConfig";
 
@@ -145,7 +145,7 @@ export async function GET(req: NextRequest) {
     for (const c of await fallbackCandidates()) {
       const dur = await getSessionDuration(c.path, false);
       if (!dur) continue;
-      const anchor = Math.floor(dur * F1_LIVE.replayAnchorFrac);
+      const anchor = await getReplayAnchorMs(c.path, false);
       const span = Math.max(1, dur - anchor);
       const upto = anchor + ((Date.now() - replayT0) % span);
       const state = await getF1LiveState(c.path, c.type, upto, false);

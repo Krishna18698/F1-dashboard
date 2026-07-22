@@ -168,7 +168,7 @@ function toState(r: ApiResponse): LiveState {
   };
 }
 
-export function useF1Live(view: "live" | "replay" = "live"): LiveState {
+export function useF1Live(view: "live" | "replay" = "live", replayT0?: number): LiveState {
   const [state, setState] = useState<LiveState>(empty);
   const cancelled = useRef(false);
 
@@ -182,11 +182,6 @@ export function useF1Live(view: "live" | "replay" = "live"): LiveState {
     // sibling components).
     resetFrames();
     const resetId = setTimeout(() => setState(empty), 0);
-
-    // Replay's virtual clock is anchored to when THIS view session started, so switching
-    // into replay always begins at lights out (lap 1) rather than joining a clock that's
-    // shared/looping across all visitors regardless of when they tuned in.
-    const replayT0 = Date.now();
 
     // Poll fast only while a session is live; back off hard when idle so we're not
     // hammering the feed when nothing is happening.
@@ -206,7 +201,7 @@ export function useF1Live(view: "live" | "replay" = "live"): LiveState {
         // so it never lands in a URL/log; read fresh from localStorage every poll so
         // saving/removing it in another tab takes effect on the next tick.
         const myToken = getStoredVisitorToken();
-        const t0Param = view === "replay" ? `&t0=${replayT0}` : "";
+        const t0Param = view === "replay" && replayT0 ? `&t0=${replayT0}` : "";
         const res = await fetch(`/api/f1live?since=${newestFrameT()}&view=${view}${t0Param}`, {
           cache: "no-store",
           headers: myToken ? { "X-F1-Token": myToken } : undefined,
@@ -243,7 +238,7 @@ export function useF1Live(view: "live" | "replay" = "live"): LiveState {
       clearTimeout(timer);
       clearTimeout(resetId);
     };
-  }, [view]);
+  }, [view, replayT0]);
 
   return state;
 }

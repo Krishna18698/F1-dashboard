@@ -70,7 +70,17 @@ function Header({
 
 export default function LiveSection() {
   const [view, setView] = useState<View>("live");
-  const s = useF1Live(view);
+  // When switching INTO replay, stamp "now" as the anchor every consumer of replay data
+  // (useF1Live for the map/board, RaceControl for messages) uses to compute the virtual
+  // clock — so both agree on the same instant instead of each picking their own "now" a
+  // few ms apart, and so every switch into replay starts fresh from lights out. Set in the
+  // click handler (not an effect) so it lands in the same render/tick as the view change.
+  const [replayT0, setReplayT0] = useState(() => Date.now());
+  const changeView = (v: View) => {
+    if (v === "replay") setReplayT0(Date.now());
+    setView(v);
+  };
+  const s = useF1Live(view, replayT0);
   // Click-to-follow: selected driver is highlighted on the map + gets a telemetry card.
   const [selected, setSelected] = useState<number | null>(null);
   // Same signal TrackMap gates its own reveal on — Race Control was popping in well before
@@ -95,7 +105,7 @@ export default function LiveSection() {
     // Minimized: nothing is live, so collapse to a slim card explaining what's coming.
     return (
       <section className="rounded-lg border border-line bg-panel px-4 py-3">
-        <ViewToggle view={view} onChange={setView} />
+        <ViewToggle view={view} onChange={changeView} />
         <div className="flex items-center gap-3">
           <span className={`h-2 w-2 shrink-0 rounded-full ${s.status === "loading" ? "live-dot bg-muted" : "bg-muted"}`} />
           <span className="font-display text-lg">
@@ -114,7 +124,7 @@ export default function LiveSection() {
             <p className="mt-1 text-ink-soft/80">
               Live driver tracking, telemetry, tyre strategy, and Race Control automatically
               become available when an official F1 session starts.{" "}
-              <button onClick={() => setView("replay")} className="font-semibold text-red underline underline-offset-2">
+              <button onClick={() => changeView("replay")} className="font-semibold text-red underline underline-offset-2">
                 Click here
               </button>{" "}
               to watch a replay of the most recent session instead.
@@ -130,7 +140,7 @@ export default function LiveSection() {
             </div>
           </div>
         )}
-        <RaceControl ready={false} />
+        <RaceControl ready={false} view={view} replayT0={replayT0} />
       </section>
     );
   }
@@ -149,7 +159,7 @@ export default function LiveSection() {
 
   return (
     <section>
-      <ViewToggle view={view} onChange={setView} />
+      <ViewToggle view={view} onChange={changeView} />
       <Header live={!s.replay} label={label} freeFeed={freeFeed} />
       {s.replay && (
         <p className="-mt-3 mb-4 text-xs text-muted">
@@ -245,7 +255,7 @@ export default function LiveSection() {
           />
         </div>
       )}
-      <RaceControl ready={trackingReady} />
+      <RaceControl ready={trackingReady} view={view} replayT0={replayT0} />
     </section>
   );
 }

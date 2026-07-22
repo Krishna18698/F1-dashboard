@@ -344,6 +344,19 @@ export async function getSessionDuration(sessionPath: string, live: boolean): Pr
   return (await load(sessionPath, live)).durationMs;
 }
 
+/** The instant real on-track GPS position data begins — a far better "lights out" anchor
+ *  for replay than ts=0: F1's live-timing recording starts well before the race itself
+ *  (garage/grid coverage), and cars only transmit real coordinates once rolled out for the
+ *  formation lap, ~10+ minutes later. Starting the replay clock at literal ts=0 meant
+ *  minutes of "lap 1, no cars on track" before anything actually appeared. */
+export async function getReplayAnchorMs(sessionPath: string, live: boolean): Promise<number> {
+  const s = await load(sessionPath, live);
+  for (const f of s.frames) {
+    if (Object.keys(f.cars).length > 0) return f.ts;
+  }
+  return 0;
+}
+
 /* ------------------------------ state reducer ------------------------------ */
 export interface F1LiveRow {
   driver_number: number;
@@ -796,9 +809,14 @@ export async function getStaticResults(): Promise<{
 /**
  * Resolves the (session path, instant, live-ness) the free-feed live panel is currently
  * showing — the exact same test-replay → live → fallback branching `/api/f1live` uses —
- * so `/api/racecontrol` can serve messages for that SAME session without a token.
+ * so `/api/racecontrol` can serve messages for that SAME session/instant without a token.
+ * `view`/`replayT0` must be passed through from the client exactly as `/api/f1live` received
+ * them, or Race Control ends up narrating a different point in the session than the map.
  */
-export async function resolveFreeInstant(): Promise<{ path: string; uptoMs: number; live: boolean } | null> {
+export async function resolveFreeInstant(
+  view: "live" | "replay" = "live",
+  replayT0?: number,
+): Promise<{ path: string; uptoMs: number; live: boolean } | null> {
   if (F1_LIVE.replay.enabled) {
     const r = F1_LIVE.replay;
     const dur = await getSessionDuration(r.sessionPath, false);
@@ -808,17 +826,21 @@ export async function resolveFreeInstant(): Promise<{ path: string; uptoMs: numb
     return { path: r.sessionPath, uptoMs: upto, live: false };
   }
 
-  const live = await resolveLiveSession();
-  if (live && live.startWallMs != null) {
-    return { path: live.path, uptoMs: Date.now() - live.startWallMs, live: true };
+  if (view === "live") {
+    const live = await resolveLiveSession();
+    if (live && live.startWallMs != null) {
+      return { path: live.path, uptoMs: Date.now() - live.startWallMs, live: true };
+    }
+    return null;
   }
 
+  const t0 = replayT0 ?? Date.now();
   for (const c of await fallbackCandidates()) {
     const dur = await getSessionDuration(c.path, false);
     if (!dur) continue;
-    const anchor = Math.floor(dur * F1_LIVE.replayAnchorFrac);
+    const anchor = await getReplayAnchorMs(c.path, false);
     const span = Math.max(1, dur - anchor);
-    const upto = anchor + (Date.now() % span);
+    const upto = anchor + ((Date.now() - t0) % span);
     return { path: c.path, uptoMs: upto, live: false };
   }
   return null;

@@ -53,15 +53,26 @@ function Msg({ m }: { m: RcMessage }) {
   );
 }
 
-export default function RaceControl({ ready }: { ready: boolean }) {
+export default function RaceControl({
+  ready,
+  view = "live",
+  replayT0,
+}: {
+  ready: boolean;
+  view?: "live" | "replay";
+  replayT0?: number;
+}) {
   const [data, setData] = useState<RaceControl | null>(null);
   const [open, setOpen] = useState(false);
 
   // Keeps polling regardless of `ready` (so data's already warm the moment it's shown) —
   // only relevant during a live session → 5s while active, 30s idle (pauses when hidden).
+  // `view`/`replayT0` must match what the map/timing poll (`useF1Live`) sends, or this ends
+  // up narrating a different point in the replay than what's on screen.
   usePolling(async () => {
     try {
-      const d = (await (await fetch("/api/racecontrol", { cache: "no-store" })).json()) as RaceControl;
+      const t0Param = view === "replay" && replayT0 ? `&t0=${replayT0}` : "";
+      const d = (await (await fetch(`/api/racecontrol?view=${view}${t0Param}`, { cache: "no-store" })).json()) as RaceControl;
       setData(d);
     } catch {}
   }, data?.available ? 5_000 : 30_000);
