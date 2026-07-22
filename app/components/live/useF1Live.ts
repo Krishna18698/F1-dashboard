@@ -5,7 +5,7 @@ import { Driver, IntervalRow, LapSummary, StintRow } from "@/lib/openf1";
 import { F1_LIVE } from "@/lib/f1liveConfig";
 import { getStoredVisitorToken } from "@/lib/visitorToken";
 import type { LiveState } from "./useLiveSession";
-import { newestFrameT, pushFrames, pushTel, resetFrames } from "./framesStore";
+import { getPlaybackT, newestFrameT, pushFrames, pushTel, resetFrames } from "./framesStore";
 
 interface ApiRow {
   driver_number: number;
@@ -204,7 +204,14 @@ export function useF1Live(view: "live" | "replay" = "live", replayT0?: number): 
         // saving/removing it in another tab takes effect on the next tick.
         const myToken = getStoredVisitorToken();
         const t0Param = view === "replay" && replayT0 ? `&t0=${replayT0}` : "";
-        const res = await fetch(`/api/f1live?since=${newestFrameT()}&view=${view}${t0Param}`, {
+        // Once the map has real frames, ask for trackStatus/formationLap/currentLap/rows as of
+        // the SAME instant the dots are currently rendering (the playback clock, ~20s behind
+        // the freshest frame) — not "now" — so a flag/lap change never shows up before the
+        // dots have actually reached that moment. Frames themselves stay on the fresh `since`
+        // window regardless, so the buffer keeps enough lead room to interpolate smoothly.
+        const pt = getPlaybackT();
+        const asOfParam = pt > 0 ? `&asOf=${Math.floor(pt)}` : "";
+        const res = await fetch(`/api/f1live?since=${newestFrameT()}&view=${view}${t0Param}${asOfParam}`, {
           cache: "no-store",
           headers: myToken ? { "X-F1-Token": myToken } : undefined,
         });

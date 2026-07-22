@@ -620,11 +620,18 @@ export async function getF1LiveState(
   sessionType: string,
   uptoMs: number,
   live: boolean,
+  // Everything EXCEPT frames/telFrames (rows, trackStatus, currentLap, formationLap, ...)
+  // is computed as of `infoUptoMs` instead of `uptoMs` when given. Frames must stay on the
+  // raw/fresh `uptoMs` so the client's buffer keeps enough lead room to interpolate smoothly;
+  // the on-screen dots then render ~20s behind that via TrackMap's own playback delay. Every
+  // OTHER displayed value (a flag tint, the lap counter, gaps) needs to reflect that SAME
+  // delayed instant, or it visibly "knows" things before the dots have caught up to them.
+  infoUptoMs: number = uptoMs,
 ): Promise<F1LiveState> {
   const s = await load(sessionPath, live);
-  const timing = mergeUpto(s.timing, uptoMs);
-  const appState = mergeUpto(s.app, uptoMs);
-  const stintFirstSeenAt = stintFirstSeenTimes(s.app, uptoMs);
+  const timing = mergeUpto(s.timing, infoUptoMs);
+  const appState = mergeUpto(s.app, infoUptoMs);
+  const stintFirstSeenAt = stintFirstSeenTimes(s.app, infoUptoMs);
   const weekendMap = await weekendTyresLeft(sessionPath, appState).catch(
     () => ({}) as Record<string, { compound: string; left: number }[]>,
   );
@@ -698,7 +705,7 @@ export async function getF1LiveState(
   const m = mode(sessionType);
   // Formation lap: after the anchor (which already backs off from SessionStatus:"Started"
   // to include it) but before the race has actually gone green — races only.
-  const formationLap = m === "race" && s.sessionStartedTs != null && uptoMs < s.sessionStartedTs;
+  const formationLap = m === "race" && s.sessionStartedTs != null && infoUptoMs < s.sessionStartedTs;
   const order = Object.keys(rows)
     .map(Number)
     .sort((a, b) => {
@@ -736,7 +743,7 @@ export async function getF1LiveState(
   let currentLap = 0;
   let totalLaps = 0;
   for (const l of s.lap) {
-    if (l.ts > uptoMs) break;
+    if (l.ts > infoUptoMs) break;
     if (l.data.CurrentLap != null) currentLap = Number(l.data.CurrentLap);
     if (l.data.TotalLaps != null) totalLaps = Number(l.data.TotalLaps);
   }
@@ -744,7 +751,7 @@ export async function getF1LiveState(
   // Track status at this instant (yellow/SC/red map tint).
   let trackStatus: string | null = null;
   for (const t of s.track) {
-    if (t.ts > uptoMs) break;
+    if (t.ts > infoUptoMs) break;
     trackStatus = t.status;
   }
 
@@ -753,13 +760,13 @@ export async function getF1LiveState(
   let qualifyingPart: number | null = null;
   let qualifyingPartStartTs: number | null = null;
   for (const p of s.qp) {
-    if (p.ts > uptoMs) break;
+    if (p.ts > infoUptoMs) break;
     qualifyingPart = p.part;
     qualifyingPartStartTs = p.ts;
   }
   const qualifyingRemainingMs =
     qualifyingPart && qualifyingPartStartTs != null
-      ? Math.max(0, QUALI_DURATION_MS[qualifyingPart] - (uptoMs - qualifyingPartStartTs))
+      ? Math.max(0, QUALI_DURATION_MS[qualifyingPart] - (infoUptoMs - qualifyingPartStartTs))
       : null;
 
   // Telemetry window [upto − 45s, upto]: decode only the CarData lines in the window

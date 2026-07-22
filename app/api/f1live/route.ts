@@ -46,6 +46,13 @@ export async function GET(req: NextRequest) {
   // switching into replay always begins at lights out, instead of joining a clock shared
   // across all visitors regardless of when they tuned in. Falls back to now if omitted.
   const replayT0 = Number(req.nextUrl.searchParams.get("t0")) || Date.now();
+  // Once the map has real frames, the client sends its OWN playback clock (the exact instant
+  // the car dots are currently rendering, ~20s behind the freshest fetched frame for smooth
+  // interpolation) as `asOf`. Every non-frame field (trackStatus, formationLap, currentLap,
+  // rows/gaps) is computed as of THAT instant instead of the raw fetch time — otherwise a
+  // flag/lap change becomes visible before the dots have actually reached that moment, which
+  // reads as the tracker "knowing" about a flag/incident before it happened on screen.
+  const asOf = Number(req.nextUrl.searchParams.get("asOf")) || undefined;
   // Set when a visitor-supplied token couldn't be used, so whatever the rest of the chain
   // ends up returning (their own live data, the owner's, the free feed, or idle) can still
   // carry a small "your token wasn't used" flag rather than blocking the page entirely.
@@ -121,7 +128,7 @@ export async function GET(req: NextRequest) {
       const live = await resolveLiveSession();
       if (live && live.startWallMs != null) {
         const upto = Date.now() - live.startWallMs;
-        const state = await getF1LiveState(live.path, live.type, upto, true);
+        const state = await getF1LiveState(live.path, live.type, upto, true, asOf ?? upto);
         if (state.drivers.length > 0) {
           return respond({
             status: "live",
@@ -148,7 +155,7 @@ export async function GET(req: NextRequest) {
       const anchor = await getReplayAnchorMs(c.path, false);
       const span = Math.max(1, dur - anchor);
       const upto = anchor + ((Date.now() - replayT0) % span);
-      const state = await getF1LiveState(c.path, c.type, upto, false);
+      const state = await getF1LiveState(c.path, c.type, upto, false, asOf ?? upto);
       if (state.drivers.length > 0) {
         return respond({
           status: "live",
