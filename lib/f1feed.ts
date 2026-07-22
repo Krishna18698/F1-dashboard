@@ -193,6 +193,7 @@ interface SessionCache {
   track: { ts: number; status: string }[];
   rc: { ts: number; idx: string; msg: RcMessage }[]; // race control messages, flattened
   qp: { ts: number; part: number }[]; // QualifyingPart transitions (1=Q1, 2=Q2, 3=Q3)
+  sessionStartedTs: number | null; // SessionStatus:"Started" — lights-out/race-start instant
   car: { ts: number; raw: string }[]; // CarData.z lines, decoded lazily (window per request)
   posOffset: number | null; // absolute Utc → session-relative ms (shared by Position + CarData)
   frames: PosFrame[];
@@ -264,14 +265,25 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
   }
 
   // SessionData: sparse "Series" index-keyed deltas carrying QualifyingPart (1=Q1,2=Q2,3=Q3),
-  // present only in Qualifying sessions.
+  // present only in Qualifying sessions. Also carries "StatusSeries" transitions, including
+  // SessionStatus:"Started" — F1's own explicit signal for lights-out/race-start, a far more
+  // reliable "the race has actually begun" marker than inferring it from position/lap data.
   const qp: { ts: number; part: number }[] = [];
+  let sessionStartedTs: number | null = null;
   for (const raw of qpTxt.replace(/^﻿/, "").split(/\r?\n/)) {
     if (!raw) continue;
     try {
-      const d = JSON.parse(raw.slice(TS_LEN)) as { Series?: Record<string, { QualifyingPart?: number }> };
+      const ts = tsToMs(raw.slice(0, TS_LEN));
+      const d = JSON.parse(raw.slice(TS_LEN)) as {
+        Series?: Record<string, { QualifyingPart?: number }>;
+        StatusSeries?: Record<string, { SessionStatus?: string }> | { SessionStatus?: string }[];
+      };
       for (const v of Object.values(d.Series ?? {})) {
-        if (v.QualifyingPart != null) qp.push({ ts: tsToMs(raw.slice(0, TS_LEN)), part: v.QualifyingPart });
+        if (v.QualifyingPart != null) qp.push({ ts, part: v.QualifyingPart });
+      }
+      const statusEntries = Array.isArray(d.StatusSeries) ? d.StatusSeries : Object.values(d.StatusSeries ?? {});
+      for (const st of statusEntries) {
+        if (st.SessionStatus === "Started" && sessionStartedTs === null) sessionStartedTs = ts;
       }
     } catch {}
   }
@@ -335,7 +347,21 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
   frames.sort((a, b) => a.ts - b.ts);
 
   const durationMs = Math.max(timing.at(-1)?.ts ?? 0, frames.at(-1)?.ts ?? 0);
-  const entry: SessionCache = { loadedAt: Date.now(), drivers, timing, app, lap, track, rc, qp, car, posOffset, frames, durationMs };
+  const entry: SessionCache = {
+    loadedAt: Date.now(),
+    drivers,
+    timing,
+    app,
+    lap,
+    track,
+    rc,
+    qp,
+    sessionStartedTs,
+    car,
+    posOffset,
+    frames,
+    durationMs,
+  };
   cache.set(sessionPath, entry);
   return entry;
 }
@@ -344,13 +370,19 @@ export async function getSessionDuration(sessionPath: string, live: boolean): Pr
   return (await load(sessionPath, live)).durationMs;
 }
 
-/** The instant real on-track GPS position data begins — a far better "lights out" anchor
- *  for replay than ts=0: F1's live-timing recording starts well before the race itself
- *  (garage/grid coverage), and cars only transmit real coordinates once rolled out for the
- *  formation lap, ~10+ minutes later. Starting the replay clock at literal ts=0 meant
- *  minutes of "lap 1, no cars on track" before anything actually appeared. */
+// Formation laps run ~2-5 min; F1's feed has no explicit "formation lap starts" marker, so
+// back off a fixed buffer from the real SessionStatus:"Started" instant to include it.
+const FORMATION_LAP_BUFFER_MS = 3 * 60_000;
+
+/** "Lights out" anchor for replay. Literal ts=0 is the start of pre-race broadcast coverage
+ *  (garage/grid, cars going out one at a time on reconnaissance laps) — using it made replay
+ *  open on an empty track for 10+ minutes before the race, let alone the formation lap,
+ *  began. SessionStatus:"Started" (from SessionData) is F1's own explicit race-start signal;
+ *  back off a fixed buffer from it to also cover the formation lap. Falls back to the first
+ *  real position sample if a session predates/lacks that topic. */
 export async function getReplayAnchorMs(sessionPath: string, live: boolean): Promise<number> {
   const s = await load(sessionPath, live);
+  if (s.sessionStartedTs != null) return Math.max(0, s.sessionStartedTs - FORMATION_LAP_BUFFER_MS);
   for (const f of s.frames) {
     if (Object.keys(f.cars).length > 0) return f.ts;
   }
