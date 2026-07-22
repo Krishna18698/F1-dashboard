@@ -107,9 +107,9 @@ export default function LiveSection() {
       <div>
         <div className="mb-3 flex items-center gap-3">
           <span className={`h-2 w-2 shrink-0 rounded-full ${s.status === "loading" ? "live-dot bg-muted" : "bg-muted"}`} />
-          <span className="font-display text-lg">
+          <h3 className="font-display text-2xl sm:text-3xl">
             Live <span className="italic text-red">Tracking</span>
-          </span>
+          </h3>
         </div>
         <section className="rounded-lg border border-line bg-panel px-4 py-3">
           <ViewToggle view={view} onChange={changeView} />
