@@ -45,27 +45,27 @@ function Header({
   freeFeed?: boolean;
 }) {
   return (
-    <div className="mb-4 flex items-end justify-between gap-4 border-b-2 border-ink pb-2">
-      <h3 className="font-display flex items-center gap-3 text-2xl sm:text-3xl">
-        <span>
+    <div className="mb-4 flex flex-wrap items-end gap-x-4 gap-y-1 border-b-2 border-ink pb-2">
+      <h3 className="font-display flex flex-wrap items-center gap-2 text-xl sm:gap-3 sm:text-3xl">
+        <span className="whitespace-nowrap">
           Live <span className="italic text-red">Tracking</span>
         </span>
         {live && (
-          <span className="flex items-center gap-1.5 rounded-full bg-red px-2.5 py-1 text-[0.6rem] font-bold tracking-wider text-white">
+          <span className="flex items-center gap-1.5 whitespace-nowrap rounded-full bg-red px-2.5 py-1 text-[0.6rem] font-bold tracking-wider text-white">
             <span className="live-dot h-1.5 w-1.5 rounded-full bg-white" />
             LIVE
           </span>
         )}
         {freeFeed && (
           <span
-            className="rounded-full border border-line px-2.5 py-1 text-[0.6rem] font-bold tracking-wider text-muted"
+            className="whitespace-nowrap rounded-full border border-line px-2.5 py-1 text-[0.6rem] font-bold tracking-wider text-muted"
             title="Running on F1's free public feed — add an F1 TV token (F1_TV_TOKEN) for real-time, smoother tracking."
           >
             FREE FEED
           </span>
         )}
       </h3>
-      <span className="eyebrow shrink-0 text-[0.6rem] text-muted">{label}</span>
+      <span className="eyebrow ml-auto text-right text-[0.6rem] text-muted">{label}</span>
     </div>
   );
 }
