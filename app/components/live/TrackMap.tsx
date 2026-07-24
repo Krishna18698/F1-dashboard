@@ -396,8 +396,10 @@ export default function TrackMap({
           {path && (
             <path d={path} fill="none" stroke="#f4f4f6" strokeWidth={12} strokeLinejoin="round" strokeLinecap="round" />
           )}
-          {cornerLabels.map((c) => (
-            <g key={c.n} transform={`translate(${c.x} ${c.y})`}>
+          {cornerLabels.map((c, i) => (
+            // Corner number isn't a safe key on its own — at least one circuit's outline
+            // data has two entries sharing the same number (e.g. a split/sub corner).
+            <g key={`${c.n}-${i}`} transform={`translate(${c.x} ${c.y})`}>
               <circle r={12} fill="#15151a" fillOpacity={0.75} />
               <text
                 textAnchor="middle"
