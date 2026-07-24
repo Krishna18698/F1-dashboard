@@ -143,7 +143,14 @@ export async function GET(req: NextRequest) {
         }
       }
 
-      return respond({ status: "idle" });
+      // Nothing to actually show yet (no token, and the free feed's own data hasn't
+      // caught up) — but if the schedule itself says a session is happening RIGHT NOW,
+      // tell the idle state which one, so it can say "X is live now, add a token" instead
+      // of the generic "nothing running" message.
+      return respond({
+        status: "idle",
+        scheduledLive: live ? { location: live.location, session_name: live.name } : null,
+      });
     }
 
     // view === "replay" — always the most recently completed session, from lights out,

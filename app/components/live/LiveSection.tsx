@@ -120,16 +120,33 @@ export default function LiveSection() {
             </div>
           ) : (
             <div className="mt-2 pl-5 text-sm">
-              <p className="font-medium text-ink-soft">No live Formula 1 session is currently running.</p>
-              <p className="mt-1 text-ink-soft/80">
-                Live driver tracking, telemetry, tyre strategy, and Race Control automatically
-                become available when an official F1 session starts.{" "}
-                <button onClick={() => changeView("replay")} className="font-semibold text-red underline underline-offset-2">
-                  Click here
-                </button>{" "}
-                to watch a replay of the most recent session instead.
-              </p>
-              {showLiveFeedBanner && (
+              {s.scheduledLive ? (
+                <>
+                  <p className="font-medium text-ink-soft">
+                    {s.scheduledLive.location} · {s.scheduledLive.session_name} is happening right now.
+                  </p>
+                  <p className="mt-1 text-ink-soft/80">
+                    Add your F1 TV token below to watch live, or{" "}
+                    <button onClick={() => changeView("replay")} className="font-semibold text-red underline underline-offset-2">
+                      click here
+                    </button>{" "}
+                    to watch a replay of the most recent session instead.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="font-medium text-ink-soft">No live Formula 1 session is currently running.</p>
+                  <p className="mt-1 text-ink-soft/80">
+                    Live driver tracking, telemetry, tyre strategy, and Race Control automatically
+                    become available when an official F1 session starts.{" "}
+                    <button onClick={() => changeView("replay")} className="font-semibold text-red underline underline-offset-2">
+                      Click here
+                    </button>{" "}
+                    to watch a replay of the most recent session instead.
+                  </p>
+                </>
+              )}
+              {showLiveFeedBanner && !s.scheduledLive && (
                 <p className="mt-3 rounded-md border border-line bg-white/50 px-3 py-2 text-ink-soft/90">
                   <span className="font-semibold text-ink">Live feed is available</span> — tracking will start
                   automatically the moment an official session goes live, no action needed.

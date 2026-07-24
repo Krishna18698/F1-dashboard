@@ -60,6 +60,7 @@ interface ApiResponse {
   qualifyingRemainingMs?: number | null;
   tokenIssue?: "invalid" | "busy";
   ownerTokenConfigured?: boolean;
+  scheduledLive?: { location: string; session_name: string } | null;
 }
 
 const empty: LiveState = {
@@ -224,6 +225,7 @@ export function useF1Live(view: "live" | "replay" = "live", replayT0?: number): 
             status: data.status,
             tokenIssue: data.tokenIssue ?? null,
             ownerTokenConfigured: data.ownerTokenConfigured ?? false,
+            scheduledLive: data.scheduledLive ?? null,
           }));
         } else {
           // Feed the map's animation buffer directly — NOT through React state — so the

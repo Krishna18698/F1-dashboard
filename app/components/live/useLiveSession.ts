@@ -58,6 +58,7 @@ export interface LiveState {
   qualifyingRemainingMs?: number | null; // live countdown in the current segment
   tokenIssue?: "invalid" | "busy" | null; // set when a visitor's own token couldn't be used
   ownerTokenConfigured?: boolean; // does the SITE have its own F1_TV_TOKEN configured
+  scheduledLive?: { location: string; session_name: string } | null; // a session is on by the schedule right now, even though there's no data to show yet (no token / free feed hasn't caught up)
   tyreLaps?: Map<number, number>; // laps on current tyre, per driver
   inPit?: Set<number>; // drivers currently in the pit lane
   retired?: Set<number>; // crashed / DNF drivers
