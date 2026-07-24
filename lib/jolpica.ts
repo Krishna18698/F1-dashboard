@@ -66,6 +66,34 @@ export function weekendSessions(race: Race): WeekendSession[] {
   out.push({ label: "Race", short: "Race", iso: raceStartISO(race) });
   return out.sort((a, b) => a.iso.localeCompare(b.iso));
 }
+
+// Best-effort scheduled duration per session type — used only to guess "is this session
+// probably still running", not for anything precise (real sessions run long under red
+// flags; this errs a little generous rather than cutting a live session off early).
+const SESSION_DURATION_MS: Record<string, number> = {
+  FP1: 60 * 60_000,
+  FP2: 60 * 60_000,
+  FP3: 60 * 60_000,
+  SQ: 60 * 60_000,
+  Sprint: 45 * 60_000,
+  Quali: 60 * 60_000,
+  Race: 3 * 3600_000,
+};
+
+/**
+ * Which session of this weekend (if any) is happening right now, going purely by schedule
+ * time — independent of F1's own live-timing Index.json, which can lag a session actually
+ * starting by hours or not list a meeting at all yet. Not pure (reads the clock).
+ */
+export function currentlyLiveWeekendSession(race: Race): WeekendSession | null {
+  const now = Date.now();
+  for (const s of weekendSessions(race)) {
+    const start = Date.parse(s.iso);
+    const duration = SESSION_DURATION_MS[s.short] ?? 60 * 60_000;
+    if (now >= start - 6 * 60_000 && now <= start + duration + 10 * 60_000) return s;
+  }
+  return null;
+}
 export interface DriverStanding {
   position: string;
   points: string;

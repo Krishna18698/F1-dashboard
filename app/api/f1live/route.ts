@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { fallbackCandidates, getF1LiveState, getReplayAnchorMs, getSessionDuration, resolveLiveSession } from "@/lib/f1feed";
 import { getRelayState, getVisitorRelayState } from "@/lib/f1Relay";
 import { F1_LIVE } from "@/lib/f1liveConfig";
+import { currentlyLiveWeekendSession, getNextRace } from "@/lib/jolpica";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -144,13 +145,26 @@ export async function GET(req: NextRequest) {
       }
 
       // Nothing to actually show yet (no token, and the free feed's own data hasn't
-      // caught up) — but if the schedule itself says a session is happening RIGHT NOW,
-      // tell the idle state which one, so it can say "X is live now, add a token" instead
-      // of the generic "nothing running" message.
-      return respond({
-        status: "idle",
-        scheduledLive: live ? { location: live.location, session_name: live.name } : null,
-      });
+      // caught up) — but if a schedule says a session is happening RIGHT NOW, tell the
+      // idle state which one, so it can say "X is live now, add a token" instead of the
+      // generic "nothing running" message. F1's own live-timing Index.json (`live` above)
+      // can lag a session actually starting by hours, or not list the meeting at all yet —
+      // so also check Jolpica's schedule (race dates/times), independent of that feed.
+      let scheduledLive: { location: string; session_name: string } | null = live
+        ? { location: live.location, session_name: live.name }
+        : null;
+      if (!scheduledLive) {
+        const race = await getNextRace();
+        const activeSession = race ? currentlyLiveWeekendSession(race) : null;
+        if (race && activeSession) {
+          scheduledLive = {
+            location: race.Circuit.Location.locality,
+            session_name: `${race.raceName} · ${activeSession.label}`,
+          };
+        }
+      }
+
+      return respond({ status: "idle", scheduledLive });
     }
 
     // view === "replay" — always the most recently completed session, from lights out,
