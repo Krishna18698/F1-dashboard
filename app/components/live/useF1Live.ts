@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useEffect, useRef, useState } from "react";
+import { startTransition, useEffect, useState } from "react";
 import { Driver, IntervalRow, LapSummary, StintRow } from "@/lib/openf1";
 import { F1_LIVE } from "@/lib/f1liveConfig";
 import { getStoredVisitorToken } from "@/lib/visitorToken";
@@ -173,10 +173,14 @@ function toState(r: ApiResponse): LiveState {
 
 export function useF1Live(view: "live" | "replay" = "live", replayT0?: number): LiveState {
   const [state, setState] = useState<LiveState>(empty);
-  const cancelled = useRef(false);
 
   useEffect(() => {
-    cancelled.current = false;
+    // Scoped to THIS effect instance, not a shared ref across re-runs — a stale in-flight
+    // fetch from the PREVIOUS view (e.g. replay) must stay blocked by ITS OWN flag even
+    // after the new view's effect has started, or switching views mid-request could apply
+    // the old view's response after the toggle already flipped (shown as "LIVE" selected
+    // while still rendering replay data — a real race that shipped and was reported).
+    let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
     // Switching view (live <-> replay) is a different data stream/clock entirely — drop
     // any buffered positions and show "loading" instead of a stale frame from the other
@@ -194,7 +198,7 @@ export function useF1Live(view: "live" | "replay" = "live", replayT0?: number): 
       let status: ApiResponse["status"] = "idle";
       // Tab hidden → don't hit the server (and rAF is paused anyway); re-check soon.
       if (typeof document !== "undefined" && document.visibilityState === "hidden") {
-        if (!cancelled.current) timer = setTimeout(poll, 5_000);
+        if (!cancelled) timer = setTimeout(poll, 5_000);
         return;
       }
       try {
@@ -217,7 +221,7 @@ export function useF1Live(view: "live" | "replay" = "live", replayT0?: number): 
           headers: myToken ? { "X-F1-Token": myToken } : undefined,
         });
         const data = (await res.json()) as ApiResponse;
-        if (cancelled.current) return;
+        if (cancelled) return;
         status = data.status;
         if (data.status === "idle" || data.status === "error") {
           setState((s) => ({
@@ -236,16 +240,16 @@ export function useF1Live(view: "live" | "replay" = "live", replayT0?: number): 
           startTransition(() => setState(toState(data)));
         }
       } catch {
-        if (!cancelled.current) setState((s) => ({ ...s, status: "error" }));
+        if (!cancelled) setState((s) => ({ ...s, status: "error" }));
       }
-      if (!cancelled.current) {
+      if (!cancelled) {
         timer = setTimeout(poll, status === "live" ? F1_LIVE.pollMs : IDLE_MS);
       }
     }
 
     poll();
     return () => {
-      cancelled.current = true;
+      cancelled = true;
       clearTimeout(timer);
       clearTimeout(resetId);
     };
