@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { usePolling } from "../usePolling";
 import { trackStatusInfo } from "@/lib/trackStatus";
 import { getPlaybackT } from "./framesStore";
+
+const MIN_KEY = "pitwall:raceControlMinimized";
 
 interface RcMessage {
   Utc?: string;
@@ -65,6 +67,24 @@ export default function RaceControl({
 }) {
   const [data, setData] = useState<RaceControl | null>(null);
   const [open, setOpen] = useState(false);
+  // Collapses the floating card down to a small dot — mostly for mobile, where the
+  // latest-2 card can sit over other content and gets in the way. Remembered across
+  // reloads so minimizing it once actually makes it stop being annoying.
+  const [minimized, setMinimized] = useState(false);
+  useEffect(() => {
+    const id = setTimeout(() => {
+      try {
+        setMinimized(localStorage.getItem(MIN_KEY) === "1");
+      } catch {}
+    }, 0);
+    return () => clearTimeout(id);
+  }, []);
+  const setMin = (v: boolean) => {
+    setMinimized(v);
+    try {
+      localStorage.setItem(MIN_KEY, v ? "1" : "0");
+    } catch {}
+  };
 
   // Keeps polling regardless of `ready` (so data's already warm the moment it's shown) —
   // only relevant during a live session → 5s while active, 30s idle (pauses when hidden).
@@ -89,25 +109,44 @@ export default function RaceControl({
   const messages = data.messages ?? [];
   const ts = trackStatusInfo(data.trackStatus?.Status);
 
+  if (minimized) {
+    return (
+      <button
+        onClick={() => setMin(false)}
+        aria-label="Show Race Control"
+        className="carbon-bg fixed bottom-3 right-3 z-40 flex items-center gap-1.5 rounded-full px-3 py-2 shadow-xl ring-1 ring-white/15"
+      >
+        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: ts.color }} />
+        <span className="eyebrow text-[0.55rem] text-white/70">Race Control</span>
+      </button>
+    );
+  }
+
   return (
     <>
       {/* Always-visible latest-2 card (click for full history) */}
       {!open && (
-        <button
-          onClick={() => setOpen(true)}
-          className="carbon-bg fixed bottom-3 right-3 z-40 w-72 max-w-[calc(100vw-1.5rem)] rounded-lg p-3 text-left shadow-xl ring-1 ring-white/15"
-        >
-          <div className="mb-1 flex items-center justify-between">
-            <span className="flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: ts.color }} />
+        <div className="carbon-bg fixed bottom-3 right-3 z-40 w-72 max-w-[calc(100vw-1.5rem)] rounded-lg p-3 shadow-xl ring-1 ring-white/15">
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <button onClick={() => setOpen(true)} className="flex min-w-0 items-center gap-1.5">
+              <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: ts.color }} />
               <span className="eyebrow text-[0.55rem] text-red">Race Control</span>
-            </span>
-            <span className="text-[0.55rem] text-white/40">view all →</span>
+            </button>
+            <div className="flex shrink-0 items-center gap-2.5">
+              <button onClick={() => setOpen(true)} className="text-[0.55rem] text-white/40">
+                view all →
+              </button>
+              <button onClick={() => setMin(true)} aria-label="Minimize Race Control" className="text-white/50 hover:text-white">
+                −
+              </button>
+            </div>
           </div>
-          {messages.slice(0, 2).map((m, i) => (
-            <Msg key={`${m.Utc}-${i}`} m={m} />
-          ))}
-        </button>
+          <button onClick={() => setOpen(true)} className="block w-full text-left">
+            {messages.slice(0, 2).map((m, i) => (
+              <Msg key={`${m.Utc}-${i}`} m={m} />
+            ))}
+          </button>
+        </div>
       )}
 
       {/* Backdrop */}
