@@ -111,7 +111,16 @@ export default function TrackMap({
     // outward — so on some corners the two land in the same screen spot. Push numbers
     // further out so they clear the tags' ~22px-tall footprint in the common case.
     const OFF = 42;
-    return circuit.corners.map((c) => {
+    // Some circuits' corner data (from MultiViewer) has more than one point sharing the
+    // same corner number — not a second real corner, just extra/incorrect entries. Show
+    // each number once, keeping its first (correct) point.
+    const seen = new Set<number>();
+    const uniqueCorners = circuit.corners.filter((c) => {
+      if (seen.has(c.number)) return false;
+      seen.add(c.number);
+      return true;
+    });
+    return uniqueCorners.map((c) => {
       const rx = c.x * cos - c.y * sin;
       const ry = c.x * sin + c.y * cos;
       const cx = offX + (rx - bounds.minX) * scale;
