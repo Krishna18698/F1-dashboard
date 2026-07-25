@@ -35,8 +35,14 @@ export default function TyreAllocation({
   /** 2 for the full-width qualifying slot, 1 when squeezed into the narrower race-mode column. */
   columns?: 1 | 2;
 }) {
-  const half = Math.ceil(order.length / columnCount);
-  const columns = columnCount === 2 ? [order.slice(0, half), order.slice(half)] : [order];
+  // `order` is sorted server-side by best lap time — fine once everyone has set one, but
+  // during a fresh segment (e.g. right as Q3 starts) several drivers can all still be
+  // best=null at once, leaving their relative order arbitrary even though `positions`
+  // already has their real current rank. Sort by position for display so the two columns
+  // always read in a sane ascending sequence.
+  const sortedOrder = [...order].sort((a, b) => (positions.get(a) ?? Infinity) - (positions.get(b) ?? Infinity));
+  const half = Math.ceil(sortedOrder.length / columnCount);
+  const columns = columnCount === 2 ? [sortedOrder.slice(0, half), sortedOrder.slice(half)] : [sortedOrder];
 
   return (
     <div className="self-start">
