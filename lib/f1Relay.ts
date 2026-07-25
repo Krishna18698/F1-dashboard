@@ -549,6 +549,22 @@ function createRelaySession() {
       return false;
     }
     const status = (sessionStatus?.Status ?? "").toLowerCase();
+    // Qualifying (and Sprint Qualifying) run as Q1/Q2/Q3 segments inside ONE session, and
+    // F1's SessionStatus topic flips to "Finished" at the end of EACH segment — a short gap
+    // before the next one starts, not the session actually ending. Confirmed directly against
+    // the live feed (SessionStatus:"Finished" mid-session while SessionInfo still showed
+    // Type:"Qualifying" with almost an hour left on the scheduled window) — treating every
+    // "Finished" as final made the whole app drop to idle during a normal Q2→Q3 break. Trust
+    // the session's own scheduled end time over that transient status while still within it.
+    const isMultiSegment = (sessionInfo.Type ?? "").toLowerCase().includes("qualifying");
+    if (isMultiSegment && sessionInfo.EndDate) {
+      const endMs = Date.parse(sessionInfo.EndDate + "Z") - offsetMs(sessionInfo.GmtOffset);
+      if (Number.isFinite(endMs) && Date.now() < endMs) {
+        endedAt = null;
+        sawLive = true;
+        return true;
+      }
+    }
     if (sessionInfo.ArchiveStatus?.Status === "Complete" || ENDED.has(status)) {
       // Only stamp an end time if we actually watched it run — otherwise connecting hours
       // after the flag (or a dev hot-reload) would fake a fresh "just ended".
