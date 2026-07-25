@@ -47,3 +47,6 @@ next-env.d.ts
 
 # Playwright MCP debug artifacts (console logs, page snapshots)
 .playwright-mcp/
+
+# Personal reference doc — not part of the project, never commit
+how-to-explain-the-f1-dashboard.docx
