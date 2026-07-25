@@ -166,9 +166,15 @@ export default function LiveSection() {
   const leaderNum = s.order[0];
   // Once eliminated in a prior quali segment (feed's KnockedOut flips true right as the
   // NEXT segment starts), the driver stays on the board — TimingBoard greys the row out and
-  // shows an "OUT" chip instead of dropping them entirely, so the full grid is still visible
-  // at a glance.
-  const boardOrder = s.order;
+  // shows an "OUT" chip instead of dropping them entirely. But `s.order` is sorted purely by
+  // best lap time, and an eliminated driver's time is frozen from an EARLIER segment — so
+  // sorted by raw time alone, "OUT" rows land interleaved among the current segment's danger
+  // zone instead of grouped together. Partition instead: still-active drivers first (in their
+  // existing order), eliminated drivers pushed to the end (also in their existing order).
+  const boardOrder =
+    s.mode === "quali" && s.knockedOut
+      ? [...s.order.filter((n) => !s.knockedOut!.has(n)), ...s.order.filter((n) => s.knockedOut!.has(n))]
+      : s.order;
   const sessionLabel = `${s.session?.location} · ${s.session?.session_name}`;
   const label = s.replay ? `Replay · ${sessionLabel}` : `${sessionLabel} · on track now`;
 
