@@ -165,11 +165,10 @@ export default function LiveSection() {
 
   const leaderNum = s.order[0];
   // Once eliminated in a prior quali segment (feed's KnockedOut flips true right as the
-  // NEXT segment starts), a driver drops off the boards entirely — Q2 only shows the 15
-  // who survived Q1, Q3 only the 10 who survived Q2. The map keeps everyone (a car's
-  // on-track position isn't about quali elimination).
-  const boardOrder =
-    s.mode === "quali" && s.knockedOut ? s.order.filter((n) => !s.knockedOut!.has(n)) : s.order;
+  // NEXT segment starts), the driver stays on the board — TimingBoard greys the row out and
+  // shows an "OUT" chip instead of dropping them entirely, so the full grid is still visible
+  // at a glance.
+  const boardOrder = s.order;
   const sessionLabel = `${s.session?.location} · ${s.session?.session_name}`;
   const label = s.replay ? `Replay · ${sessionLabel}` : `${sessionLabel} · on track now`;
 

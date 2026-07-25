@@ -125,6 +125,7 @@ export default function TimingBoard({
             const isP1 = pos === 1;
             const isSel = num === selectedNum;
             const isOut = retired?.has(num);
+            const isKnockedOut = knockedOut?.has(num);
             const inDanger = danger.has(num);
             const lap = laps.get(num);
             return (
@@ -137,8 +138,14 @@ export default function TimingBoard({
                     : inDanger
                       ? "bg-red/10 hover:bg-red/15"
                       : "hover:bg-panel"
-                } ${isOut ? "opacity-50" : ""}`}
-                title={inDanger ? "Provisionally eliminated if the session ended now" : undefined}
+                } ${isOut || isKnockedOut ? "opacity-50" : ""}`}
+                title={
+                  isKnockedOut
+                    ? "Eliminated in an earlier segment"
+                    : inDanger
+                      ? "Provisionally eliminated if the session ended now"
+                      : undefined
+                }
               >
                 <span className={`tnum text-right font-mono text-sm font-bold ${isP1 ? "text-red" : ""}`}>{pos}</span>
 
@@ -169,6 +176,12 @@ export default function TimingBoard({
                       )}
                     </div>
                   )
+                ) : isKnockedOut ? (
+                  <div className="col-span-2 text-right">
+                    <span className="rounded-sm bg-ink px-1.5 py-0.5 text-[0.6rem] font-bold tracking-wider text-white">
+                      OUT
+                    </span>
+                  </div>
                 ) : (
                   <>
                     <span className={`tnum text-right font-mono text-xs font-bold ${isP1 ? "text-red" : ""}`}>
