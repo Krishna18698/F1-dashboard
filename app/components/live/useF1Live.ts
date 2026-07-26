@@ -193,6 +193,11 @@ export function useF1Live(view: "live" | "replay" = "live", replayT0?: number): 
     // Poll fast only while a session is live; back off hard when idle so we're not
     // hammering the feed when nothing is happening.
     const IDLE_MS = 30_000;
+    // Guards against the visibilitychange handler below firing while a poll is already
+    // in flight (very plausible — e.g. alt-tabbing during a live session) and spawning a
+    // SECOND, overlapping poll on top of it. Two concurrent fetches racing to push frames
+    // into the shared buffer was desyncing the interpolation and made cars visibly jump.
+    let inFlight = false;
 
     async function poll() {
       let status: ApiResponse["status"] = "idle";
@@ -201,6 +206,8 @@ export function useF1Live(view: "live" | "replay" = "live", replayT0?: number): 
         if (!cancelled) timer = setTimeout(poll, 5_000);
         return;
       }
+      if (inFlight) return;
+      inFlight = true;
       try {
         // Incremental: ask only for frames newer than what we've buffered — keeps each
         // poll's payload/parse tiny so it never steals an animation frame. Attach the
@@ -242,6 +249,7 @@ export function useF1Live(view: "live" | "replay" = "live", replayT0?: number): 
       } catch {
         if (!cancelled) setState((s) => ({ ...s, status: "error" }));
       }
+      inFlight = false;
       if (!cancelled) {
         timer = setTimeout(poll, status === "live" ? F1_LIVE.pollMs : IDLE_MS);
       }
@@ -255,7 +263,7 @@ export function useF1Live(view: "live" | "replay" = "live", replayT0?: number): 
     // on refocus instead of waiting for whatever the (possibly delayed) scheduled timer does —
     // same pattern `usePolling.ts` already uses correctly for Race Control/live status.
     const onVisible = () => {
-      if (document.visibilityState !== "hidden") {
+      if (document.visibilityState !== "hidden" && !inFlight) {
         clearTimeout(timer);
         poll();
       }

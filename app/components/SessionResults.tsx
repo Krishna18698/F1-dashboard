@@ -50,6 +50,9 @@ export default function SessionResults() {
     let on = true;
     let hydrated = false;
     let timer: ReturnType<typeof setTimeout>;
+    // Guards against the visibilitychange handler below firing while a poll is already in
+    // flight and spawning a second, overlapping one (same race useF1Live's poll loop had).
+    let inFlight = false;
 
     const poll = async () => {
       // On first run, show the last known result instantly (persists across reloads).
@@ -68,6 +71,8 @@ export default function SessionResults() {
         if (on) timer = setTimeout(poll, 15_000);
         return;
       }
+      if (inFlight) return;
+      inFlight = true;
       let complete = true;
       try {
         const d = (await (await fetch("/api/f1results", { cache: "no-store" })).json()) as Res;
@@ -81,6 +86,7 @@ export default function SessionResults() {
         }
         // status "none"/"off" → keep showing the stored result, don't clear.
       } catch {}
+      inFlight = false;
       // Live session → refresh often; finished/idle → back off.
       if (on) timer = setTimeout(poll, complete ? 60_000 : 15_000);
     };
@@ -89,7 +95,7 @@ export default function SessionResults() {
     // by the browser, so the scheduled re-poll can fire much later than intended — force an
     // immediate check on refocus instead of waiting for it.
     const onVisible = () => {
-      if (document.visibilityState !== "hidden") {
+      if (document.visibilityState !== "hidden" && !inFlight) {
         clearTimeout(timer);
         poll();
       }
