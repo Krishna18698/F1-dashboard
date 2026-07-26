@@ -127,6 +127,7 @@ export interface F1LiveState {
   telFrames: TelFrame[]; // recent timestamped telemetry window (client plays back at the map's clock)
   qualifyingPart: number | null; // 1=Q1, 2=Q2, 3=Q3 (quali sessions only)
   qualifyingRemainingMs: number | null; // live countdown in the current segment
+  formationLap: boolean; // race hasn't gone green yet (SessionData StatusSeries "Started")
 }
 export interface SessionResult {
   session_name: string;
@@ -223,6 +224,9 @@ function createRelaySession() {
   // driver num -> stint index -> epoch ms it was FIRST seen, so a stint can be matched to the
   // qualifyingPartHistory entry active at that moment (which Q1/Q2/Q3 it began in).
   let stintFirstSeenAt: Record<string, Record<string, number>> = {};
+  // SessionData's StatusSeries carries SessionStatus:"Started" — F1's own explicit race-start
+  // signal (same one the free-feed replay path anchors formation-lap detection to).
+  let sessionStartedTs: number | null = null;
   // Rolling buffer of timestamped car telemetry (CarData.z channels: 0=RPM 2=Speed 3=Gear
   // 4=Throttle) — ~4Hz per-sample Utc, played back by the client on the same delayed clock
   // as the position dots so the card matches the car on screen and updates continuously.
@@ -246,6 +250,7 @@ function createRelaySession() {
       qualifyingPart = null;
       qualifyingPartHistory = [];
       stintFirstSeenAt = {};
+      sessionStartedTs = null;
       telBuffer = [];
       endedAt = null;
       sawLive = false;
@@ -356,12 +361,21 @@ function createRelaySession() {
       // Series is index-keyed deltas: { "2": { Utc, QualifyingPart: 2 } }. Only Qualifying
       // sessions carry this; keep the latest value seen (1=Q1, 2=Q2, 3=Q3) and record when
       // it started (for the live countdown + attributing stints to the segment they began in).
-      const series = (data as { Series?: Record<string, { Utc?: string; QualifyingPart?: number }> }).Series;
-      for (const v of Object.values(series ?? {})) {
+      const d = data as {
+        Series?: Record<string, { Utc?: string; QualifyingPart?: number }>;
+        StatusSeries?: Record<string, { Utc?: string; SessionStatus?: string }> | { Utc?: string; SessionStatus?: string }[];
+      };
+      for (const v of Object.values(d.Series ?? {})) {
         if (v.QualifyingPart != null) {
           qualifyingPart = v.QualifyingPart;
           const startMs = v.Utc ? Date.parse(v.Utc) : Date.now();
           qualifyingPartHistory.push({ startMs, part: v.QualifyingPart });
+        }
+      }
+      const statusEntries = Array.isArray(d.StatusSeries) ? d.StatusSeries : Object.values(d.StatusSeries ?? {});
+      for (const st of statusEntries) {
+        if (st.SessionStatus === "Started" && sessionStartedTs === null) {
+          sessionStartedTs = st.Utc ? Date.parse(st.Utc) : Date.now();
         }
       }
     } else if (topic === "Position.z") {
@@ -683,6 +697,7 @@ function createRelaySession() {
         qualifyingPart && qualifyingPartHistory.length
           ? Math.max(0, QUALI_DURATION_MS[qualifyingPart] - (Date.now() - qualifyingPartHistory.at(-1)!.startMs))
           : null,
+      formationLap: mode === "race" && sessionStartedTs != null && Date.now() < sessionStartedTs,
     };
   }
 
