@@ -248,10 +248,24 @@ export function useF1Live(view: "live" | "replay" = "live", replayT0?: number): 
     }
 
     poll();
+    // A page left open for hours (waiting for a session to start) gets its background-tab
+    // timers throttled hard by the browser — the 30s idle re-poll can end up firing far later
+    // than scheduled, so returning to the tab could sit on stale "idle" state well past when a
+    // session actually went live, until something forced a fresh check. Force one immediately
+    // on refocus instead of waiting for whatever the (possibly delayed) scheduled timer does —
+    // same pattern `usePolling.ts` already uses correctly for Race Control/live status.
+    const onVisible = () => {
+      if (document.visibilityState !== "hidden") {
+        clearTimeout(timer);
+        poll();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
       clearTimeout(timer);
       clearTimeout(resetId);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [view, replayT0]);
 

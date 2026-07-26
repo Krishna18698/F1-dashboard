@@ -85,10 +85,21 @@ export default function SessionResults() {
       if (on) timer = setTimeout(poll, complete ? 60_000 : 15_000);
     };
     poll();
+    // Same fix as useF1Live's poll loop: a long-backgrounded tab gets its timers throttled
+    // by the browser, so the scheduled re-poll can fire much later than intended — force an
+    // immediate check on refocus instead of waiting for it.
+    const onVisible = () => {
+      if (document.visibilityState !== "hidden") {
+        clearTimeout(timer);
+        poll();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
 
     return () => {
       on = false;
       clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);
 
