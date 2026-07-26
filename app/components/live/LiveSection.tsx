@@ -11,6 +11,7 @@ import MyTokenCard from "./MyTokenCard";
 import RaceControl from "./RaceControl";
 import { useHasFrames } from "./framesStore";
 import { getStoredVisitorToken } from "@/lib/visitorToken";
+import { F1_LIVE } from "@/lib/f1liveConfig";
 
 type View = "live" | "replay";
 
@@ -194,19 +195,31 @@ export default function LiveSection() {
       {/* Track map + clean running order side by side */}
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="self-start">
-          <TrackMap
-            circuitKey={s.circuitKey}
-            drivers={s.drivers}
-            leaderNum={leaderNum}
-            inPit={s.inPit}
-            retired={s.retired}
-            name={s.session?.location}
-            trackStatus={s.trackStatus}
-            formationLap={s.formationLap}
-            laps={s.mode === "race" ? { current: s.currentLap ?? 0, total: s.totalLaps ?? 0 } : undefined}
-            selectedNum={selected}
-            onSelect={setSelected}
-          />
+          {F1_LIVE.driverTrackerDisabled ? (
+            <div className="self-start">
+              <span className="eyebrow mb-2 block text-[0.6rem] text-muted">
+                Driver <span className="text-red">Tracker</span>
+              </span>
+              <div className="flex aspect-square items-center justify-center rounded-lg carbon-bg px-6 text-center text-sm text-white/50 ring-1 ring-white/10">
+                Temporarily unavailable — F1&apos;s own live position data is having issues
+                right now. Timing, tyres, and Race Control are unaffected.
+              </div>
+            </div>
+          ) : (
+            <TrackMap
+              circuitKey={s.circuitKey}
+              drivers={s.drivers}
+              leaderNum={leaderNum}
+              inPit={s.inPit}
+              retired={s.retired}
+              name={s.session?.location}
+              trackStatus={s.trackStatus}
+              formationLap={s.formationLap}
+              laps={s.mode === "race" ? { current: s.currentLap ?? 0, total: s.totalLaps ?? 0 } : undefined}
+              selectedNum={selected}
+              onSelect={setSelected}
+            />
+          )}
           {selected != null && (
             <TelemetryCard
               num={selected}
