@@ -68,8 +68,13 @@ export function weekendSessions(race: Race): WeekendSession[] {
 }
 
 // Best-effort scheduled duration per session type — used only to guess "is this session
-// probably still running", not for anything precise (real sessions run long under red
-// flags; this errs a little generous rather than cutting a live session off early).
+// probably still running" when no token/live feed is available to check the real thing.
+// Race was originally the FIA's absolute red-flag-extended cap (3h) rather than a typical
+// race length (~1h30-2h from lights out) — with no token configured (e.g. on a fresh
+// deploy), that left the site showing "still live" for over an hour after a normal-length
+// race had actually finished, since this schedule-only guess has no way to see the
+// chequered flag. 2h plus the grace buffer below comfortably covers a normal race without
+// that long a tail; a red-flag-extended race is the rare case this trades away.
 const SESSION_DURATION_MS: Record<string, number> = {
   FP1: 60 * 60_000,
   FP2: 60 * 60_000,
@@ -77,8 +82,11 @@ const SESSION_DURATION_MS: Record<string, number> = {
   SQ: 60 * 60_000,
   Sprint: 45 * 60_000,
   Quali: 60 * 60_000,
-  Race: 3 * 3600_000,
+  Race: 2 * 3600_000,
 };
+// How long after a session's assumed end to still call it "live" — covers the schedule
+// guess above running a little short in a normal race.
+const POST_SESSION_GRACE_MS = 20 * 60_000;
 
 /**
  * Which session of this weekend (if any) is happening right now, going purely by schedule
@@ -90,7 +98,7 @@ export function currentlyLiveWeekendSession(race: Race): WeekendSession | null {
   for (const s of weekendSessions(race)) {
     const start = Date.parse(s.iso);
     const duration = SESSION_DURATION_MS[s.short] ?? 60 * 60_000;
-    if (now >= start - 6 * 60_000 && now <= start + duration + 10 * 60_000) return s;
+    if (now >= start - 6 * 60_000 && now <= start + duration + POST_SESSION_GRACE_MS) return s;
   }
   return null;
 }
