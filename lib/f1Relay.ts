@@ -227,6 +227,11 @@ function createRelaySession() {
   // SessionData's StatusSeries carries SessionStatus:"Started" — F1's own explicit race-start
   // signal (same one the free-feed replay path anchors formation-lap detection to).
   let sessionStartedTs: number | null = null;
+  // When the race's own LapCount first reached TotalLaps (the chequered flag, from real lap
+  // data — not a schedule guess). SessionStatus/ArchiveStatus can lag well behind the actual
+  // flag (podium/post-race coverage keeps the session "Started" for a while) — this is a more
+  // direct signal for "is the race actually over" than waiting on those.
+  let raceLapsCompleteAt: number | null = null;
   // Rolling buffer of timestamped car telemetry (CarData.z channels: 0=RPM 2=Speed 3=Gear
   // 4=Throttle) — ~4Hz per-sample Utc, played back by the client on the same delayed clock
   // as the position dots so the card matches the car on screen and updates continuously.
@@ -251,6 +256,7 @@ function createRelaySession() {
       qualifyingPartHistory = [];
       stintFirstSeenAt = {};
       sessionStartedTs = null;
+      raceLapsCompleteAt = null;
       telBuffer = [];
       endedAt = null;
       sawLive = false;
@@ -563,6 +569,20 @@ function createRelaySession() {
       return false;
     }
     const status = (sessionStatus?.Status ?? "").toLowerCase();
+    // Race: the chequered flag is when LapCount's CurrentLap first reaches TotalLaps — a
+    // direct signal from real lap data, not a guess. SessionStatus/ArchiveStatus can lag well
+    // behind that (podium/post-race coverage keeps the session "Started" a while longer), so
+    // trust the lap count first: 20 min after the laps are actually done, call it over,
+    // regardless of what SessionStatus still says.
+    if (modeOf(sessionInfo.Type) === "race" && lapCount?.TotalLaps && (lapCount.CurrentLap ?? 0) >= lapCount.TotalLaps) {
+      if (raceLapsCompleteAt === null) raceLapsCompleteAt = Date.now();
+      if (Date.now() > raceLapsCompleteAt + 20 * 60_000) {
+        if (sawLive && endedAt == null) endedAt = raceLapsCompleteAt;
+        return false;
+      }
+    } else {
+      raceLapsCompleteAt = null; // not (yet) at the final lap — e.g. resumed after a red flag
+    }
     // Qualifying (and Sprint Qualifying) run as Q1/Q2/Q3 segments inside ONE session, and
     // F1's SessionStatus topic flips to "Finished" at the end of EACH segment — a short gap
     // before the next one starts, not the session actually ending. Confirmed directly against
