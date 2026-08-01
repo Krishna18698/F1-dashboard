@@ -3,6 +3,7 @@ import { fallbackCandidates, getF1LiveState, getReplayAnchorMs, getSessionDurati
 import { getRelayState, getVisitorRelayState } from "@/lib/f1Relay";
 import { F1_LIVE } from "@/lib/f1liveConfig";
 import { currentlyLiveWeekendSession, getNextRace } from "@/lib/jolpica";
+import { getTokenStatus } from "@/lib/f1Token";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -61,7 +62,11 @@ export async function GET(req: NextRequest) {
   // So the client can tell "nothing's live right now" apart from "no token is configured
   // at all" — the token card should only invite a visitor to add their own in the latter
   // case; the site owner's own env token being merely idle isn't a reason to ask for one.
-  const ownerTokenConfigured = Boolean(process.env.F1_TV_TOKEN?.trim());
+  // Must mean "present AND not expired" — an expired token is present but useless, and
+  // reporting it as configured told visitors "live feed is available, no action needed"
+  // while quietly never actually working (and hid the "add your own token" invite too).
+  const ownerToken = getTokenStatus();
+  const ownerTokenConfigured = ownerToken.present && !ownerToken.expired;
   const respond = (body: Record<string, unknown>) =>
     Response.json({ ...body, ownerTokenConfigured, ...(tokenIssue ? { tokenIssue } : {}) });
 
@@ -109,8 +114,9 @@ export async function GET(req: NextRequest) {
         // falls through silently, no issue to flag.
       }
 
-      // 2) Real-time via the site's own F1 TV token.
-      if (process.env.F1_TV_TOKEN?.trim()) {
+      // 2) Real-time via the site's own F1 TV token — skip the connection attempt entirely
+      //    if it's already known to be expired.
+      if (ownerTokenConfigured) {
         const relay = await getRelayState();
         if (relay && relay.drivers.length > 0) {
           return respond({
