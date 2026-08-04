@@ -29,6 +29,13 @@ export const F1_LIVE = {
   // Flip back to false once F1's feed is stable again.
   driverTrackerDisabled: true,
 
+  // Sessions to skip entirely when picking a replay fallback candidate — the Hungarian GP
+  // Race's position data has the same upstream teleporting problem noted above baked
+  // permanently into the archive (not just a live-only glitch), so replay would show the
+  // same jumping forever. Falls through to the next most recent candidate (e.g. Spa)
+  // instead. Remove the entry once F1 republishes clean data for it, if they ever do.
+  replayExcludePaths: ["Hungarian_Grand_Prix"] as string[],
+
   /**
    * TEST replay: when enabled, the live panel replays this past session against a
    * real-time virtual clock — so you can verify the map/board/tyres/ticker work

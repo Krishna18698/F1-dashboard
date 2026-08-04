@@ -150,6 +150,7 @@ export async function fallbackCandidates(): Promise<ResolvedSession[]> {
   const now = Date.now();
   const past = (await flatSessions())
     .filter((s) => s.startMs <= now)
+    .filter((s) => !F1_LIVE.replayExcludePaths.some((bad) => s.path.includes(bad)))
     .sort((a, b) => b.startMs - a.startMs);
   const preferred = past.filter((s) => s.type === F1_LIVE.preferType);
   const rest = past.filter((s) => s.type !== F1_LIVE.preferType);
