@@ -21,10 +21,12 @@ export const F1_LIVE = {
   pollMs: 3000, // paired with the ~4s car-dot glide for continuous, non-stop motion
   base: "https://livetiming.formula1.com/static",
 
-  // Kill switch for the Driver Tracker map specifically (timing board/race control/tyres
-  // stay up). Confirmed 2026-07-26: F1's own official live tracker was ALSO showing cars
-  // teleporting during the Hungarian GP race — this was upstream position-feed trouble, not
-  // a bug in this app's interpolation. Flip back to false once F1's feed is stable again.
+  // Kill switch for the Driver Tracker map, LIVE view only (timing board/race control/tyres
+  // stay up, and replay is unaffected — a past, already-completed session's position data
+  // isn't touched by whatever's currently wrong with the live feed). Confirmed 2026-07-26:
+  // F1's own official live tracker was ALSO showing cars teleporting during the Hungarian GP
+  // race — this was upstream position-feed trouble, not a bug in this app's interpolation.
+  // Flip back to false once F1's feed is stable again.
   driverTrackerDisabled: true,
 
   /**

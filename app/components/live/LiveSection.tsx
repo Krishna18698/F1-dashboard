@@ -195,7 +195,7 @@ export default function LiveSection() {
       {/* Track map + clean running order side by side */}
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="self-start">
-          {F1_LIVE.driverTrackerDisabled ? (
+          {F1_LIVE.driverTrackerDisabled && !s.replay ? (
             <div className="self-start">
               <span className="eyebrow mb-2 block text-[0.6rem] text-muted">
                 Driver <span className="text-red">Tracker</span>
