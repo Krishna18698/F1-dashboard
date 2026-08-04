@@ -68,12 +68,14 @@ function tag(block: string, name: string): string {
 
 function parse(xml: string, source: string, limit: number): IntelItem[] {
   const items: IntelItem[] = [];
+  const seenLinks = new Set<string>(); // the same feed can list one article more than once
   const blocks = xml.match(/<item>([\s\S]*?)<\/item>/gi) ?? [];
   for (const block of blocks) {
     const title = tag(block, "title");
     const link = tag(block, "link") || tag(block, "guid");
     // Only trust http(s) links (guards against javascript:/data: URLs from a feed).
-    if (!title || !/^https?:\/\//i.test(link)) continue;
+    if (!title || !/^https?:\/\//i.test(link) || seenLinks.has(link)) continue;
+    seenLinks.add(link);
     const rawDate = tag(block, "pubDate") || tag(block, "dc:date");
     items.push({
       title,
