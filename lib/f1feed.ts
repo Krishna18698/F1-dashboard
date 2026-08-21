@@ -836,8 +836,12 @@ export async function getStaticResults(): Promise<{
   top: { pos: number; tla: string; team_colour: string; best: number | null; gap: string }[];
 } | null> {
   const now = Date.now();
+  // Any completed session type — matches the token path (getRelayResults), which shows
+  // whatever session F1's hub last had open, practice/sprint included. Restricting this to
+  // race/qualifying only meant the free-feed (no-token) env never showed the results ticker
+  // for a just-finished practice or sprint session at all.
   const session = (await flatSessions())
-    .filter((s) => /race|qualifying/i.test(s.type) && !/sprint/i.test(s.type) && s.endMs <= now)
+    .filter((s) => s.endMs <= now)
     .sort((a, b) => b.endMs - a.endMs)[0];
   if (!session) return null;
   const st = await getF1LiveState(session.path, session.type, Number.MAX_SAFE_INTEGER, false);
