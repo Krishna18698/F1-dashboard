@@ -703,7 +703,17 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
         fastestLap = { driver_number: +n, tla: drivers[n]?.Tla ?? String(n), time: t.BestLapTime.Value, lap: Number(t.BestLapTime.Lap ?? 0) };
       }
     }
-    const order = nums.map(Number).sort((a, b) => (mode === "race" ? rows[a].position - rows[b].position : (rows[a].best ?? Infinity) - (rows[b].best ?? Infinity)));
+    const order = nums.map(Number).sort((a, b) => {
+      if (mode === "race") return rows[a].position - rows[b].position;
+      const ba = rows[a].best ?? Infinity;
+      const bb = rows[b].best ?? Infinity;
+      // Two drivers with no time yet both map to Infinity, and Infinity - Infinity is NaN —
+      // a comparator returning NaN leaves the sort in engine-defined (effectively arbitrary)
+      // order. That's the WHOLE grid for the first minutes of any practice/quali session, so
+      // the board opened scrambled rather than in track order. Break ties on position.
+      if (ba === bb) return rows[a].position - rows[b].position;
+      return ba - bb;
+    });
     return { nums, mode, rows, order, fastestLap };
   }
 

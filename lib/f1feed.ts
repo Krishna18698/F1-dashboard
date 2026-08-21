@@ -713,6 +713,9 @@ export async function getF1LiveState(
       if (m === "race") return rows[a].position - rows[b].position;
       const ba = rows[a].best ?? Infinity;
       const bb = rows[b].best ?? Infinity;
+      // See the identical guard in f1Relay.ts: Infinity - Infinity is NaN, and a NaN
+      // comparator leaves every yet-to-set-a-time driver in arbitrary order. Tie on position.
+      if (ba === bb) return rows[a].position - rows[b].position;
       return ba - bb;
     });
 
