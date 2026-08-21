@@ -56,6 +56,7 @@ export default function TimingBoard({
   retired,
   qualifyingPart,
   qualifyingRemainingMs,
+  sprintQuali,
   knockedOut,
   selectedNum,
   onSelect,
@@ -69,6 +70,7 @@ export default function TimingBoard({
   retired?: Set<number>;
   qualifyingPart?: number | null;
   qualifyingRemainingMs?: number | null;
+  sprintQuali?: boolean;
   knockedOut?: Set<number>;
   selectedNum?: number | null;
   onSelect?: (num: number | null) => void;
@@ -92,8 +94,11 @@ export default function TimingBoard({
           Driver Live <span className="text-red">Tracker</span>
         </span>
         {isQuali && qualifyingPart && (
+          /* A sprint weekend's segments are SQ1/SQ2/SQ3, not Q1/Q2/Q3 — same feed field,
+             different session, and F1's own broadcast labels them separately. */
           <span className="rounded-sm bg-ink px-1.5 py-0.5 text-[0.6rem] font-bold tracking-wider text-white">
-            Q{qualifyingPart}
+            {sprintQuali ? "SQ" : "Q"}
+            {qualifyingPart}
           </span>
         )}
         {isQuali && countdown && (

@@ -272,6 +272,7 @@ export default function LiveSection() {
           laps={s.laps}
           retired={s.retired}
           qualifyingPart={s.qualifyingPart}
+          sprintQuali={/sprint/i.test(s.session?.session_name ?? "")}
           qualifyingRemainingMs={s.qualifyingRemainingMs}
           knockedOut={s.knockedOut}
           selectedNum={selected}
