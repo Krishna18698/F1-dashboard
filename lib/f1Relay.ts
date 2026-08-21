@@ -426,13 +426,18 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
    * `allowAnonymous` (the site's own singleton — never the per-visitor path, where a token
    * failing to authenticate must stay distinguishable from no token being sent).
    *
-   * Verified against F1's hub from production, not assumed: an unauthenticated Subscribe
-   * still returns DriverList, TimingData, TimingAppData, SessionInfo, SessionStatus,
-   * SessionData, RaceControlMessages and TrackStatus in full. Only Position.z, CarData.z,
-   * LapCount and ChampionshipPrediction come back absent. That covers the timing board,
-   * tyres, race control and results — all of which the tokenless deployment previously had
-   * to source from F1's free STATIC feed, which publishes its archive hours late (it had no
-   * Dutch GP data at all while FP1's results were already complete on the hub).
+   * Measured, not assumed — an A-B Subscribe against the SAME session, once anonymous and
+   * once with a token, showed exactly two topics differing: Position.z and CarData.z are
+   * empty anonymously and populated with a token. Everything else (DriverList, TimingData,
+   * TimingAppData, SessionInfo, SessionStatus, SessionData, RaceControlMessages, TrackStatus)
+   * is byte-for-byte identical either way. LapCount and ChampionshipPrediction were empty in
+   * BOTH — they're populated by session type (race/sprint), not withheld by auth, so don't
+   * mistake their absence on a practice session for gating.
+   *
+   * That covers the timing board, tyres, race control and results — all of which the
+   * tokenless deployment previously had to source from F1's free STATIC feed, which
+   * publishes its archive hours late (it had no Dutch GP data at all while FP1's results
+   * were already complete on the hub).
    */
   async function ensureConnection(tokenOverride?: string): Promise<boolean> {
     const token = tokenOverride ?? process.env.F1_TV_TOKEN?.trim();
