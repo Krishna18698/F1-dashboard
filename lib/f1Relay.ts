@@ -246,6 +246,12 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
   // SessionData's StatusSeries carries SessionStatus:"Started" — F1's own explicit race-start
   // signal (same one the free-feed replay path anchors formation-lap detection to).
   let sessionStartedTs: number | null = null;
+  // The LATEST SessionStatus:"Started", as opposed to the first. A qualifying session emits
+  // one per segment (measured at Zandvoort SQ: Started 14:30:00 → Finished 14:42:00 for SQ1,
+  // then another pair for SQ2), so this is what marks the current segment actually going
+  // green. `sessionStartedTs` deliberately stays pinned to the first one — that's lights-out
+  // for formation-lap detection, a different question.
+  let segmentStartedTs: number | null = null;
   // When the race's own LapCount first reached TotalLaps (the chequered flag, from real lap
   // data — not a schedule guess). SessionStatus/ArchiveStatus can lag well behind the actual
   // flag (podium/post-race coverage keeps the session "Started" for a while) — this is a more
@@ -275,6 +281,7 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
       qualifyingPartHistory = [];
       stintFirstSeenAt = {};
       sessionStartedTs = null;
+      segmentStartedTs = null;
       raceLapsCompleteAt = null;
       telBuffer = [];
       endedAt = null;
@@ -399,8 +406,10 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
       }
       const statusEntries = Array.isArray(d.StatusSeries) ? d.StatusSeries : Object.values(d.StatusSeries ?? {});
       for (const st of statusEntries) {
-        if (st.SessionStatus === "Started" && sessionStartedTs === null) {
-          sessionStartedTs = st.Utc ? Date.parse(st.Utc) : Date.now();
+        if (st.SessionStatus === "Started") {
+          const ts = st.Utc ? Date.parse(st.Utc) : Date.now();
+          if (sessionStartedTs === null) sessionStartedTs = ts; // first only — lights out
+          if (segmentStartedTs === null || ts > segmentStartedTs) segmentStartedTs = ts;
         }
       }
     } else if (topic === "Position.z") {
@@ -533,14 +542,14 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
    * clock from the announcement burned ~13 min of a 12 min segment before a car had moved,
    * so a freshly-started SQ1 displayed "2:32 left".
    *
-   * The green light (`StatusSeries` → `SessionStatus: "Started"`, already tracked as
-   * `sessionStartedTs`) is the real start of the FIRST segment. Later segments legitimately
-   * begin after it, so take whichever is later — that leaves Q2/Q3 driven by their own
-   * announcement, which for them lands at the right time.
+   * The green light for the current segment (`StatusSeries` → `SessionStatus: "Started"`,
+   * tracked as `segmentStartedTs` — qualifying emits one per segment) is the real start.
+   * Take whichever of the two is later: that fixes an early announcement, and degrades to
+   * the announcement alone if a session never publishes a per-segment "Started".
    */
   function qualiSegmentStart(): number {
     const announced = qualifyingPartHistory.at(-1)!.startMs;
-    return sessionStartedTs != null ? Math.max(announced, sessionStartedTs) : announced;
+    return segmentStartedTs != null ? Math.max(announced, segmentStartedTs) : announced;
   }
 
   /** Which qualifying segment (1/2/3) was active at a given epoch ms, from the history of
