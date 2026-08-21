@@ -15,6 +15,10 @@ const UA = { "User-Agent": "BestHTTP" };
 const TS_LEN = 12; // "HH:MM:SS.mmm"
 // Standard FIA qualifying segment durations.
 const QUALI_DURATION_MS: Record<number, number> = { 1: 18 * 60_000, 2: 15 * 60_000, 3: 12 * 60_000 };
+// See the matching pair in f1Relay.ts — Sprint Qualifying's segments are shorter than a
+// Saturday qualifying's, and both carry Type "Qualifying", so the session path is what
+// distinguishes them here (".../2026-08-21_Sprint_Qualifying/").
+const SPRINT_QUALI_DURATION_MS: Record<number, number> = { 1: 12 * 60_000, 2: 10 * 60_000, 3: 8 * 60_000 };
 
 /* --------------------------------- parsing --------------------------------- */
 function tsToMs(ts: string): number {
@@ -768,9 +772,19 @@ export async function getF1LiveState(
     qualifyingPart = p.part;
     qualifyingPartStartTs = p.ts;
   }
+  // F1 announces the segment while the session is still being set up — minutes before the
+  // lights go green — so the announcement instant is NOT when the segment started running.
+  // The green light (SessionStatus "Started") is, for the first segment; later segments
+  // legitimately begin after it, so take whichever is later. Without this the clock opened
+  // a fresh segment already most of the way expired (see f1Relay.ts for the measured case).
+  const segStart =
+    qualifyingPartStartTs != null && s.sessionStartedTs != null
+      ? Math.max(qualifyingPartStartTs, s.sessionStartedTs)
+      : qualifyingPartStartTs;
+  const segDurations = /sprint/i.test(sessionPath) ? SPRINT_QUALI_DURATION_MS : QUALI_DURATION_MS;
   const qualifyingRemainingMs =
-    qualifyingPart && qualifyingPartStartTs != null
-      ? Math.max(0, QUALI_DURATION_MS[qualifyingPart] - (infoUptoMs - qualifyingPartStartTs))
+    qualifyingPart && segStart != null
+      ? Math.max(0, (segDurations[qualifyingPart] ?? 0) - (infoUptoMs - segStart))
       : null;
 
   // Telemetry window [upto − 45s, upto]: decode only the CarData lines in the window

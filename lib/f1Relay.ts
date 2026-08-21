@@ -30,6 +30,14 @@ const TOPICS = ["DriverList", "TimingData", "TimingAppData", "Position.z", "Sess
 const ENDED = new Set(["finished", "finalised", "ends"]);
 const BUFFER_MS = 45_000; // keep ~45s of position frames (covers a 20s playback delay)
 const QUALI_DURATION_MS: Record<number, number> = { 1: 18 * 60_000, 2: 15 * 60_000, 3: 12 * 60_000 };
+// Sprint Qualifying (SQ1/SQ2/SQ3) runs shorter segments than a Saturday qualifying — the
+// whole session is ~44 min end-to-end where a normal quali is ~60. Both arrive with
+// Type "Qualifying", so they're only distinguishable by name.
+const SPRINT_QUALI_DURATION_MS: Record<number, number> = { 1: 12 * 60_000, 2: 10 * 60_000, 3: 8 * 60_000 };
+function qualiSegmentMs(part: number, sessionName?: string): number {
+  const sprint = /sprint/i.test(sessionName ?? "");
+  return (sprint ? SPRINT_QUALI_DURATION_MS : QUALI_DURATION_MS)[part] ?? 0;
+}
 const LIVE_GRACE_MS = 120_000; // keep live tracking on 2 min after a session ends
 const WEEKEND_FLIP_MS = 300_000; // flip the hero to the next weekend 5 min after the race ends
 // A visitor's connection stays open just long enough to catch a few incremental position/
@@ -516,6 +524,25 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
     conn = null;
   }
 
+  /**
+   * When the CURRENT qualifying segment actually began running.
+   *
+   * F1 publishes `SessionData.Series[].QualifyingPart` while the session is still being SET
+   * UP, well before the lights go green — at Zandvoort's Sprint Qualifying, part 1 was
+   * announced at 14:16:31Z but the session only started at 14:30:00Z. Counting the segment
+   * clock from the announcement burned ~13 min of a 12 min segment before a car had moved,
+   * so a freshly-started SQ1 displayed "2:32 left".
+   *
+   * The green light (`StatusSeries` → `SessionStatus: "Started"`, already tracked as
+   * `sessionStartedTs`) is the real start of the FIRST segment. Later segments legitimately
+   * begin after it, so take whichever is later — that leaves Q2/Q3 driven by their own
+   * announcement, which for them lands at the right time.
+   */
+  function qualiSegmentStart(): number {
+    const announced = qualifyingPartHistory.at(-1)!.startMs;
+    return sessionStartedTs != null ? Math.max(announced, sessionStartedTs) : announced;
+  }
+
   /** Which qualifying segment (1/2/3) was active at a given epoch ms, from the history of
    *  segment-start times. Falls back to Q1 if a stint predates the first recorded transition
    *  (e.g. we connected mid-Q1, before any SessionData message had arrived). */
@@ -760,7 +787,7 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
       qualifyingPart,
       qualifyingRemainingMs:
         qualifyingPart && qualifyingPartHistory.length
-          ? Math.max(0, QUALI_DURATION_MS[qualifyingPart] - (Date.now() - qualifyingPartHistory.at(-1)!.startMs))
+          ? Math.max(0, qualiSegmentMs(qualifyingPart, sessionInfo.Name) - (Date.now() - qualiSegmentStart()))
           : null,
       formationLap: mode === "race" && sessionStartedTs != null && Date.now() < sessionStartedTs,
       mapAvailable: !anonymous,
