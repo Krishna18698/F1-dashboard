@@ -27,7 +27,7 @@ export const F1_LIVE = {
   // F1's own official live tracker was ALSO showing cars teleporting during the Hungarian GP
   // race — this was upstream position-feed trouble, not a bug in this app's interpolation.
   // Flip back to false once F1's feed is stable again.
-  driverTrackerDisabled: true,
+  driverTrackerDisabled: false,
 
   // Sessions to skip entirely when picking a replay fallback candidate — the Hungarian GP
   // Race's position data has the same upstream teleporting problem noted above baked
