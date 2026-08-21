@@ -128,6 +128,13 @@ export interface F1LiveState {
   qualifyingPart: number | null; // 1=Q1, 2=Q2, 3=Q3 (quali sessions only)
   qualifyingRemainingMs: number | null; // live countdown in the current segment
   formationLap: boolean; // race hasn't gone green yet (SessionData StatusSeries "Started")
+  /**
+   * Whether car POSITIONS can be served at all. True on any token-backed connection; false
+   * on an anonymous one — F1 gates Position.z/CarData.z behind a token while serving the
+   * timing topics to anyone. Lets the UI distinguish "no frames have arrived yet" from
+   * "frames will never arrive", and show an honest placeholder instead of a dead map.
+   */
+  mapAvailable: boolean;
 }
 export interface SessionResult {
   session_name: string;
@@ -197,10 +204,14 @@ function clampStintsToLaps<T extends { laps: number }>(stints: T[], totalLaps: n
  * so it can be instantiated either once (the owner's persistent singleton, below) or fresh
  * per visitor request (`getVisitorRelayState`) with zero shared state between instances.
  */
-function createRelaySession() {
+function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
   let conn: signalR.HubConnection | null = null;
   let starting: Promise<void> | null = null;
   let lastRefresh = 0;
+  // True once connected WITHOUT any token (see ensureConnection). Everything the map needs
+  // is missing in that mode, so callers must be able to tell "no cars to show" apart from
+  // "not allowed to see the cars".
+  let anonymous = false;
 
   let timing: Record<string, Dict> = {};
   let app: Record<string, Dict> = {};
@@ -407,11 +418,25 @@ function createRelaySession() {
     if (snap["CarData.z"]) applyCarData(snap["CarData.z"] as string);
   }
 
-  /** `tokenOverride` lets a visitor's own token be used instead of the site's F1_TV_TOKEN —
-   *  everything else about the connection is identical either way. */
+  /**
+   * `tokenOverride` lets a visitor's own token be used instead of the site's F1_TV_TOKEN —
+   * everything else about the connection is identical either way.
+   *
+   * With NO token at all, this connects ANONYMOUSLY, but only for sessions created with
+   * `allowAnonymous` (the site's own singleton — never the per-visitor path, where a token
+   * failing to authenticate must stay distinguishable from no token being sent).
+   *
+   * Verified against F1's hub from production, not assumed: an unauthenticated Subscribe
+   * still returns DriverList, TimingData, TimingAppData, SessionInfo, SessionStatus,
+   * SessionData, RaceControlMessages and TrackStatus in full. Only Position.z, CarData.z,
+   * LapCount and ChampionshipPrediction come back absent. That covers the timing board,
+   * tyres, race control and results — all of which the tokenless deployment previously had
+   * to source from F1's free STATIC feed, which publishes its archive hours late (it had no
+   * Dutch GP data at all while FP1's results were already complete on the hub).
+   */
   async function ensureConnection(tokenOverride?: string): Promise<boolean> {
     const token = tokenOverride ?? process.env.F1_TV_TOKEN?.trim();
-    if (!token) return false;
+    if (!token && !opts.allowAnonymous) return false;
     if (conn && conn.state === signalR.HubConnectionState.Connected) return true;
     if (starting) {
       await starting.catch(() => {});
@@ -419,7 +444,11 @@ function createRelaySession() {
     }
     starting = (async () => {
       const c = new signalR.HubConnectionBuilder()
-        .withUrl(HUB, { accessTokenFactory: () => token, transport: signalR.HttpTransportType.WebSockets, headers: { "User-Agent": "BestHTTP" } })
+        .withUrl(HUB, {
+          ...(token ? { accessTokenFactory: () => token } : {}),
+          transport: signalR.HttpTransportType.WebSockets,
+          headers: { "User-Agent": "BestHTTP" },
+        })
         .withAutomaticReconnect()
         .build();
       c.on("feed", (topic: string, data: unknown) => {
@@ -434,6 +463,7 @@ function createRelaySession() {
       });
       await c.start();
       conn = c;
+      anonymous = !token;
       applySnapshot((await c.invoke("Subscribe", TOPICS)) as Record<string, unknown>);
       lastRefresh = Date.now();
     })();
@@ -718,6 +748,7 @@ function createRelaySession() {
           ? Math.max(0, QUALI_DURATION_MS[qualifyingPart] - (Date.now() - qualifyingPartHistory.at(-1)!.startMs))
           : null,
       formationLap: mode === "race" && sessionStartedTs != null && Date.now() < sessionStartedTs,
+      mapAvailable: !anonymous,
     };
   }
 
@@ -836,10 +867,12 @@ function createRelaySession() {
   };
 }
 
-/* --------------------------- the owner's persistent singleton --------------------------- */
-// Unchanged behavior: one shared connection using the site's own F1_TV_TOKEN, for the
-// lifetime of the server process — exactly as before this file was refactored into a factory.
-const ownerSession = createRelaySession();
+/* --------------------------- the site's persistent singleton --------------------------- */
+// One shared connection for the lifetime of the server process. Uses the site's own
+// F1_TV_TOKEN when it's set (full data, unchanged), and falls back to an ANONYMOUS
+// connection when it isn't — which still serves timing/tyres/race control/results in real
+// time, instead of the hours-late static archive the tokenless deploy used to be stuck with.
+const ownerSession = createRelaySession({ allowAnonymous: true });
 export const getRelayState = ownerSession.getRelayState;
 export const getChampionship = ownerSession.getChampionship;
 export const getRaceControl = ownerSession.getRaceControl;

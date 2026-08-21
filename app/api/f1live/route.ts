@@ -114,15 +114,19 @@ export async function GET(req: NextRequest) {
         // falls through silently, no issue to flag.
       }
 
-      // 2) Real-time via the site's own F1 TV token — skip the connection attempt entirely
-      //    if it's already known to be expired.
-      if (ownerTokenConfigured) {
+      // 2) Real-time via the site's own relay. With F1_TV_TOKEN set this is the full feed
+      //    (map included). WITHOUT one it still connects anonymously and returns everything
+      //    except car positions/telemetry — timing board, tyres, race control, track status —
+      //    which beats falling through to the static feed, whose archive lands hours late.
+      //    `mapAvailable: false` tells the client to show a "tracking needs a token"
+      //    placeholder rather than an empty map.
+      {
         const relay = await getRelayState();
         if (relay && relay.drivers.length > 0) {
           return respond({
             status: "live",
             replay: false,
-            source: "token",
+            source: relay.mapAvailable === false ? "free-live" : "token",
             ...relay,
             frames: newFrames(relay.frames, since),
             telFrames: newTel(relay.telFrames, since),

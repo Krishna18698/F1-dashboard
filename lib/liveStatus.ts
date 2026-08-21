@@ -18,11 +18,14 @@ export interface LiveStatusData {
 
 export async function getLiveStatusData(): Promise<LiveStatusData> {
   try {
-    if (process.env.F1_TV_TOKEN?.trim()) {
-      return await getLiveStatus();
-    }
+    // The relay knows the REAL session status (F1's own SessionStatus/ArchiveStatus), and now
+    // works without a token too — so it's tried first either way. `name` being set means it
+    // actually connected and knows which session this is; a bare {live:false} means it
+    // couldn't connect, which is the only case worth falling through for.
+    const relay = await getLiveStatus();
+    if (relay.name) return relay;
 
-    // No token — free feed first (real published data), else Jolpica's own schedule as a
+    // Relay unreachable — free feed (real published data), else Jolpica's own schedule as a
     // schedule-only estimate (F1's live-timing index can lag a session actually starting by
     // hours, or not list the meeting yet at all).
     const live = await resolveLiveSession();

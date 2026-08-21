@@ -180,6 +180,9 @@ export default function LiveSection() {
   const label = s.replay ? `Replay · ${sessionLabel}` : `${sessionLabel} · on track now`;
 
   const freeFeed = s.source === "free";
+  // The feed can't carry car positions at all (anonymous hub connection), as opposed to
+  // simply not having received any yet — the map would never draw, so don't render one.
+  const mapUnavailable = s.mapAvailable === false;
 
   return (
     <section>
@@ -205,6 +208,22 @@ export default function LiveSection() {
                 right now. Timing, tyres, and Race Control are unaffected.
               </div>
             </div>
+          ) : mapUnavailable ? (
+            /* Everything on this page except the car positions is coming through live — F1
+               serves timing/tyres/race control to anyone, but gates Position.z behind a
+               token. Say that plainly instead of rendering a map that can never draw. */
+            <div className="self-start">
+              <span className="eyebrow mb-2 block text-[0.6rem] text-muted">
+                Driver <span className="text-red">Tracker</span>
+              </span>
+              <div className="flex aspect-square flex-col items-center justify-center gap-2 rounded-lg carbon-bg px-6 text-center ring-1 ring-white/10">
+                <p className="text-sm text-white/70">Live driver tracking needs an F1 TV token.</p>
+                <p className="text-xs text-white/45">
+                  Timing, tyres, and Race Control below are live right now — only the car
+                  positions on track are restricted by F1. Add your token below to see them.
+                </p>
+              </div>
+            </div>
           ) : (
             <TrackMap
               circuitKey={s.circuitKey}
@@ -220,7 +239,9 @@ export default function LiveSection() {
               onSelect={setSelected}
             />
           )}
-          {selected != null && (
+          {/* Telemetry rides on CarData.z, gated by the same token as the positions — with
+              no map there's nothing behind this card either, so don't offer it. */}
+          {selected != null && !mapUnavailable && (
             <TelemetryCard
               num={selected}
               driver={s.drivers.get(selected)}
@@ -292,7 +313,10 @@ export default function LiveSection() {
           />
         </div>
       )}
-      <RaceControl ready={trackingReady} view={view} replayT0={replayT0} />
+      {/* `trackingReady` normally holds Race Control back until the map has frames, so the
+          two don't appear out of order. With no map at all there are no frames to wait for —
+          gating on them would hide Race Control permanently. */}
+      <RaceControl ready={trackingReady || mapUnavailable} view={view} replayT0={replayT0} />
     </section>
   );
 }

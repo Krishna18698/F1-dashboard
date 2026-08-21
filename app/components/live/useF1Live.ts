@@ -42,7 +42,8 @@ interface ApiResponse {
   // token still falls through to whatever the site would otherwise show; see `tokenIssue`.
   status: "live" | "idle" | "error";
   replay?: boolean;
-  source?: "token" | "free" | "visitor";
+  source?: "token" | "free" | "visitor" | "free-live";
+  mapAvailable?: boolean;
   mode?: LiveState["mode"];
   circuitKey?: number;
   session?: { location: string; session_name: string };
@@ -138,6 +139,7 @@ function toState(r: ApiResponse): LiveState {
     status: "live",
     replay: r.replay,
     source: r.source,
+    mapAvailable: r.mapAvailable,
     circuitKey: r.circuitKey,
     frames: [], // positions live in framesStore now, not React state (keeps the map smooth)
     mode: r.mode ?? "race",

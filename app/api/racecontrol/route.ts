@@ -6,15 +6,19 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 20;
 
-/** Race control messages for the live session — token relay when available, otherwise
+/** Race control messages — the live relay (token or anonymous) for the live view, otherwise
  *  F1's free static feed for the same session/instant `/api/f1live` is showing (`view`/`t0`
  *  must match what the client sent there, or this narrates a different point in the replay). */
 export async function GET(req: NextRequest) {
   try {
-    if (process.env.F1_TV_TOKEN?.trim()) {
-      return Response.json(await getRaceControl());
-    }
     const view = req.nextUrl.searchParams.get("view") === "replay" ? "replay" : "live";
+    // Live view: the relay carries RaceControlMessages untokenised, so prefer it either way —
+    // it's real-time, where the static feed lags by hours. Replay deliberately skips it (the
+    // relay only ever knows the CURRENT session; a replay needs the archived one).
+    if (view === "live") {
+      const relay = await getRaceControl();
+      if (relay.available) return Response.json(relay);
+    }
     const t0 = Number(req.nextUrl.searchParams.get("t0")) || undefined;
     const asOf = Number(req.nextUrl.searchParams.get("asOf")) || undefined;
     const instant = await resolveFreeInstant(view, t0, asOf);

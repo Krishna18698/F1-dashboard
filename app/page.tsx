@@ -38,13 +38,17 @@ export default async function Page() {
       getStandingsRound().catch(() => 0),
       getSeasonWinners().catch(() => ({})),
       // Only the live feed knows when the race is REALLY over (handles red flags / extensions).
-      // Guarded by token + a short timeout so a page render never hangs on the relay.
-      process.env.F1_TV_TOKEN?.trim()
-        ? Promise.race([
-            getEndedWeekend().catch(() => null),
-            new Promise<null>((r) => setTimeout(() => r(null), 2500)),
-          ])
-        : Promise.resolve(null),
+      // Works with or without a token now (SessionInfo/SessionStatus are ungated), so the
+      // tokenless deploy gets the same accurate weekend flip too. It used to be skipped
+      // entirely without a token, so it now costs a relay connection on a cold start where it
+      // previously cost nothing — capped tighter than the other relay calls because this only
+      // changes anything during the 5 minutes after a race ends, which isn't worth making
+      // every other page load wait on. A warm instance reuses the connection and returns
+      // instantly; a timeout just means the hero flips on the next render instead.
+      Promise.race([
+        getEndedWeekend().catch(() => null),
+        new Promise<null>((r) => setTimeout(() => r(null), 1200)),
+      ]),
       // Seeds the hero/weekend-schedule "live" badge so the first client render already
       // reflects reality instead of flashing the countdown before the first client poll lands.
       getLiveStatusData().catch(() => ({ live: false })),
