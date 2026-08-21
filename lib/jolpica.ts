@@ -85,8 +85,21 @@ const SESSION_DURATION_MS: Record<string, number> = {
   Race: 2 * 3600_000,
 };
 // How long after a session's assumed end to still call it "live" — covers the schedule
-// guess above running a little short in a normal race.
-const POST_SESSION_GRACE_MS = 20 * 60_000;
+// guess above running a little short. 20 min was a user-requested buffer specifically for
+// RACES (which can genuinely run long under a red flag/safety car) — applying that same 20
+// min uniformly to a 60-minute practice session left it reporting "happening right now" for
+// up to 20 minutes after a practice session had already finished on schedule, which practice/
+// quali/sprint sessions reliably do (no red-flag-length tail to cover). Race keeps the longer
+// buffer; everything else gets a short one for a slightly-late schedule instead.
+const POST_SESSION_GRACE_MS: Record<string, number> = {
+  FP1: 5 * 60_000,
+  FP2: 5 * 60_000,
+  FP3: 5 * 60_000,
+  SQ: 5 * 60_000,
+  Sprint: 5 * 60_000,
+  Quali: 5 * 60_000,
+  Race: 20 * 60_000,
+};
 
 /**
  * Which session of this weekend (if any) is happening right now, going purely by schedule
@@ -98,7 +111,8 @@ export function currentlyLiveWeekendSession(race: Race): WeekendSession | null {
   for (const s of weekendSessions(race)) {
     const start = Date.parse(s.iso);
     const duration = SESSION_DURATION_MS[s.short] ?? 60 * 60_000;
-    if (now >= start - 6 * 60_000 && now <= start + duration + POST_SESSION_GRACE_MS) return s;
+    const grace = POST_SESSION_GRACE_MS[s.short] ?? 5 * 60_000;
+    if (now >= start - 6 * 60_000 && now <= start + duration + grace) return s;
   }
   return null;
 }
