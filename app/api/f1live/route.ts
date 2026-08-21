@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { fallbackCandidates, getF1LiveState, getReplayAnchorMs, getSessionDuration, resolveLiveSession } from "@/lib/f1feed";
-import { getRelayState, getVisitorRelayState } from "@/lib/f1Relay";
+import { getLiveStatus, getRelayState, getVisitorRelayState } from "@/lib/f1Relay";
 import { F1_LIVE } from "@/lib/f1liveConfig";
 import { currentlyLiveWeekendSession, getNextRace } from "@/lib/jolpica";
 import { getTokenStatus } from "@/lib/f1Token";
@@ -164,13 +164,25 @@ export async function GET(req: NextRequest) {
         ? { location: live.location, session_name: live.name }
         : null;
       if (!scheduledLive) {
-        const race = await getNextRace();
-        const activeSession = race ? currentlyLiveWeekendSession(race) : null;
-        if (race && activeSession) {
-          scheduledLive = {
-            location: race.Circuit.Location.locality,
-            session_name: `${race.raceName} · ${activeSession.label}`,
-          };
+        // ...but only when nothing better is available. The relay reads F1's OWN
+        // SessionStatus and now connects without a token, so whenever it can see the current
+        // session it is authoritative — a schedule ESTIMATE must never contradict it. It used
+        // to: Sprint Qualifying actually runs 44 min (16:30–17:14 per F1's own SessionInfo)
+        // while SESSION_DURATION_MS assumes 60, so after SQ finished at 15:14 the guess went
+        // on claiming "Sprint Qualifying is happening right now" until 15:35 — 21 minutes
+        // past the chequered flag. Tuning the assumed durations only ever moves that error
+        // around; deferring to the feed removes it.
+        const relayStatus = await getLiveStatus();
+        const relayKnowsSession = !!relayStatus.name;
+        if (!relayKnowsSession) {
+          const race = await getNextRace();
+          const activeSession = race ? currentlyLiveWeekendSession(race) : null;
+          if (race && activeSession) {
+            scheduledLive = {
+              location: race.Circuit.Location.locality,
+              session_name: `${race.raceName} · ${activeSession.label}`,
+            };
+          }
         }
       }
 

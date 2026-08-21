@@ -79,7 +79,9 @@ const SESSION_DURATION_MS: Record<string, number> = {
   FP1: 60 * 60_000,
   FP2: 60 * 60_000,
   FP3: 60 * 60_000,
-  SQ: 60 * 60_000,
+  // Sprint Qualifying is SQ1+SQ2+SQ3 (12/10/8) plus the breaks — 44 min end to end per F1's
+  // own SessionInfo (16:30–17:14 at Zandvoort), not the 60 a full qualifying runs.
+  SQ: 45 * 60_000,
   Sprint: 45 * 60_000,
   Quali: 60 * 60_000,
   Race: 2 * 3600_000,
