@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:notoken": "F1_TV_TOKEN= next dev",
+    "start:notoken": "F1_TV_TOKEN= next start",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
