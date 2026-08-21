@@ -1,8 +1,14 @@
 import * as signalR from "@microsoft/signalr";
+import WsImpl from "ws";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 20;
+
+// Vercel's Node.js serverless runtime has no native `WebSocket` global — @microsoft/signalr
+// needs one. lib/f1Relay.ts does the same polyfill for its own (token) connections.
+const g = globalThis as unknown as { WebSocket?: unknown };
+if (typeof g.WebSocket === "undefined") g.WebSocket = WsImpl;
 
 /**
  * TEMPORARY diagnostic route — proves (from actual Vercel prod infrastructure, not a local
