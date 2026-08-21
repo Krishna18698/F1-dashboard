@@ -1,5 +1,6 @@
 import { Race, weekendSessions } from "@/lib/jolpica";
 import { lapRecord } from "@/lib/lapRecords";
+import type { LiveStatus } from "./useLiveStatus";
 import SessionSchedule from "./SessionSchedule";
 import SessionResults from "./SessionResults";
 
@@ -15,7 +16,15 @@ function formatWindow(race: Race): string {
   return start === end ? fmt(end) : `${fmt(start)} – ${fmt(end)}`;
 }
 
-export default function Hero({ race }: { race: Race | null }) {
+export default function Hero({
+  race,
+  initialLiveStatus,
+  nowMs,
+}: {
+  race: Race | null;
+  initialLiveStatus?: LiveStatus;
+  nowMs?: number;
+}) {
   if (!race) {
     return (
       <section className="carbon-bg rounded-xl p-8 text-white">
@@ -70,7 +79,11 @@ export default function Hero({ race }: { race: Race | null }) {
         </div>
 
         <div className="lg:text-right">
-          <SessionSchedule sessions={weekendSessions(race)} />
+          <SessionSchedule
+            sessions={weekendSessions(race)}
+            initialLiveStatus={initialLiveStatus}
+            nowMs={nowMs}
+          />
         </div>
 
         {record && (

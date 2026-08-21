@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { WeekendSession } from "@/lib/jolpica";
-import { useLiveStatus } from "./useLiveStatus";
+import { useLiveStatus, LiveStatus } from "./useLiveStatus";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 const FLIP_MS = 300_000; // "Race ended" holds for 5 min, then flip to the next weekend
@@ -22,8 +22,19 @@ function delta(ms: number) {
  * Hero timing: LIVE (no timer) when a session is on track, else countdown to next.
  * Below it, the weekend session chips: completed ✓, next in red, live only when live.
  */
-export default function SessionSchedule({ sessions }: { sessions: WeekendSession[] }) {
-  const [now, setNow] = useState<number | null>(null);
+export default function SessionSchedule({
+  sessions,
+  initialLiveStatus,
+  nowMs,
+}: {
+  sessions: WeekendSession[];
+  initialLiveStatus?: LiveStatus;
+  nowMs?: number;
+}) {
+  // Seed from the server's own clock (same request that computed initialLiveStatus) so the
+  // very first client render is already "ready" — without this, the countdown/live badge sits
+  // behind a `now === null` placeholder for one extra frame after hydration for no reason.
+  const [now, setNow] = useState<number | null>(nowMs ?? null);
   useEffect(() => {
     const tick = () => setNow(Date.now());
     const raf = requestAnimationFrame(tick);
@@ -33,7 +44,7 @@ export default function SessionSchedule({ sessions }: { sessions: WeekendSession
       clearInterval(id);
     };
   }, []);
-  const { live, name, type, endedAt } = useLiveStatus();
+  const { live, name, type, endedAt } = useLiveStatus(initialLiveStatus);
   const router = useRouter();
 
   const ready = now !== null;

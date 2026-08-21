@@ -11,6 +11,7 @@ import {
 } from "@/lib/jolpica";
 import { getPaddockIntel } from "@/lib/news";
 import { getEndedWeekend } from "@/lib/f1Relay";
+import { getLiveStatusData } from "@/lib/liveStatus";
 import { requestNow } from "@/lib/now";
 import Hero from "./components/Hero";
 import WeekendSchedule from "./components/WeekendSchedule";
@@ -27,23 +28,27 @@ import LiveSection from "./components/live/LiveSection";
 export const dynamic = "force-dynamic";
 
 export default async function Page() {
-  const [rawNext, drivers, constructors, schedule, intel, standingsRound, winners, endedWeekend] = await Promise.all([
-    getNextRace(),
-    getDriverStandings().catch(() => []),
-    getConstructorStandings().catch(() => []),
-    getSchedule().catch(() => []),
-    getPaddockIntel().catch(() => []),
-    getStandingsRound().catch(() => 0),
-    getSeasonWinners().catch(() => ({})),
-    // Only the live feed knows when the race is REALLY over (handles red flags / extensions).
-    // Guarded by token + a short timeout so a page render never hangs on the relay.
-    process.env.F1_TV_TOKEN?.trim()
-      ? Promise.race([
-          getEndedWeekend().catch(() => null),
-          new Promise<null>((r) => setTimeout(() => r(null), 2500)),
-        ])
-      : Promise.resolve(null),
-  ]);
+  const [rawNext, drivers, constructors, schedule, intel, standingsRound, winners, endedWeekend, liveStatus] =
+    await Promise.all([
+      getNextRace(),
+      getDriverStandings().catch(() => []),
+      getConstructorStandings().catch(() => []),
+      getSchedule().catch(() => []),
+      getPaddockIntel().catch(() => []),
+      getStandingsRound().catch(() => 0),
+      getSeasonWinners().catch(() => ({})),
+      // Only the live feed knows when the race is REALLY over (handles red flags / extensions).
+      // Guarded by token + a short timeout so a page render never hangs on the relay.
+      process.env.F1_TV_TOKEN?.trim()
+        ? Promise.race([
+            getEndedWeekend().catch(() => null),
+            new Promise<null>((r) => setTimeout(() => r(null), 2500)),
+          ])
+        : Promise.resolve(null),
+      // Seeds the hero/weekend-schedule "live" badge so the first client render already
+      // reflects reality instead of flashing the countdown before the first client poll lands.
+      getLiveStatusData().catch(() => ({ live: false })),
+    ]);
 
   // Standings after the PREVIOUS round → movement arrows (needs standingsRound, so a 2nd pass;
   // past rounds are immutable and cached a day, so this is usually instant).
@@ -77,10 +82,16 @@ export default async function Page() {
       <TokenBanner />
 
       <div className="flex flex-col gap-10">
-        <Hero race={nextRace} />
+        <Hero race={nextRace} initialLiveStatus={liveStatus} nowMs={requestNow()} />
 
         {/* This weekend's sessions (local time) — above the season calendar */}
-        {nextRace && <WeekendSchedule sessions={weekendSessions(nextRace)} nowMs={requestNow()} />}
+        {nextRace && (
+          <WeekendSchedule
+            sessions={weekendSessions(nextRace)}
+            nowMs={requestNow()}
+            initialLiveStatus={liveStatus}
+          />
+        )}
 
         {schedule.length > 0 && (
           <Section title="Season" emphasis="Calendar" hint="2026 · 22 rounds">

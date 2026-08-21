@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { WeekendSession } from "@/lib/jolpica";
-import { useLiveStatus } from "./useLiveStatus";
+import { useLiveStatus, LiveStatus } from "./useLiveStatus";
 
 function fmtLocal(iso: string): string {
   return new Date(iso).toLocaleString(undefined, {
@@ -13,7 +13,15 @@ function fmtLocal(iso: string): string {
 }
 
 /** Full weekend schedule in the viewer's local time: done ✓, live 🔴, or upcoming. */
-export default function WeekendSchedule({ sessions, nowMs }: { sessions: WeekendSession[]; nowMs: number }) {
+export default function WeekendSchedule({
+  sessions,
+  nowMs,
+  initialLiveStatus,
+}: {
+  sessions: WeekendSession[];
+  nowMs: number;
+  initialLiveStatus?: LiveStatus;
+}) {
   // Seed the clock from the server timestamp so the done/next/live card colours are correct
   // on the very first paint (no light→dark flip). The interval keeps it live afterwards.
   const [now, setNow] = useState(nowMs);
@@ -28,7 +36,7 @@ export default function WeekendSchedule({ sessions, nowMs }: { sessions: Weekend
     () => true,
     () => false,
   );
-  const { live, name } = useLiveStatus();
+  const { live, name } = useLiveStatus(initialLiveStatus);
 
   // The live session is matched by the feed's name (e.g. "… · Qualifying").
   const liveLabel = live && name ? name.split("·").pop()?.trim() : null;
