@@ -24,32 +24,19 @@ export async function GET() {
       .withUrl(HUB, { transport: signalR.HttpTransportType.WebSockets, headers: { "User-Agent": "BestHTTP" } })
       .build();
 
+    const ALL_TOPICS = [
+      "DriverList", "TimingData", "TimingAppData", "Position.z", "SessionInfo", "SessionStatus",
+      "ChampionshipPrediction", "RaceControlMessages", "TrackStatus", "LapCount", "CarData.z", "SessionData",
+    ];
     try {
       await conn.start();
-      const snap = (await conn.invoke("Subscribe", ["DriverList", "TimingData", "SessionInfo"])) as {
-        SessionInfo?: { Meeting?: { Name?: string }; Name?: string; ArchiveStatus?: { Status?: string } };
-        DriverList?: Record<string, { Tla?: string; TeamName?: string }>;
-        TimingData?: { Lines?: Record<string, { Position?: string; BestLapTime?: { Value?: string } }> };
-      };
-      const drivers = snap.DriverList ?? {};
-      const lines = snap.TimingData?.Lines ?? {};
-      const rows = Object.entries(lines)
-        .map(([num, l]) => ({
-          pos: Number(l.Position),
-          tla: drivers[num]?.Tla ?? num,
-          team: drivers[num]?.TeamName ?? "",
-          best: l.BestLapTime?.Value ?? "",
-        }))
-        .filter((r) => !Number.isNaN(r.pos))
-        .sort((a, b) => a.pos - b.pos);
-
-      return Response.json({
-        connectedWithoutToken: true,
-        session: `${snap.SessionInfo?.Meeting?.Name ?? "?"} - ${snap.SessionInfo?.Name ?? "?"}`,
-        archiveStatus: snap.SessionInfo?.ArchiveStatus?.Status ?? null,
-        rowCount: rows.length,
-        rows,
-      });
+      const snap = (await conn.invoke("Subscribe", ALL_TOPICS)) as Record<string, unknown>;
+      const perTopic: Record<string, { present: boolean; bytes: number }> = {};
+      for (const t of ALL_TOPICS) {
+        const v = snap[t];
+        perTopic[t] = { present: v != null, bytes: v ? JSON.stringify(v).length : 0 };
+      }
+      return Response.json({ connectedWithoutToken: true, perTopic });
     } finally {
       await conn.stop().catch(() => {});
     }
