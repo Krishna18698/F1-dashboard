@@ -58,6 +58,10 @@ const WEEKEND_FLIP_MS = 300_000; // flip the hero to the next weekend 5 min afte
 // longer than this per request, regardless of how long the visitor keeps polling.
 const VISITOR_COLLECT_MS = 2_500;
 const MAX_CONCURRENT_VISITOR_CONNECTIONS = 20;
+// How long to wait after a failed connect before trying again. Long enough to stop four
+// polling routes hammering the hub when nothing is live, short enough that a session
+// starting is picked up promptly.
+const CONNECT_RETRY_COOLDOWN_MS = 20_000;
 
 type Dict = Record<string, unknown>;
 interface RawDriver {
@@ -304,6 +308,12 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
   // is missing in that mode, so callers must be able to tell "no cars to show" apart from
   // "not allowed to see the cars".
   let anonymous = false;
+  // When F1 drops an idle connection, the next request used to immediately open a brand-new
+  // one. With four routes polling that produced continuous churn — one dev log showed 112
+  // connects against 66 failed transport starts — and a wall of SignalR errors every few
+  // seconds. Wait a little before trying again; a live session connects first time and never
+  // reaches this.
+  let lastConnectFailAt = 0;
 
   let timing: Record<string, Dict> = {};
   let app: Record<string, Dict> = {};
@@ -585,6 +595,7 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
     const token = tokenOverride ?? process.env.F1_TV_TOKEN?.trim();
     if (!token && !opts.allowAnonymous) return false;
     if (conn && conn.state === signalR.HubConnectionState.Connected) return true;
+    if (Date.now() - lastConnectFailAt < CONNECT_RETRY_COOLDOWN_MS) return false;
     if (starting) {
       await starting.catch(() => {});
       return conn?.state === signalR.HubConnectionState.Connected;
@@ -597,6 +608,10 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
           headers: { "User-Agent": "BestHTTP" },
         })
         .withAutomaticReconnect()
+        // SignalR logs its own transport failures at Error level. We already handle a failed
+        // connection by falling back, so those lines are noise that buried anything real in
+        // the dev console. Our own one-liner below records it instead.
+        .configureLogging(signalR.LogLevel.None)
         .build();
       c.on("feed", (topic: string, data: unknown) => {
         try {
@@ -619,6 +634,7 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
       return true;
     } catch {
       conn = null;
+      lastConnectFailAt = Date.now();
       return false;
     } finally {
       starting = null;
