@@ -97,7 +97,7 @@ export default function TelemetryCard({
   // one bar and a full set as updates arrived. Lock the bar count to the widest sector this
   // driver has shown (Zandvoort reports 8 per sector) so the layout stays put and only the
   // colours change.
-  const segCount = Math.max(8, ...(sectors ?? []).map((x) => x.segments?.length ?? 0));
+  const segCount = Math.max(8, ...(sectors ?? []).map((x) => x?.segments?.length ?? 0));
   return (
     <div className="carbon-bg mt-3 rounded-lg p-3 ring-1 ring-white/10 sm:p-4">
     <div className="flex items-center gap-4 sm:gap-5">

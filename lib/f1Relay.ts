@@ -218,16 +218,29 @@ function offsetMs(gmt?: string): number {
  *  objects in incremental deltas ({"0":{...},"2":{...}}), and deepMerge preserves whichever
  *  arrived. `allStints` already deals with this for tyre stints; sectors/segments need the
  *  same treatment or `.map` throws on a live delta and the whole route 500s. */
-function asList<T>(v: unknown): T[] {
-  if (Array.isArray(v)) return v as T[];
+function asList<T>(v: unknown, minLength = 0): (T | undefined)[] {
+  const pad = (a: (T | undefined)[]) => {
+    // A sparse array serializes its holes as `null`, which then blows up any consumer doing
+    // `x.foo` on the client. Materialize every slot up to minLength so the wire format is
+    // always dense.
+    for (let i = 0; i < Math.max(minLength, a.length); i++) if (!(i in a)) a[i] = undefined;
+    return a;
+  };
+  if (Array.isArray(v)) return pad([...(v as T[])]);
   if (v && typeof v === "object") {
-    return Object.keys(v as Record<string, T>)
-      .map(Number)
-      .filter((k) => !Number.isNaN(k))
-      .sort((a, b) => a - b)
-      .map((k) => (v as Record<string, T>)[String(k)]);
+    // Place each entry at ITS OWN numeric key, not in encounter order. A delta often carries
+    // just the one member that changed ({"1": {...}} = sector 2 only); compacting that into a
+    // dense array moved sector 2's data to index 0, so S1 displayed S2's time (seen live:
+    // ANT showing 28.294 for both S1 and S2). Gaps stay undefined and fall back to the
+    // remembered value for that slot.
+    const out: (T | undefined)[] = [];
+    for (const k of Object.keys(v as Record<string, T>)) {
+      const i = Number(k);
+      if (!Number.isNaN(i) && i >= 0 && i < 64) out[i] = (v as Record<string, T>)[k];
+    }
+    return pad(out);
   }
-  return [];
+  return pad([]);
 }
 
 function modeOf(type?: string): F1LiveState["mode"] {
@@ -627,6 +640,28 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
    * Take whichever of the two is later: that fixes an early announcement, and degrades to
    * the announcement alone if a session never publishes a per-segment "Started".
    */
+  /**
+   * Length of the most recent gap between one segment ending and the next going green,
+   * measured from this session's own transitions — so Q1->Q2 teaches Q2->Q3 instead of
+   * trusting a hardcoded constant across every event.
+   *
+   * Must scan FORWARD to the next "Started" rather than requiring it to be the immediately
+   * following entry: F1 emits an "Inactive" between the two (measured at Zandvoort —
+   * Finished 14:18:00, Inactive 14:24:05, Started 14:25:00). Pairing only on adjacency meant
+   * this never matched and the estimate silently never self-corrected.
+   */
+  function measuredBreakMs(): number | null {
+    let found: number | null = null;
+    for (let i = 0; i < statusHistory.length; i++) {
+      if (statusHistory[i].status !== "Finished") continue;
+      const next = statusHistory.slice(i + 1).find((h) => h.status === "Started");
+      if (!next) continue;
+      const observed = next.ts - statusHistory[i].ts;
+      if (observed > 60_000 && observed < 30 * 60_000) found = observed; // sanity-bounded
+    }
+    return found;
+  }
+
   function qualiSegmentStart(): number {
     const announced = qualifyingPartHistory.at(-1)!.startMs;
     return segmentStartedTs != null ? Math.max(announced, segmentStartedTs) : announced;
@@ -886,7 +921,7 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
           OverallFastest?: boolean;
           PersonalFastest?: boolean;
           Segments?: unknown;
-        }>(t.Sectors).map((sec, si) => {
+        }>(t.Sectors, 3).map((sec, si) => {
           const live = sec?.Value || sec?.PreviousValue || "";
           const remembered = lastSectors[n]?.[si];
           if (live) {
@@ -903,7 +938,7 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
             personalFastest: shown?.personalFastest ?? false,
             // Segments always reflect the CURRENT lap in progress — that's the point of the
             // mini-sector bars — so they're never carried over.
-            segments: asList<{ Status?: number }>(sec?.Segments).map((g) => Number(g?.Status ?? 0)),
+            segments: asList<{ Status?: number }>(sec?.Segments).map((g) => (g ? Number(g.Status ?? 0) : -1)),
           };
         }),
         speeds: Object.fromEntries(
@@ -988,13 +1023,7 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
         if (qualifyingPart <= 1 && segmentStartedTs == null) return none;
         // Otherwise the PREVIOUS part just ended and we're counting down to this one.
         const prevEnd = [...statusHistory].reverse().find((h) => h.status === "Finished")?.ts ?? null;
-        let brk = QUALI_BREAK_MS;
-        for (let i = 0; i < statusHistory.length - 1; i++) {
-          if (statusHistory[i].status === "Finished" && statusHistory[i + 1].status === "Started") {
-            const obs = statusHistory[i + 1].ts - statusHistory[i].ts;
-            if (obs > 60_000 && obs < 30 * 60_000) brk = obs;
-          }
-        }
+        const brk = measuredBreakMs() ?? QUALI_BREAK_MS;
         const until = prevEnd != null ? prevEnd + brk - Date.now() : null;
         return {
           remainingMs: 0,
@@ -1025,13 +1054,7 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
       // transition when one has already happened (Q1->Q2 teaches us Q2->Q3), falling back to
       // the value measured at Zandvoort only for the first break of a session. Self-correcting
       // rather than trusting one hardcoded number across every event.
-      let breakMs = QUALI_BREAK_MS;
-      for (let i = 0; i < statusHistory.length - 1; i++) {
-        if (statusHistory[i].status === "Finished" && statusHistory[i + 1].status === "Started") {
-          const observed = statusHistory[i + 1].ts - statusHistory[i].ts;
-          if (observed > 60_000 && observed < 30 * 60_000) breakMs = observed; // sanity-bounded
-        }
-      }
+      const breakMs = measuredBreakMs() ?? QUALI_BREAK_MS;
       const untilNext = segEndedAt + breakMs - now;
       return { remainingMs: 0, segmentEnded: true, nextInMs: untilNext > 0 ? untilNext : null, part: qualifyingPart };
     })();
