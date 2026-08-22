@@ -273,13 +273,17 @@ export default function LiveSection() {
               onSelect={setSelected}
             />
           )}
-          {/* Telemetry rides on CarData.z, gated by the same token as the positions — with
-              no map there's nothing behind this card either, so don't offer it. */}
-          {selected != null && !mapUnavailable && (
+          {/* One card for the followed driver: live telemetry (token only — CarData.z is
+              gated) plus their sectors and speed traps, which come from the ungated
+              TimingData and so are shown in both environments. */}
+          {selected != null && (
             <TelemetryCard
               num={selected}
               driver={s.drivers.get(selected)}
               onClose={() => setSelected(null)}
+              sectors={s.sectors?.get(selected)}
+              speeds={s.speeds?.get(selected)}
+              showTelemetry={!mapUnavailable}
             />
           )}
           {/* Race mode: the Driver Live Tracker column is usually taller than the map, so
@@ -306,7 +310,6 @@ export default function LiveSection() {
           laps={s.laps}
           retired={s.retired}
           sectors={s.sectors}
-          speeds={s.speeds}
           qualifyingPart={s.qualifyingPart}
           sprintQuali={/sprint/i.test(s.session?.session_name ?? "")}
           qualifyingRemainingMs={s.qualifyingRemainingMs}

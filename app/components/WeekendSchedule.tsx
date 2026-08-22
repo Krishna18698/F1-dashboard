@@ -56,17 +56,22 @@ export default function WeekendSchedule({
           const isLive = liveLabel === s.label;
           const done = !isLive && Date.parse(s.iso) <= now;
           const isNext = !isLive && i === nextIdx;
-          const dark = isLive || isNext; // black card like the season calendar's current round
+          // LIVE and NEXT used to share one black treatment, so "on track right now" and
+          // "coming up later" looked identical. Only the LIVE session is filled dark now;
+          // NEXT stays on the light card and is marked with a red outline instead.
+          const dark = isLive;
           return (
             <div
               key={s.label}
               className={[
                 "rounded-lg border p-3 transition-colors",
-                dark
-                  ? "carbon-bg border-white/10 text-white"
-                  : done
-                    ? "border-line bg-panel/60 opacity-70"
-                    : "border-line bg-paper",
+                isLive
+                  ? "carbon-bg border-red text-white ring-2 ring-red/40"
+                  : isNext
+                    ? "border-red/50 bg-paper ring-1 ring-red/20"
+                    : done
+                      ? "border-line bg-panel/60 opacity-70"
+                      : "border-line bg-paper",
               ].join(" ")}
             >
               <div className="flex items-center justify-between">

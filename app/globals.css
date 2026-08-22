@@ -55,6 +55,14 @@ body {
   font-family: var(--font-display), Georgia, "Times New Roman", serif;
 }
 
+/* Timing typeface — lap times, sectors, gaps, countdowns. Squarer figures than the general
+   mono, which reads better in dense timing tables. */
+.font-timing {
+  font-family: var(--font-timing), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
 /* Tabular figures for all timing / points numbers */
 .tnum {
   font-variant-numeric: tabular-nums;

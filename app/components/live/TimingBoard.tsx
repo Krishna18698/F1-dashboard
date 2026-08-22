@@ -9,23 +9,6 @@ import { formatDelta, formatGap, formatInterval, formatLap, hex } from "@/lib/fo
 const QUALI_CUTOFF: Record<number, number> = { 1: 15, 2: 10 };
 
 
-/**
- * Mini-sector status codes from TimingData's Sectors[].Segments[].
- * Harvested live during Zandvoort qualifying rather than taken on faith — the codes actually
- * observed were 0, 2048, 2049, 2051 and 2064. 2064 showed up on drivers sitting in the pit
- * lane, and 0/2048 on sectors not yet run. 2052 (purple mini-sector) is the one value NOT
- * seen in the sample, so it's mapped from the obvious progression and should be treated as
- * unconfirmed until a purple mini-sector is observed.
- */
-const MINI_SECTOR: Record<number, string> = {
-  0: "bg-line", // not reached yet
-  2048: "bg-line", // not set
-  2049: "bg-amber-400", // completed, slower than personal best
-  2051: "bg-emerald-500", // personal best
-  2052: "bg-violet-500", // overall fastest (unconfirmed — see above)
-  2064: "bg-sky-400", // in the pit lane
-};
-
 /** F1's own colour semantics: purple = fastest anyone, green = personal best. */
 function sectorColour(s?: { overallFastest: boolean; personalFastest: boolean }): string {
   if (!s) return "text-muted";
@@ -81,7 +64,6 @@ export default function TimingBoard({
   laps,
   retired,
   sectors,
-  speeds,
   qualifyingPart,
   qualifyingRemainingMs,
   qualifyingSegmentEnded,
@@ -99,7 +81,6 @@ export default function TimingBoard({
   laps: Map<number, LapSummary>;
   retired?: Set<number>;
   sectors?: Map<number, { value: string; overallFastest: boolean; personalFastest: boolean; segments: number[] }[]>;
-  speeds?: Map<number, Record<string, { value: string; overallFastest: boolean; personalFastest: boolean }>>;
   qualifyingPart?: number | null;
   qualifyingRemainingMs?: number | null;
   qualifyingSegmentEnded?: boolean;
@@ -125,11 +106,14 @@ export default function TimingBoard({
   // room — on a narrow screen they'd crush the driver name, so they collapse away and the
   // per-driver detail row below still carries them.
   const showSectors = !isRace && !!sectors?.size;
+  // The header row and each driver row are SEPARATE grids, so `auto` columns size themselves
+  // independently — the narrow "S1" header ended up a different width from the "30.609"
+  // beneath it and the columns visibly failed to line up. Fixed widths make both grids agree.
   const cols = isRace
     ? "grid-cols-[2rem_1fr_auto]"
     : showSectors
-      ? "grid-cols-[2rem_1fr_auto_auto] sm:grid-cols-[2rem_1fr_repeat(3,auto)_auto_auto]"
-      : "grid-cols-[2rem_1fr_auto_auto]";
+      ? "grid-cols-[2rem_1fr_4.5rem_3.5rem] sm:grid-cols-[2rem_1fr_repeat(3,4.25rem)_5rem_4rem]"
+      : "grid-cols-[2rem_1fr_4.5rem_3.5rem]";
 
   return (
     <div className="self-start">
@@ -154,7 +138,7 @@ export default function TimingBoard({
         )}
         {/* Running: time left in this segment. */}
         {isQuali && !qualifyingSegmentEnded && countdown && (
-          <span className="tnum font-mono text-xs font-bold text-red" title="Time remaining in this segment">
+          <span className="tnum font-timing text-xs font-bold text-red" title="Time remaining in this segment">
             {countdown}
           </span>
         )}
@@ -164,7 +148,7 @@ export default function TimingBoard({
           <span className="text-[0.6rem] font-bold tracking-wider text-muted">
             {segLabel}
             {qualifyingPart + 1} IN{" "}
-            <span className="tnum font-mono text-xs text-red">{nextCountdown ?? "—"}</span>
+            <span className="tnum font-timing text-xs text-red">{nextCountdown ?? "—"}</span>
           </span>
         )}
       </div>
@@ -282,56 +266,6 @@ export default function TimingBoard({
             );
           })}
         </ol>
-        {/* Selected driver: the fuller picture — each sector with F1's purple/green
-            semantics, the mini-sector bars that make up it, and the speed traps. Driven by
-            TimingData, which is ungated, so this works without a token as well. */}
-        {selectedNum != null && !isRace && sectors?.get(selectedNum) && (
-          <div className="border-t border-line bg-panel px-3 py-2.5">
-            <div className="mb-2 flex items-center gap-2">
-              <span className="eyebrow text-[0.55rem] text-muted">
-                {drivers.get(selectedNum)?.name_acronym ?? selectedNum} · sectors
-              </span>
-              <button onClick={() => onSelect?.(null)} className="ml-auto text-[0.6rem] font-bold text-muted hover:text-ink">
-                CLOSE
-              </button>
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              {(sectors.get(selectedNum) ?? []).map((sec, i) => (
-                <div key={i}>
-                  <div className="flex items-baseline justify-between">
-                    <span className="eyebrow text-[0.55rem] text-muted">S{i + 1}</span>
-                    <span className={`tnum font-mono text-sm font-bold ${sectorColour(sec)}`}>{sec.value || "–"}</span>
-                  </div>
-                  {/* mini-sectors */}
-                  <div className="mt-1 flex gap-0.5">
-                    {(sec.segments ?? []).map((code, j) => (
-                      <span
-                        key={j}
-                        className={`h-1.5 flex-1 rounded-sm ${MINI_SECTOR[code] ?? "bg-line"}`}
-                        title={`mini-sector ${j + 1} (status ${code})`}
-                      />
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-            {speeds?.get(selectedNum) && (
-              <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1 border-t border-line pt-2">
-                {["I1", "I2", "FL", "ST"].map((k) => {
-                  const sp = speeds.get(selectedNum!)?.[k];
-                  if (!sp?.value) return null;
-                  return (
-                    <span key={k} className="text-[0.6rem] text-muted">
-                      {k}{" "}
-                      <span className={`tnum font-mono text-xs font-semibold ${sectorColour(sp)}`}>{sp.value}</span>
-                      <span className="text-[0.55rem]"> km/h</span>
-                    </span>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
       </div>
     </div>
   );
