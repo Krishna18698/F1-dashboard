@@ -223,6 +223,9 @@ interface SessionCache {
   rc: { ts: number; idx: string; msg: RcMessage }[]; // race control messages, flattened
   qp: { ts: number; part: number }[]; // QualifyingPart transitions (1=Q1, 2=Q2, 3=Q3)
   sessionStartedTs: number | null; // SessionStatus:"Started" — lights-out/race-start instant
+  /** Every SessionStatus transition with its session-relative timestamp. Qualifying emits a
+   *  Started+Finished pair PER SEGMENT, which is what the between-segments state needs. */
+  statusHist: { ts: number; status: string }[];
   car: { ts: number; raw: string }[]; // CarData.z lines, decoded lazily (window per request)
   posOffset: number | null; // absolute Utc → session-relative ms (shared by Position + CarData)
   frames: PosFrame[];
@@ -298,6 +301,7 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
   // SessionStatus:"Started" — F1's own explicit signal for lights-out/race-start, a far more
   // reliable "the race has actually begun" marker than inferring it from position/lap data.
   const qp: { ts: number; part: number }[] = [];
+  const statusHist: { ts: number; status: string }[] = [];
   let sessionStartedTs: number | null = null;
   for (const raw of qpTxt.replace(/^﻿/, "").split(/\r?\n/)) {
     if (!raw) continue;
@@ -312,6 +316,7 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
       }
       const statusEntries = Array.isArray(d.StatusSeries) ? d.StatusSeries : Object.values(d.StatusSeries ?? {});
       for (const st of statusEntries) {
+        if (st.SessionStatus) statusHist.push({ ts, status: st.SessionStatus });
         if (st.SessionStatus === "Started" && sessionStartedTs === null) sessionStartedTs = ts;
       }
     } catch {}
@@ -386,6 +391,7 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
     rc,
     qp,
     sessionStartedTs,
+    statusHist,
     car,
     posOffset,
     frames,
@@ -477,6 +483,8 @@ export interface F1LiveState {
   telFrames: { t: number; c: Record<string, [number, number, number, number]> }[];
   qualifyingPart: number | null;
   qualifyingRemainingMs: number | null;
+  qualifyingSegmentEnded?: boolean;
+  nextQualifyingSegmentInMs?: number | null;
   formationLap: boolean;
   durationMs: number;
   segmentEvents?: SegmentEvent[];
@@ -894,10 +902,57 @@ export async function getF1LiveState(
       ? Math.max(qualifyingPartStartTs, s.sessionStartedTs)
       : qualifyingPartStartTs;
   const segDurations = /sprint/i.test(sessionPath) ? SPRINT_QUALI_DURATION_MS : QUALI_DURATION_MS;
-  const qualifyingRemainingMs =
-    qualifyingPart && segStart != null
-      ? Math.max(0, (segDurations[qualifyingPart] ?? 0) - (infoUptoMs - segStart))
-      : null;
+  // Segment clock, mirroring the live relay so replay behaves identically: a running
+  // countdown, then "SQ1 ENDED" with an estimated countdown to the next segment's green
+  // light during the break. The break length is MEASURED from this session's own earlier
+  // Finished -> Started gap (scanning forward past the "Inactive" F1 emits between them),
+  // falling back to the value measured at Zandvoort only for the first break.
+  const hist = s.statusHist.filter((h) => h.ts <= infoUptoMs);
+  const lastStarted = [...hist].reverse().find((h) => h.status === "Started")?.ts ?? null;
+  const lastFinished = [...hist].reverse().find((h) => h.status === "Finished")?.ts ?? null;
+  const partAnnouncedAt = qualifyingPartStartTs;
+  const partRunning =
+    lastStarted != null && (partAnnouncedAt == null || lastStarted >= partAnnouncedAt);
+  const measuredBreak = (() => {
+    let found: number | null = null;
+    for (let i = 0; i < s.statusHist.length; i++) {
+      if (s.statusHist[i].status !== "Finished") continue;
+      const next = s.statusHist.slice(i + 1).find((h) => h.status === "Started");
+      if (!next) continue;
+      const obs = next.ts - s.statusHist[i].ts;
+      if (obs > 60_000 && obs < 30 * 60_000) found = obs;
+    }
+    return found;
+  })();
+  const breakMs = measuredBreak ?? 7 * 60_000;
+
+  let qualifyingRemainingMs: number | null = null;
+  let qualifyingSegmentEnded = false;
+  let nextQualifyingSegmentInMs: number | null = null;
+  let effectivePart = qualifyingPart;
+
+  if (qualifyingPart && segStart != null) {
+    const assumedEnd = segStart + (segDurations[qualifyingPart] ?? 0);
+    const finishedPerFeed = lastFinished != null && (lastStarted == null || lastFinished > lastStarted);
+    if (!partRunning && qualifyingPart > 1) {
+      // Announced but not yet green — still the BREAK after the previous segment.
+      qualifyingSegmentEnded = true;
+      effectivePart = qualifyingPart - 1;
+      const until = lastFinished != null ? lastFinished + breakMs - infoUptoMs : null;
+      nextQualifyingSegmentInMs = until != null && until > 0 ? until : null;
+      qualifyingRemainingMs = 0;
+    } else if (finishedPerFeed || infoUptoMs >= assumedEnd) {
+      qualifyingSegmentEnded = true;
+      qualifyingRemainingMs = 0;
+      if (qualifyingPart < 3) {
+        const endedAt = finishedPerFeed ? lastFinished! : assumedEnd;
+        const until = endedAt + breakMs - infoUptoMs;
+        nextQualifyingSegmentInMs = until > 0 ? until : null;
+      }
+    } else {
+      qualifyingRemainingMs = Math.max(0, assumedEnd - infoUptoMs);
+    }
+  }
 
   // Telemetry window [upto − 45s, upto]: decode only the CarData lines in the window
   // (lines are ~1.3s batches → ~35 tiny inflates) and keep each sample's OWN Utc
@@ -947,8 +1002,10 @@ export async function getF1LiveState(
     fastestLap,
     trackStatus,
     telFrames,
-    qualifyingPart,
+    qualifyingPart: effectivePart,
     qualifyingRemainingMs,
+    qualifyingSegmentEnded,
+    nextQualifyingSegmentInMs,
     formationLap,
     durationMs: s.durationMs,
     segmentEvents,
