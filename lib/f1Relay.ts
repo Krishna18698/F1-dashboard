@@ -181,6 +181,11 @@ export interface F1LiveState {
   /** Session is over, but this is still F1's current session — the board is showing a FINAL
    *  classification rather than a live one. */
   sessionEnded: boolean;
+  /** Mini-sector transitions the car dots haven't reached yet (the map plays ~20s behind). */
+  segmentEvents?: { t: number; n: number; s: number; i: number; c: number }[];
+  /** Line crossings ahead of the dots, so the card can blank on time rather than on the
+   *  next poll. */
+  lapResets?: { t: number; n: number }[];
 }
 export interface SessionResult {
   session_name: string;
@@ -367,6 +372,21 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
    * relay answer for the same instant the dots are showing.
    */
   let sectorHistory: { t: number; byDriver: Record<string, SectorTime[]> }[] = [];
+  /**
+   * Which lap a sector time belongs to. F1 keeps a sector's Value across the start/finish
+   * line and only overwrites it when that sector is next completed, so between the final
+   * mini-sector being reached and the new time being written the sector looks finished while
+   * still holding LAST lap's number. Recording when each Value was written, and when the
+   * driver's mini-sectors were last blanked, is what tells the two apart. The static feed
+   * derives this by re-walking its delta history; live has to record it as updates land.
+   */
+  let valueSetAt: Record<string, number[]> = {};
+  let lapResetAt: Record<string, number> = {};
+  /** Mini-sector transitions and line crossings, timestamped, for the window the car dots
+   *  haven't rendered yet (the map plays ~20s behind). Lets the client light a segment and
+   *  blank the card at the moment the dot arrives instead of on the next poll. */
+  let segmentEvents: { t: number; n: number; s: number; i: number; c: number }[] = [];
+  let lapResets: { t: number; n: number }[] = [];
   // When the race's own LapCount first reached TotalLaps (the chequered flag, from real lap
   // data — not a schedule guess). SessionStatus/ArchiveStatus can lag well behind the actual
   // flag (podium/post-race coverage keeps the session "Started" for a while) — this is a more
@@ -400,6 +420,10 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
       sessionFinishedTs = null;
       statusHistory = [];
       sectorHistory = [];
+      valueSetAt = {};
+      lapResetAt = {};
+      segmentEvents = [];
+      lapResets = [];
       raceLapsCompleteAt = null;
       telBuffer = [];
       endedAt = null;
@@ -455,7 +479,38 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
   function applyFeed(topic: string, data: unknown) {
     if (!data) return;
     if (topic === "TimingData") {
-      for (const [n, u] of Object.entries((data as { Lines?: Record<string, Dict> }).Lines ?? {})) deepMerge((timing[n] ??= {}), u);
+      const now = Date.now();
+      for (const [n, u] of Object.entries((data as { Lines?: Record<string, Dict> }).Lines ?? {})) {
+        // Note WHEN each sector time was written and when the mini-sectors were blanked,
+        // BEFORE merging — afterwards the update is indistinguishable from earlier state.
+        const secs = (u as { Sectors?: unknown }).Sectors;
+        if (secs && typeof secs === "object") {
+          let zeros = 0;
+          for (const [sk, sv] of Object.entries(secs as Record<string, { Value?: string; Segments?: unknown }>)) {
+            const si = Number(sk);
+            if (!Number.isNaN(si) && sv?.Value) (valueSetAt[n] ??= [])[si] = now;
+            const segs = sv?.Segments;
+            if (segs && typeof segs === "object") {
+              for (const [gk, gv] of Object.entries(segs as Record<string, { Status?: number }>)) {
+                const gi = Number(gk);
+                const code = Number(gv?.Status ?? NaN);
+                if (Number.isNaN(gi) || Number.isNaN(code)) continue;
+                if (code === 0) zeros++;
+                segmentEvents.push({ t: now, n: +n, s: si, i: gi, c: code });
+              }
+            }
+          }
+          // One update blanking a dozen-plus mini-sectors is the line crossing.
+          if (zeros >= 12) {
+            lapResetAt[n] = now;
+            lapResets.push({ t: now, n: +n });
+          }
+        }
+        deepMerge((timing[n] ??= {}), u);
+      }
+      const cutoff = now - BUFFER_MS;
+      if (segmentEvents.length > 400) segmentEvents = segmentEvents.filter((e) => e.t >= cutoff);
+      if (lapResets.length > 40) lapResets = lapResets.filter((e) => e.t >= cutoff);
     } else if (topic === "TimingAppData") {
       for (const [n, u] of Object.entries((data as { Lines?: Record<string, Dict> }).Lines ?? {})) {
         const cur = (app[n] ??= {});
@@ -969,13 +1024,16 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
           OverallFastest?: boolean;
           PersonalFastest?: boolean;
           Segments?: unknown;
-        }>(t.Sectors, 3).map((sec) => {
+        }>(t.Sectors, 3).map((sec, si) => {
           // Only the CURRENT lap's time — no PreviousValue fallback and no carry-forward of
           // the last completed reading. Both were added to stop the card blanking mid-lap,
           // but they also kept last lap's times on screen after a driver had started a new
           // one. The bar should empty at the line and refill sector by sector.
           return {
-            value: sec?.Value || "",
+            // Blank unless this time was written AFTER the last line crossing — otherwise
+            // the ~90ms gap before F1 writes the new time shows last lap's value, and a poll
+            // landing in it displays that for a full poll cycle.
+            value: (valueSetAt[n]?.[si] ?? 0) >= (lapResetAt[n] ?? 0) ? sec?.Value || "" : "",
             overallFastest: Boolean(sec?.OverallFastest),
             personalFastest: Boolean(sec?.PersonalFastest),
             // Segments always reflect the CURRENT lap in progress — that's the point of the
@@ -1163,6 +1221,10 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
           : Number(lapCount?.CurrentLap ?? 0) >= 1),
       mapAvailable: !anonymous,
       sessionEnded: ended,
+      // Only what's still ahead of the dots is useful to the client; anything older has
+      // already been folded into the rows above.
+      segmentEvents: asOfMs ? segmentEvents.filter((e) => e.t > asOfMs) : [],
+      lapResets: asOfMs ? lapResets.filter((e) => e.t > asOfMs) : [],
     };
   }
 
