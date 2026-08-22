@@ -7,13 +7,24 @@ import { getPlaybackT, getTel } from "./framesStore";
 
 /** Mini-sector status codes — see the note in TimingBoard; 2052 (purple) is still
  *  unconfirmed against live data. Tuned for the dark card background. */
+/**
+ * Mini-sector colours, matching F1's own timing convention:
+ *   yellow = slower than this driver's best
+ *   green  = the driver's personal best for that mini-sector
+ *   purple = fastest anyone has gone there
+ * Anything that isn't a timed mini-sector (not reached yet, or the car is in the pit lane)
+ * stays neutral rather than getting a colour of its own — an earlier build tinted the pit
+ * status blue, which read as a fourth meaning that doesn't exist in F1's scheme.
+ * Codes observed live at Zandvoort: 0/2048 (not set), 2049, 2051, 2064 (pit). 2052 (purple)
+ * follows the progression but hasn't been seen in a capture yet.
+ */
 const MINI_SECTOR: Record<number, string> = {
   0: "bg-white/15",
   2048: "bg-white/15",
   2049: "bg-amber-400",
   2051: "bg-emerald-400",
   2052: "bg-violet-400",
-  2064: "bg-sky-400",
+  2064: "bg-white/15",
 };
 
 /** F1's colour semantics, on the dark card: purple = fastest anyone, green = personal best. */

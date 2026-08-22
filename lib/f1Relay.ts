@@ -330,6 +330,10 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
   // F1's own graphics keep the previous lap's sectors on screen until new ones replace them;
   // this is that memory.
   let lastSectors: Record<string, { value: string; overallFastest: boolean; personalFastest: boolean }[]> = {};
+  // Same problem, one level down: a delta often carries only the mini-sector that just
+  // changed, so rendering the raw array blanked the rest and the bars visibly flashed on
+  // every poll. Merge each update into the last known set per driver/sector instead.
+  let lastSegments: Record<string, number[][]> = {};
   // When the race's own LapCount first reached TotalLaps (the chequered flag, from real lap
   // data — not a schedule guess). SessionStatus/ArchiveStatus can lag well behind the actual
   // flag (podium/post-race coverage keeps the session "Started" for a while) — this is a more
@@ -363,6 +367,7 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
       sessionFinishedTs = null;
       statusHistory = [];
       lastSectors = {};
+      lastSegments = {};
       raceLapsCompleteAt = null;
       telBuffer = [];
       endedAt = null;
@@ -398,7 +403,12 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
         const c: TelFrame["c"] = {};
         for (const [num, car] of Object.entries(e.Cars)) {
           const ch = car.Channels;
-          if (ch) c[num] = [ch["0"] ?? 0, ch["2"] ?? 0, ch["3"] ?? 0, ch["4"] ?? 0];
+          // Throttle/brake arrive as 104 when a car has NO live telemetry (measured on every
+          // stationary car in the pits, alongside rpm/speed/gear all 0, while a car actually
+          // running reports a real 0-100). Clamping that to 100 made a parked car read
+          // "THROTTLE 100%". Anything above 100 is the no-data sentinel, not a reading.
+          const thr = ch?.["4"] ?? 0;
+          if (ch) c[num] = [ch["0"] ?? 0, ch["2"] ?? 0, ch["3"] ?? 0, thr > 100 ? 0 : thr];
         }
         if (Object.keys(c).length) {
           telBuffer.push({ t, c });
@@ -938,7 +948,17 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
             personalFastest: shown?.personalFastest ?? false,
             // Segments always reflect the CURRENT lap in progress — that's the point of the
             // mini-sector bars — so they're never carried over.
-            segments: asList<{ Status?: number }>(sec?.Segments).map((g) => (g ? Number(g.Status ?? 0) : -1)),
+            segments: (() => {
+              const incoming = asList<{ Status?: number }>(sec?.Segments);
+              const prev = lastSegments[n]?.[si] ?? [];
+              const merged = [...prev];
+              incoming.forEach((g, gi) => {
+                if (g) merged[gi] = Number(g.Status ?? 0);
+              });
+              for (let gi = 0; gi < merged.length; gi++) if (merged[gi] == null) merged[gi] = 0;
+              (lastSegments[n] ??= [])[si] = merged;
+              return merged;
+            })(),
           };
         }),
         speeds: Object.fromEntries(
