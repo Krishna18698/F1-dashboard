@@ -58,6 +58,8 @@ export interface LiveState {
   formationLap?: boolean; // race hasn't gone green yet — tints the map yellow, like a flag
   qualifyingPart?: number | null; // 1=Q1, 2=Q2, 3=Q3 (quali sessions only)
   qualifyingRemainingMs?: number | null; // live countdown in the current segment
+  qualifyingSegmentEnded?: boolean; // segment clock ran out, next hasn't started yet
+  nextQualifyingSegmentInMs?: number | null; // estimated countdown to the next segment
   tokenIssue?: "invalid" | "busy" | null; // set when a visitor's own token couldn't be used
   ownerTokenConfigured?: boolean; // does the SITE have its own F1_TV_TOKEN configured
   scheduledLive?: { location: string; session_name: string } | null; // a session is on by the schedule right now, even though there's no data to show yet (no token / free feed hasn't caught up)

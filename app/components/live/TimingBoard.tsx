@@ -56,6 +56,8 @@ export default function TimingBoard({
   retired,
   qualifyingPart,
   qualifyingRemainingMs,
+  qualifyingSegmentEnded,
+  nextQualifyingSegmentInMs,
   sprintQuali,
   knockedOut,
   selectedNum,
@@ -70,6 +72,8 @@ export default function TimingBoard({
   retired?: Set<number>;
   qualifyingPart?: number | null;
   qualifyingRemainingMs?: number | null;
+  qualifyingSegmentEnded?: boolean;
+  nextQualifyingSegmentInMs?: number | null;
   sprintQuali?: boolean;
   knockedOut?: Set<number>;
   selectedNum?: number | null;
@@ -78,6 +82,8 @@ export default function TimingBoard({
   const isRace = mode === "race";
   const isQuali = mode === "quali";
   const countdown = useCountdown(qualifyingRemainingMs);
+  const nextCountdown = useCountdown(nextQualifyingSegmentInMs);
+  const segLabel = sprintQuali ? "SQ" : "Q";
   const fastest = [...laps.values()].reduce<number | null>((m, l) => {
     if (l.best == null) return m;
     return m == null || l.best < m ? l.best : m;
@@ -95,15 +101,32 @@ export default function TimingBoard({
         </span>
         {isQuali && qualifyingPart && (
           /* A sprint weekend's segments are SQ1/SQ2/SQ3, not Q1/Q2/Q3 — same feed field,
-             different session, and F1's own broadcast labels them separately. */
-          <span className="rounded-sm bg-ink px-1.5 py-0.5 text-[0.6rem] font-bold tracking-wider text-white">
-            {sprintQuali ? "SQ" : "Q"}
+             different session, and F1's own broadcast labels them separately.
+             Once a segment's clock runs out it reads "SQ1 ENDED" (greyed) rather than
+             sitting at 0:00 as though it were still running. */
+          <span
+            className={`rounded-sm px-1.5 py-0.5 text-[0.6rem] font-bold tracking-wider ${
+              qualifyingSegmentEnded ? "bg-line text-ink-soft" : "bg-ink text-white"
+            }`}
+          >
+            {segLabel}
             {qualifyingPart}
+            {qualifyingSegmentEnded ? " ENDED" : ""}
           </span>
         )}
-        {isQuali && countdown && (
+        {/* Running: time left in this segment. */}
+        {isQuali && !qualifyingSegmentEnded && countdown && (
           <span className="tnum font-mono text-xs font-bold text-red" title="Time remaining in this segment">
             {countdown}
+          </span>
+        )}
+        {/* Between segments: count down to the next one going green. The estimate is
+            replaced by the real segment clock the moment F1 starts it. */}
+        {isQuali && qualifyingSegmentEnded && qualifyingPart != null && qualifyingPart < 3 && (
+          <span className="text-[0.6rem] font-bold tracking-wider text-muted">
+            {segLabel}
+            {qualifyingPart + 1} IN{" "}
+            <span className="tnum font-mono text-xs text-red">{nextCountdown ?? "—"}</span>
           </span>
         )}
       </div>

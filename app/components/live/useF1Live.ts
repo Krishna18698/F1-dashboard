@@ -60,6 +60,8 @@ interface ApiResponse {
   telFrames?: { t: number; c: Record<string, [number, number, number, number]> }[];
   qualifyingPart?: number | null;
   qualifyingRemainingMs?: number | null;
+  qualifyingSegmentEnded?: boolean;
+  nextQualifyingSegmentInMs?: number | null;
   tokenIssue?: "invalid" | "busy";
   ownerTokenConfigured?: boolean;
   scheduledLive?: { location: string; session_name: string } | null;
@@ -163,6 +165,8 @@ function toState(r: ApiResponse): LiveState {
     formationLap: r.formationLap ?? false,
     qualifyingPart: r.qualifyingPart ?? null,
     qualifyingRemainingMs: r.qualifyingRemainingMs ?? null,
+    qualifyingSegmentEnded: r.qualifyingSegmentEnded ?? false,
+    nextQualifyingSegmentInMs: r.nextQualifyingSegmentInMs ?? null,
     tokenIssue: r.tokenIssue ?? null,
     ownerTokenConfigured: r.ownerTokenConfigured ?? false,
     tyreLaps,

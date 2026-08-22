@@ -308,6 +308,8 @@ export default function LiveSection() {
           qualifyingPart={s.qualifyingPart}
           sprintQuali={/sprint/i.test(s.session?.session_name ?? "")}
           qualifyingRemainingMs={s.qualifyingRemainingMs}
+          qualifyingSegmentEnded={s.qualifyingSegmentEnded}
+          nextQualifyingSegmentInMs={s.nextQualifyingSegmentInMs}
           knockedOut={s.knockedOut}
           selectedNum={selected}
           onSelect={setSelected}

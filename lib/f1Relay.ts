@@ -38,6 +38,14 @@ function qualiSegmentMs(part: number, sessionName?: string): number {
   const sprint = /sprint/i.test(sessionName ?? "");
   return (sprint ? SPRINT_QUALI_DURATION_MS : QUALI_DURATION_MS)[part] ?? 0;
 }
+// Gap between the end of one segment and the green light of the next. Measured off F1's own
+// StatusSeries at Zandvoort SQ: SQ1 Finished 14:42:00 -> SQ2 Started 14:49:00, and SQ2
+// Finished 14:59:00 -> SQ3 Started 15:06:00 — 7 min both times. A Saturday qualifying's
+// breaks aren't measured yet, so it uses the same value until one is observed. This is only
+// ever used to COUNT DOWN to the next segment; the moment F1 actually starts it, the real
+// segment clock takes over, so an inaccurate estimate self-corrects rather than persisting.
+const QUALI_BREAK_MS = 7 * 60_000;
+const QUALI_LAST_PART = 3;
 const LIVE_GRACE_MS = 120_000; // keep live tracking on 2 min after a session ends
 // How long the FINAL classification stays on the Driver Live Tracker after a session ends,
 // measured from F1's OWN "Finished" timestamp. Then the tracker goes idle. The result isn't
@@ -140,6 +148,11 @@ export interface F1LiveState {
   telFrames: TelFrame[]; // recent timestamped telemetry window (client plays back at the map's clock)
   qualifyingPart: number | null; // 1=Q1, 2=Q2, 3=Q3 (quali sessions only)
   qualifyingRemainingMs: number | null; // live countdown in the current segment
+  /** Current segment's clock has run out and the next one hasn't gone green yet. */
+  qualifyingSegmentEnded: boolean;
+  /** Estimated ms until the NEXT segment starts, during that break. Null on the last
+   *  segment, or once the estimate has elapsed and we're just waiting on F1. */
+  nextQualifyingSegmentInMs: number | null;
   formationLap: boolean; // race hasn't gone green yet (SessionData StatusSeries "Started")
   /**
    * Whether car POSITIONS can be served at all. True on any token-backed connection; false
@@ -846,6 +859,26 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
       } catch {}
     }
 
+    // Qualifying segment clock. Three states, in order:
+    //   running  -> remainingMs counts down inside the segment
+    //   ended    -> its clock hit zero; F1 hasn't started the next one yet (the ~7 min break)
+    //   next-in  -> estimated countdown to the next segment's green light, during that break
+    // `nextInMs` is an ESTIMATE (see QUALI_BREAK_MS); it's only shown during the break and is
+    // replaced by the real clock the instant F1 starts the segment, so it can't drift.
+    const qualiClock = (() => {
+      if (!qualifyingPart || !qualifyingPartHistory.length) {
+        return { remainingMs: null as number | null, segmentEnded: false, nextInMs: null as number | null };
+      }
+      const segStart = qualiSegmentStart();
+      const segEndsAt = segStart + qualiSegmentMs(qualifyingPart, sessionInfo.Name);
+      const remainingMs = Math.max(0, segEndsAt - Date.now());
+      if (remainingMs > 0) return { remainingMs, segmentEnded: false, nextInMs: null as number | null };
+      // Segment over. The final segment has nothing to count down to.
+      if (qualifyingPart >= QUALI_LAST_PART) return { remainingMs: 0, segmentEnded: true, nextInMs: null as number | null };
+      const untilNext = segEndsAt + QUALI_BREAK_MS - Date.now();
+      return { remainingMs: 0, segmentEnded: true, nextInMs: untilNext > 0 ? untilNext : null };
+    })();
+
     return {
       mode,
       session: { location: sessionInfo.Meeting?.Location ?? sessionInfo.Meeting?.Circuit?.ShortName ?? "F1", session_name: sessionName() },
@@ -860,10 +893,9 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
       trackStatus: trackStatus?.Status ?? null,
       telFrames: telBuffer.slice(-200), // ~45s at ~4Hz
       qualifyingPart,
-      qualifyingRemainingMs:
-        qualifyingPart && qualifyingPartHistory.length
-          ? Math.max(0, qualiSegmentMs(qualifyingPart, sessionInfo.Name) - (Date.now() - qualiSegmentStart()))
-          : null,
+      qualifyingRemainingMs: qualiClock.remainingMs,
+      qualifyingSegmentEnded: qualiClock.segmentEnded,
+      nextQualifyingSegmentInMs: qualiClock.nextInMs,
       // Two different situations, because the green light is known at different times.
       // REPLAY-style (the whole session already loaded): sessionStartedTs is known up front,
       // so the formation lap is simply "before it".
