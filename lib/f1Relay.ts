@@ -1025,8 +1025,14 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
     await refreshIfStale();
     if (!sessionInfo) return null;
     liveNow(); // maintain endedAt
-    const isRace = (sessionInfo.Type ?? "").toLowerCase() === "race";
-    if (!isRace || endedAt == null) return null;
+    // The doc above says "main Grand Prix only" — enforce it. A SPRINT arrives with
+    // Type "Race" (Name "Sprint"), so a type check alone treats Saturday's sprint as the
+    // Grand Prix and flips the hero to the NEXT round while qualifying and the actual race
+    // are still to come that weekend. Confirmed against the feed: Zandvoort's sprint reported
+    // Name "Sprint", Type "Race", Meeting "Dutch Grand Prix".
+    const name = (sessionInfo.Name ?? "").toLowerCase();
+    const isGrandPrixRace = (sessionInfo.Type ?? "").toLowerCase() === "race" && !name.includes("sprint");
+    if (!isGrandPrixRace || endedAt == null) return null;
     return { round: Number(sessionInfo.Meeting?.Number ?? 0), flipReady: Date.now() >= endedAt + WEEKEND_FLIP_MS };
   }
 
