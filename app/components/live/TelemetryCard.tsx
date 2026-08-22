@@ -26,6 +26,7 @@ const MINI_SECTOR: Record<number, string> = {
   2052: "bg-violet-400", // fastest anyone has gone there
   2064: "bg-white/35", // in the pit lane — not a timed mini-sector, but it DID happen, so it
   // stays visible rather than looking like a gap in the lap (neutral grey, not a 4th colour).
+  [-1]: "bg-white/45", // passed, but F1 never reported a status for it (see the note below)
 };
 
 /** F1's colour semantics, on the dark card: purple = fastest anyone, green = personal best. */
@@ -209,7 +210,17 @@ export default function TelemetryCard({
                 </div>
                 <div className="mt-1 flex gap-0.5">
                   {Array.from({ length: segCount }, (_, j) => {
-                    const code = (liveSegs?.[i] ?? sec.segments)?.[j];
+                    const row = liveSegs?.[i] ?? sec.segments ?? [];
+                    let code = row[j];
+                    // F1 doesn't report every mini-sector — index 0 especially (787 updates
+                    // vs ~950 for each other index across a whole session). An unreported one
+                    // sitting between reported ones left a visible hole in the bar, as though
+                    // the car skipped it. A car cannot reach mini-sector 4 without passing 0-3,
+                    // so treat an unreported slot that has a lit one AFTER it as passed.
+                    if (code == null || code === 0 || code === 2048) {
+                      const laterLit = row.slice(j + 1).some((c) => c && c !== 0 && c !== 2048);
+                      if (laterLit) code = -1; // "passed, no colour reported"
+                    }
                     return (
                       <span
                         key={j}
