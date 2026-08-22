@@ -64,6 +64,8 @@ export interface LiveState {
   ownerTokenConfigured?: boolean; // does the SITE have its own F1_TV_TOKEN configured
   scheduledLive?: { location: string; session_name: string } | null; // a session is on by the schedule right now, even though there's no data to show yet (no token / free feed hasn't caught up)
   tyreLaps?: Map<number, number>; // laps on current tyre, per driver
+  sectors?: Map<number, { value: string; overallFastest: boolean; personalFastest: boolean; segments: number[] }[]>; // S1/S2/S3 with F1's purple/green flags
+  speeds?: Map<number, Record<string, { value: string; overallFastest: boolean; personalFastest: boolean }>>; // I1/I2/FL/ST speed traps
   inPit?: Set<number>; // drivers currently in the pit lane
   retired?: Set<number>; // crashed / DNF drivers
   knockedOut?: Set<number>; // eliminated in a prior quali segment

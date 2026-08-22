@@ -8,6 +8,32 @@ import { formatDelta, formatGap, formatInterval, formatLap, hex } from "@/lib/fo
 // FIA quali format: Q1 cuts the field to 15, Q2 cuts to 10 — fixed regardless of grid size.
 const QUALI_CUTOFF: Record<number, number> = { 1: 15, 2: 10 };
 
+
+/**
+ * Mini-sector status codes from TimingData's Sectors[].Segments[].
+ * Harvested live during Zandvoort qualifying rather than taken on faith — the codes actually
+ * observed were 0, 2048, 2049, 2051 and 2064. 2064 showed up on drivers sitting in the pit
+ * lane, and 0/2048 on sectors not yet run. 2052 (purple mini-sector) is the one value NOT
+ * seen in the sample, so it's mapped from the obvious progression and should be treated as
+ * unconfirmed until a purple mini-sector is observed.
+ */
+const MINI_SECTOR: Record<number, string> = {
+  0: "bg-line", // not reached yet
+  2048: "bg-line", // not set
+  2049: "bg-amber-400", // completed, slower than personal best
+  2051: "bg-emerald-500", // personal best
+  2052: "bg-violet-500", // overall fastest (unconfirmed — see above)
+  2064: "bg-sky-400", // in the pit lane
+};
+
+/** F1's own colour semantics: purple = fastest anyone, green = personal best. */
+function sectorColour(s?: { overallFastest: boolean; personalFastest: boolean }): string {
+  if (!s) return "text-muted";
+  if (s.overallFastest) return "text-violet-500";
+  if (s.personalFastest) return "text-emerald-600";
+  return "text-ink-soft";
+}
+
 /** Bottom N of the still-active (not yet eliminated) field, in current ranked order. */
 function dangerZone(order: number[], knockedOut: Set<number> | undefined, part: number | null | undefined): Set<number> {
   const cutoff = part ? QUALI_CUTOFF[part] : undefined;
@@ -54,6 +80,8 @@ export default function TimingBoard({
   intervals,
   laps,
   retired,
+  sectors,
+  speeds,
   qualifyingPart,
   qualifyingRemainingMs,
   qualifyingSegmentEnded,
@@ -70,6 +98,8 @@ export default function TimingBoard({
   intervals: Map<number, IntervalRow>;
   laps: Map<number, LapSummary>;
   retired?: Set<number>;
+  sectors?: Map<number, { value: string; overallFastest: boolean; personalFastest: boolean; segments: number[] }[]>;
+  speeds?: Map<number, Record<string, { value: string; overallFastest: boolean; personalFastest: boolean }>>;
   qualifyingPart?: number | null;
   qualifyingRemainingMs?: number | null;
   qualifyingSegmentEnded?: boolean;
@@ -91,7 +121,15 @@ export default function TimingBoard({
 
   const danger = isQuali ? dangerZone(order, knockedOut, qualifyingPart) : new Set<number>();
 
-  const cols = isRace ? "grid-cols-[2rem_1fr_auto]" : "grid-cols-[2rem_1fr_auto_auto]";
+  // Sector columns only where sectors are the story (quali/practice) and only once there's
+  // room — on a narrow screen they'd crush the driver name, so they collapse away and the
+  // per-driver detail row below still carries them.
+  const showSectors = !isRace && !!sectors?.size;
+  const cols = isRace
+    ? "grid-cols-[2rem_1fr_auto]"
+    : showSectors
+      ? "grid-cols-[2rem_1fr_auto_auto] sm:grid-cols-[2rem_1fr_repeat(3,auto)_auto_auto]"
+      : "grid-cols-[2rem_1fr_auto_auto]";
 
   return (
     <div className="self-start">
@@ -140,6 +178,13 @@ export default function TimingBoard({
             <span className="text-right">Gap / Int</span>
           ) : (
             <>
+              {showSectors && (
+                <>
+                  <span className="hidden text-right sm:block">S1</span>
+                  <span className="hidden text-right sm:block">S2</span>
+                  <span className="hidden text-right sm:block">S3</span>
+                </>
+              )}
               <span className="text-right">Best</span>
               <span className="text-right">Gap</span>
             </>
@@ -205,13 +250,26 @@ export default function TimingBoard({
                     </div>
                   )
                 ) : isKnockedOut ? (
-                  <div className="col-span-2 text-right">
+                  <div className={`text-right ${showSectors ? "col-span-2 sm:col-span-5" : "col-span-2"}`}>
                     <span className="rounded-sm bg-ink px-1.5 py-0.5 text-[0.6rem] font-bold tracking-wider text-white">
                       OUT
                     </span>
                   </div>
                 ) : (
                   <>
+                    {showSectors &&
+                      [0, 1, 2].map((si) => {
+                        const sec = sectors?.get(num)?.[si];
+                        return (
+                          <span
+                            key={si}
+                            className={`tnum hidden text-right font-mono text-xs sm:block ${sectorColour(sec)}`}
+                            title={sec?.overallFastest ? "Fastest of anyone" : sec?.personalFastest ? "Personal best" : undefined}
+                          >
+                            {sec?.value || "–"}
+                          </span>
+                        );
+                      })}
                     <span className={`tnum text-right font-mono text-xs font-bold ${isP1 ? "text-red" : ""}`}>
                       {formatLap(lap?.best)}
                     </span>
@@ -224,6 +282,56 @@ export default function TimingBoard({
             );
           })}
         </ol>
+        {/* Selected driver: the fuller picture — each sector with F1's purple/green
+            semantics, the mini-sector bars that make up it, and the speed traps. Driven by
+            TimingData, which is ungated, so this works without a token as well. */}
+        {selectedNum != null && !isRace && sectors?.get(selectedNum) && (
+          <div className="border-t border-line bg-panel px-3 py-2.5">
+            <div className="mb-2 flex items-center gap-2">
+              <span className="eyebrow text-[0.55rem] text-muted">
+                {drivers.get(selectedNum)?.name_acronym ?? selectedNum} · sectors
+              </span>
+              <button onClick={() => onSelect?.(null)} className="ml-auto text-[0.6rem] font-bold text-muted hover:text-ink">
+                CLOSE
+              </button>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              {(sectors.get(selectedNum) ?? []).map((sec, i) => (
+                <div key={i}>
+                  <div className="flex items-baseline justify-between">
+                    <span className="eyebrow text-[0.55rem] text-muted">S{i + 1}</span>
+                    <span className={`tnum font-mono text-sm font-bold ${sectorColour(sec)}`}>{sec.value || "–"}</span>
+                  </div>
+                  {/* mini-sectors */}
+                  <div className="mt-1 flex gap-0.5">
+                    {(sec.segments ?? []).map((code, j) => (
+                      <span
+                        key={j}
+                        className={`h-1.5 flex-1 rounded-sm ${MINI_SECTOR[code] ?? "bg-line"}`}
+                        title={`mini-sector ${j + 1} (status ${code})`}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {speeds?.get(selectedNum) && (
+              <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1 border-t border-line pt-2">
+                {["I1", "I2", "FL", "ST"].map((k) => {
+                  const sp = speeds.get(selectedNum!)?.[k];
+                  if (!sp?.value) return null;
+                  return (
+                    <span key={k} className="text-[0.6rem] text-muted">
+                      {k}{" "}
+                      <span className={`tnum font-mono text-xs font-semibold ${sectorColour(sp)}`}>{sp.value}</span>
+                      <span className="text-[0.55rem]"> km/h</span>
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

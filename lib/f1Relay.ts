@@ -214,6 +214,22 @@ function offsetMs(gmt?: string): number {
   return sign * (Math.abs(+m[1]) * 3600 + +m[2] * 60 + +m[3]) * 1000;
 }
 
+/** F1 sends repeated structures as arrays in the Subscribe snapshot but as index-keyed
+ *  objects in incremental deltas ({"0":{...},"2":{...}}), and deepMerge preserves whichever
+ *  arrived. `allStints` already deals with this for tyre stints; sectors/segments need the
+ *  same treatment or `.map` throws on a live delta and the whole route 500s. */
+function asList<T>(v: unknown): T[] {
+  if (Array.isArray(v)) return v as T[];
+  if (v && typeof v === "object") {
+    return Object.keys(v as Record<string, T>)
+      .map(Number)
+      .filter((k) => !Number.isNaN(k))
+      .sort((a, b) => a - b)
+      .map((k) => (v as Record<string, T>)[String(k)]);
+  }
+  return [];
+}
+
 function modeOf(type?: string): F1LiveState["mode"] {
   const t = (type ?? "").toLowerCase();
   if (t.includes("qual")) return "quali";
@@ -857,11 +873,17 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
         // Per-sector timings straight from TimingData — ungated, so these work without a
         // token too. `Value` empties out while a sector is being run and `PreviousValue`
         // holds the last completed one, so fall back to it rather than flashing blank.
-        sectors: (t.Sectors ?? []).map((sec) => ({
+        sectors: asList<{
+          Value?: string;
+          PreviousValue?: string;
+          OverallFastest?: boolean;
+          PersonalFastest?: boolean;
+          Segments?: unknown;
+        }>(t.Sectors).map((sec) => ({
           value: sec?.Value || sec?.PreviousValue || "",
           overallFastest: Boolean(sec?.OverallFastest),
           personalFastest: Boolean(sec?.PersonalFastest),
-          segments: (sec?.Segments ?? []).map((g) => Number(g?.Status ?? 0)),
+          segments: asList<{ Status?: number }>(sec?.Segments).map((g) => Number(g?.Status ?? 0)),
         })),
         speeds: Object.fromEntries(
           Object.entries(t.Speeds ?? {}).map(([k, v]) => [
@@ -926,14 +948,40 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
     // `nextInMs` is an ESTIMATE (see QUALI_BREAK_MS); it's only shown during the break and is
     // replaced by the real clock the instant F1 starts the segment, so it can't drift.
     const qualiClock = (() => {
-      const none = { remainingMs: null as number | null, segmentEnded: false, nextInMs: null as number | null };
+      const none = { remainingMs: null as number | null, segmentEnded: false, nextInMs: null as number | null, part: qualifyingPart };
       if (!qualifyingPart || !qualifyingPartHistory.length) return none;
       // F1 announces QualifyingPart 1 BEFORE the session starts — measured 13:46:45 for a
       // 14:00 qualifying, 13 min early. With no "Started" yet there is no running segment at
       // all, and counting from the announcement had Q1's 18 min clock already down to 7:21
       // three minutes before the session began. Show the segment chip, but no clock, until
       // F1 actually goes green.
-      if (segmentStartedTs == null) return none;
+      // Has the CURRENTLY-ANNOUNCED part actually gone green? F1 announces the next part
+      // during the break (Q2 announced ~1 min before its green light), so qualifyingPart
+      // flips early. Comparing the last "Started" against this part's announcement is what
+      // distinguishes "Q2 is running" from "Q2 is announced but we're still in the break" —
+      // without it the board read "Q2 ENDED" during the Q1->Q2 gap.
+      const announcedAt = qualifyingPartHistory.at(-1)!.startMs;
+      const partHasStarted = segmentStartedTs != null && segmentStartedTs >= announcedAt;
+      if (!partHasStarted) {
+        // Nothing has run yet at all (pre-session) — no clock, no "ended".
+        if (qualifyingPart <= 1 && segmentStartedTs == null) return none;
+        // Otherwise the PREVIOUS part just ended and we're counting down to this one.
+        const prevEnd = [...statusHistory].reverse().find((h) => h.status === "Finished")?.ts ?? null;
+        let brk = QUALI_BREAK_MS;
+        for (let i = 0; i < statusHistory.length - 1; i++) {
+          if (statusHistory[i].status === "Finished" && statusHistory[i + 1].status === "Started") {
+            const obs = statusHistory[i + 1].ts - statusHistory[i].ts;
+            if (obs > 60_000 && obs < 30 * 60_000) brk = obs;
+          }
+        }
+        const until = prevEnd != null ? prevEnd + brk - Date.now() : null;
+        return {
+          remainingMs: 0,
+          segmentEnded: true,
+          nextInMs: until != null && until > 0 ? until : null,
+          part: Math.max(1, qualifyingPart - 1),
+        };
+      }
       const now = Date.now();
       const segStart = qualiSegmentStart();
 
@@ -948,9 +996,9 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
       const segEndedAt = finishedPerFeed ? lastFinished! : assumedEndsAt;
 
       if (!finishedPerFeed && now < assumedEndsAt) {
-        return { remainingMs: assumedEndsAt - now, segmentEnded: false, nextInMs: null as number | null };
+        return { remainingMs: assumedEndsAt - now, segmentEnded: false, nextInMs: null as number | null, part: qualifyingPart };
       }
-      if (qualifyingPart >= QUALI_LAST_PART) return { remainingMs: 0, segmentEnded: true, nextInMs: null as number | null };
+      if (qualifyingPart >= QUALI_LAST_PART) return { remainingMs: 0, segmentEnded: true, nextInMs: null as number | null, part: qualifyingPart };
 
       // Break length: MEASURED from this same session's earlier Finished -> Started
       // transition when one has already happened (Q1->Q2 teaches us Q2->Q3), falling back to
@@ -964,7 +1012,7 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
         }
       }
       const untilNext = segEndedAt + breakMs - now;
-      return { remainingMs: 0, segmentEnded: true, nextInMs: untilNext > 0 ? untilNext : null };
+      return { remainingMs: 0, segmentEnded: true, nextInMs: untilNext > 0 ? untilNext : null, part: qualifyingPart };
     })();
 
     return {
@@ -980,7 +1028,7 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
       fastestLap,
       trackStatus: trackStatus?.Status ?? null,
       telFrames: telBuffer.slice(-200), // ~45s at ~4Hz
-      qualifyingPart,
+      qualifyingPart: qualiClock.part ?? qualifyingPart,
       qualifyingRemainingMs: qualiClock.remainingMs,
       qualifyingSegmentEnded: qualiClock.segmentEnded,
       nextQualifyingSegmentInMs: qualiClock.nextInMs,

@@ -305,6 +305,8 @@ export default function LiveSection() {
           intervals={s.intervals}
           laps={s.laps}
           retired={s.retired}
+          sectors={s.sectors}
+          speeds={s.speeds}
           qualifyingPart={s.qualifyingPart}
           sprintQuali={/sprint/i.test(s.session?.session_name ?? "")}
           qualifyingRemainingMs={s.qualifyingRemainingMs}

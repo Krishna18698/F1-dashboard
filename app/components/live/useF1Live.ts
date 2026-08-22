@@ -23,6 +23,8 @@ interface ApiRow {
   grid?: number;
   stints?: { compound: string; laps: number; age: number; isNew: boolean; segment: number | null }[];
   weekendTyresLeft?: { compound: string; left: number }[];
+  sectors?: { value: string; overallFastest: boolean; personalFastest: boolean; segments: number[] }[];
+  speeds?: Record<string, { value: string; overallFastest: boolean; personalFastest: boolean }>;
 }
 interface ApiFastest {
   driver_number: number;
@@ -101,6 +103,8 @@ function toState(r: ApiResponse): LiveState {
   const tyreStints = new Map<number, { compound: string; laps: number; age: number; isNew: boolean; segment: number | null }[]>();
   const weekendTyresLeft = new Map<number, { compound: string; left: number }[]>();
   const tyreLaps = new Map<number, number>();
+  const sectors = new Map<number, { value: string; overallFastest: boolean; personalFastest: boolean; segments: number[] }[]>();
+  const speeds = new Map<number, Record<string, { value: string; overallFastest: boolean; personalFastest: boolean }>>();
   const inPit = new Set<number>();
   const retired = new Set<number>();
   const knockedOut = new Set<number>();
@@ -120,6 +124,8 @@ function toState(r: ApiResponse): LiveState {
         : [{ compound: row.compound, laps: row.tyre_laps ?? 0, age: row.tyre_laps ?? 0, isNew: false, segment: null }],
     );
     if (row.weekendTyresLeft) weekendTyresLeft.set(num, row.weekendTyresLeft);
+    if (row.sectors) sectors.set(num, row.sectors);
+    if (row.speeds) speeds.set(num, row.speeds);
     if (row.in_pit) inPit.add(num);
     intervals.set(num, {
       date: "",
@@ -170,6 +176,8 @@ function toState(r: ApiResponse): LiveState {
     tokenIssue: r.tokenIssue ?? null,
     ownerTokenConfigured: r.ownerTokenConfigured ?? false,
     tyreLaps,
+    sectors,
+    speeds,
     inPit,
     retired,
     knockedOut,
