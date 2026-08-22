@@ -706,7 +706,11 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
     // "Finished" as final made the whole app drop to idle during a normal Q2→Q3 break. Trust
     // the session's own scheduled end time over that transient status while still within it.
     const isMultiSegment = (sessionInfo.Type ?? "").toLowerCase().includes("qualifying");
-    if (isMultiSegment && sessionInfo.EndDate) {
+    // `sessionStartedTs != null` matters: this override only exists to hold a session "live"
+    // through the gaps BETWEEN segments. Without that guard it also fired before the session
+    // had begun — the hub publishes the next Qualifying's SessionInfo well ahead of time, so
+    // the whole app reported a not-yet-started quali as live from the moment it appeared.
+    if (isMultiSegment && sessionInfo.EndDate && sessionStartedTs != null) {
       const endMs = Date.parse(sessionInfo.EndDate + "Z") - offsetMs(sessionInfo.GmtOffset);
       if (Number.isFinite(endMs) && Date.now() < endMs) {
         endedAt = null;
@@ -766,7 +770,12 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
     // production. F1's own status is what makes it final.
     const status = (sessionStatus?.Status ?? "").toLowerCase();
     const archive = (sessionInfo.ArchiveStatus?.Status ?? "").toLowerCase();
-    if (!ENDED.has(status) && archive !== "generating" && archive !== "complete") return false;
+    // ArchiveStatus "Generating" is NOT proof a session is over — F1 reports it on an
+    // UPCOMING session too (measured on the Zandvoort qualifying an hour before it started,
+    // alongside SessionStatus "Inactive" and an empty StatusSeries). Treating it as finished
+    // made a session that hadn't started yet render a "FINAL" board. Require a real end:
+    // F1's own Finished transition, an explicitly ended status, or a completed archive.
+    if (sessionFinishedTs == null && !ENDED.has(status) && archive !== "complete") return false;
     // Anchor on when it actually ended so a hub parked on an old session can't pin a stale
     // result on screen indefinitely. EndDate is the fallback for a fresh process that has no
     // observed end instant of its own.
@@ -778,7 +787,11 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
       endedAt ??
       raceLapsCompleteAt ??
       (sessionInfo.EndDate ? Date.parse(sessionInfo.EndDate + "Z") - offsetMs(sessionInfo.GmtOffset) : null);
-    return endMs != null && Date.now() < endMs + SHOW_FINISHED_MAX_MS;
+    // The anchor must be in the PAST. EndDate is the last-resort fallback and is a FUTURE
+    // time for a session that hasn't run yet — without this guard that read as "ended
+    // moments ago" and kept a not-yet-started session on screen as a final result.
+    if (endMs == null || endMs > Date.now()) return false;
+    return Date.now() < endMs + SHOW_FINISHED_MAX_MS;
   }
 
   function classify() {
@@ -879,6 +892,12 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
     const qualiClock = (() => {
       const none = { remainingMs: null as number | null, segmentEnded: false, nextInMs: null as number | null };
       if (!qualifyingPart || !qualifyingPartHistory.length) return none;
+      // F1 announces QualifyingPart 1 BEFORE the session starts — measured 13:46:45 for a
+      // 14:00 qualifying, 13 min early. With no "Started" yet there is no running segment at
+      // all, and counting from the announcement had Q1's 18 min clock already down to 7:21
+      // three minutes before the session began. Show the segment chip, but no clock, until
+      // F1 actually goes green.
+      if (segmentStartedTs == null) return none;
       const now = Date.now();
       const segStart = qualiSegmentStart();
 
