@@ -39,13 +39,11 @@ function qualiSegmentMs(part: number, sessionName?: string): number {
   return (sprint ? SPRINT_QUALI_DURATION_MS : QUALI_DURATION_MS)[part] ?? 0;
 }
 const LIVE_GRACE_MS = 120_000; // keep live tracking on 2 min after a session ends
-// How long the FINAL classification stays on the Driver Live Tracker after a session ends.
-// Originally this waited for F1's hub to advance to the next session, but that can be hours
-// (Sprint ends ~10:35, Qualifying isn't until 13:00) and left a finished session sitting in
-// the live area long after anyone would call it current. 20 min matches the window liveNow()
-// already uses to call a race over. The result itself isn't lost when this lapses — the hero
-// results ticker keeps it for 24h, which is the right home for "what happened earlier".
-const SHOW_FINISHED_MAX_MS = 20 * 60_000;
+// How long the FINAL classification stays on the Driver Live Tracker after a session ends,
+// measured from F1's OWN "Finished" timestamp. Then the tracker goes idle. The result isn't
+// lost when this lapses — the hero results ticker keeps it for 24h, which is the right home
+// for "what happened earlier"; the live tracker is for what's happening now.
+const SHOW_FINISHED_MAX_MS = 2 * 60_000;
 const WEEKEND_FLIP_MS = 300_000; // flip the hero to the next weekend 5 min after the race ends
 // A visitor's connection stays open just long enough to catch a few incremental position/
 // telemetry updates beyond the initial snapshot, then always tears down — never held any
@@ -693,9 +691,12 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
       }
     }
     if (sessionInfo.ArchiveStatus?.Status === "Complete" || ENDED.has(status)) {
-      // Only stamp an end time if we actually watched it run — otherwise connecting hours
-      // after the flag (or a dev hot-reload) would fake a fresh "just ended".
-      if (sawLive && endedAt == null) endedAt = Date.now();
+      // Prefer F1's OWN "Finished" timestamp. Date.now() here records when this process
+      // noticed, which on a fresh connection (every serverless invocation) fakes a "just
+      // ended" no matter how long ago it really was — that's what kept the post-session
+      // windows from ever expiring. Falling back to now() only when we watched it run
+      // keeps the old behaviour for a feed that never publishes the timestamp.
+      if (endedAt == null) endedAt = sessionFinishedTs ?? (sawLive ? Date.now() : null);
       return false;
     }
     endedAt = null; // still running (or resumed after a red flag)
@@ -729,7 +730,10 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
    * area 40 min after the flag, reading as though it were still running.
    */
   function finishedButCurrent(): boolean {
-    if (liveOrGrace()) return false;
+    // Gate on liveNow(), NOT liveOrGrace(): once F1 says the session is over we want the
+    // board labelled FINAL immediately, rather than spending the grace window still showing
+    // a red LIVE badge on a finished race and only then switching.
+    if (liveNow()) return false;
     if (!sessionInfo) return false;
     // Decided from the DATA, never from whether THIS process happened to watch the session
     // run. On serverless every request can land on a freshly-started instance that connected
