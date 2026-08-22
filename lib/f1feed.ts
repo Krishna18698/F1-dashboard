@@ -689,6 +689,32 @@ export async function getF1LiveState(
 ): Promise<F1LiveState> {
   const s = await load(sessionPath, live);
   const timing = mergeUpto(s.timing, infoUptoMs);
+  // A sector's Value survives the line — F1 only overwrites it when the sector is next
+  // completed. Merged state alone therefore can't say which lap a time belongs to. Walk the
+  // deltas once more and note WHEN each sector's Value was written, and when the driver last
+  // had their mini-sectors blanked (the line crossing). A value older than the reset is last
+  // lap's, and must not be shown however complete the mini-sectors look.
+  const valueSetAt: Record<string, number[]> = {};
+  const lapResetAt: Record<string, number> = {};
+  for (const dlt of s.timing) {
+    if (dlt.ts > infoUptoMs) break;
+    for (const [numStr, upd] of Object.entries(dlt.lines)) {
+      const secs = (upd as { Sectors?: unknown }).Sectors;
+      if (!secs || typeof secs !== "object") continue;
+      let zeros = 0;
+      for (const [sk, sv] of Object.entries(secs as Record<string, { Value?: string; Segments?: unknown }>)) {
+        const si = Number(sk);
+        if (!Number.isNaN(si) && sv?.Value) (valueSetAt[numStr] ??= [])[si] = dlt.ts;
+        const segs = sv?.Segments;
+        if (segs && typeof segs === "object") {
+          for (const gv of Object.values(segs as Record<string, { Status?: number }>)) {
+            if (Number(gv?.Status ?? -1) === 0) zeros++;
+          }
+        }
+      }
+      if (zeros >= 12) lapResetAt[numStr] = dlt.ts;
+    }
+  }
   const appState = mergeUpto(s.app, infoUptoMs);
   const stintFirstSeenAt = stintFirstSeenTimes(s.app, infoUptoMs);
   const weekendMap = await weekendTyresLeft(sessionPath, appState).catch(
@@ -786,7 +812,8 @@ export async function getF1LiveState(
             // falling back to it meant a driver who had just started a lap still showed last
             // lap's three sector times — the bar should empty at the line and refill as each
             // sector is actually completed.
-            value: sec?.Value || "",
+            // Blank unless this time was written AFTER the last line crossing.
+            value: (valueSetAt[numStr]?.[i] ?? 0) >= (lapResetAt[numStr] ?? 0) ? sec?.Value || "" : "",
             overallFastest: Boolean(sec?.OverallFastest),
             personalFastest: Boolean(sec?.PersonalFastest),
             segments: Array.from({ length: segs.length }, (_, j) => Number(segs[j]?.Status ?? 0)),
