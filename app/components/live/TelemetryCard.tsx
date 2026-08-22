@@ -34,12 +34,16 @@ export default function TelemetryCard({
   driver,
   onClose,
   sectors,
+  lapResets,
   showTelemetry = true,
 }: {
   num: number;
   driver?: Driver;
   onClose: () => void;
   sectors?: { value: string; overallFastest: boolean; personalFastest: boolean; segments: number[] }[];
+  /** Line crossings that F1 has already published but the car dots haven't reached. Used to
+   *  blank the sectors at the instant the car crosses, rather than on the next 3s poll. */
+  lapResets?: { t: number; n: number }[];
   /** CarData is token-gated; without it the live readout is empty, but the SECTORS below
    *  still work (TimingData is ungated) — so the card renders without the telemetry strip
    *  rather than not rendering at all. */
@@ -78,6 +82,29 @@ export default function TelemetryCard({
     const id = setInterval(tick, 120);
     return () => clearInterval(id);
   }, [num]);
+
+  // The sectors in `sectors` were computed at the playback instant of the LAST poll. If the
+  // car crosses the line between polls, the card would keep last lap's times for up to 3s.
+  // The reset is already in the fetched-ahead window, so blank as soon as the clock reaches
+  // it — the poll then confirms it a moment later with the real (empty) state.
+  const [clearedAt, setClearedAt] = useState<number | null>(null);
+  useEffect(() => {
+    // Deferred, not called in the effect body — same rule the rest of this file follows:
+    // setState belongs in a timer callback, never synchronously during an effect.
+    const reset = setTimeout(() => setClearedAt(null), 0); // a fresh poll supersedes a local blank
+    const mine = (lapResets ?? []).filter((r) => r.n === num).sort((a, b) => a.t - b.t);
+    const id = setInterval(() => {
+      if (!mine.length) return;
+      const pt = getPlaybackT();
+      if (!pt) return;
+      const due = mine.filter((r) => r.t <= pt).pop();
+      if (due) setClearedAt(due.t);
+    }, 100);
+    return () => {
+      clearTimeout(reset);
+      clearInterval(id);
+    };
+  }, [lapResets, num, sectors]);
 
   const color = hex(driver?.team_colour);
   const throttle = Math.max(0, Math.min(100, v?.throttle ?? 0));
@@ -152,18 +179,33 @@ export default function TelemetryCard({
               // been completed this lap — at the line every mini-sector resets, so all three
               // sectors blank immediately and each refills only as it is finished.
               const segs = sec.segments ?? [];
-              const lit = (c?: number) => !!c && c !== 0 && c !== 2048;
-              // Testing only the FINAL mini-sector isn't safe: F1 under-reports individual
-              // ones (index 0 appears 787 times vs ~950 for indices 1-7 across a session), so
-              // a finished sector can be missing its last tick and read as unfinished. Count
-              // instead, tolerating a couple of gaps — mid-sector only a few are lit, so a
-              // sector in progress still reads as incomplete and stays blank.
-              const litCount = segs.filter(lit).length;
-              const complete = segs.length > 0 && litCount >= Math.max(1, segs.length - 2);
+              // Two different things live in these codes, and conflating them hid every
+              // non-timed lap:
+              //   0                 -> mini-sector not reached yet
+              //   2048              -> reached, but no colour (an in-lap or any lap that
+              //                        isn't being timed — measured on LEC's in-lap, where
+              //                        every mini-sector reported 2048 while the same car's
+              //                        flying lap reported 2049/2051)
+              //   2049/2051/2052    -> reached AND coloured
+              //   2064              -> pit lane
+              // Progress must count anything that isn't 0; only the coloured ones say
+              // anything about pace. Testing for colour meant in-lap sectors never showed,
+              // even though F1 had published their times (LEC S1 34.341, S2 33.574).
+              const reached = (c?: number) => c != null && c !== 0;
+              const reachedCount = segs.filter(reached).length;
+              // EVERY mini-sector must be reached, not "most". The two-slot tolerance was there
+              // to cope with F1 under-reporting, but that only applied when testing for
+              // COLOUR — every index does get a `reached` value (the lap-start reset writes
+              // one). With a tolerance, completion fired ~5s before the sector actually
+              // finished, and since F1 writes the new sector time only at the end, the card
+              // showed the PREVIOUS lap's time in that gap (LEC: 24.805 lingering while the
+              // in-lap was really heading for 34.341). F1 publishes the time ~90ms after the
+              // final mini-sector, so requiring all of them lines the two up.
+              const complete = segs.length > 0 && reachedCount === segs.length;
               // The mini-sectors finish a beat before F1 writes the sector time, so keying the
               // bar off `complete` alone briefly coloured a sector that still showed no time.
               // One signal for both: a sector is only "done" once its time actually exists.
-              const show = complete && !!sec.value;
+              const show = clearedAt === null && complete && !!sec.value;
               return (
               <div key={i}>
                 <div className="flex items-baseline justify-between gap-1">

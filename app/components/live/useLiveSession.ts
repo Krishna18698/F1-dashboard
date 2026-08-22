@@ -41,6 +41,7 @@ export interface LiveState {
   mapAvailable?: boolean; // false when the feed can't supply car positions at all (anonymous hub connection — F1 gates Position.z behind a token)
   sessionEnded?: boolean; // session is over but still F1's current one — board shows a FINAL classification
   segmentEvents?: { t: number; n: number; s: number; i: number; c: number }[]; // mini-sectors published but not yet reached by the car dots
+  lapResets?: { t: number; n: number }[]; // line crossings ahead of the dots, so the card can blank on time
   circuitKey?: number;
   session?: Session;
   clockISO?: string;

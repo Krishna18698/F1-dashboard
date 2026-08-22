@@ -282,6 +282,7 @@ export default function LiveSection() {
               driver={s.drivers.get(selected)}
               onClose={() => setSelected(null)}
               sectors={s.sectors?.get(selected)}
+              lapResets={s.lapResets}
               showTelemetry={!mapUnavailable}
             />
           )}

@@ -488,6 +488,8 @@ export interface F1LiveState {
   formationLap: boolean;
   durationMs: number;
   segmentEvents?: SegmentEvent[];
+  /** Line crossings ahead of the dots — lets the card blank on time. */
+  lapResets?: { t: number; n: number }[];
 }
 
 function mergeUpto(deltas: Delta[], uptoMs: number): Record<string, Record<string, unknown>> {
@@ -804,6 +806,11 @@ export async function getF1LiveState(
   // instead of the whole set stepping forward once per poll — which is what made the bars
   // visibly trail the car between polls.
   const segmentEvents: { t: number; n: number; s: number; i: number; c: number }[] = [];
+  // When a driver crosses the line F1 blanks every mini-sector in one delta (measured: a
+  // single update setting all three sectors' eight segments at once). Those resets sit in
+  // the already-fetched window ahead of the dots, so shipping them lets the card blank at
+  // the instant the car actually crosses rather than waiting for the next 3s poll.
+  const lapResets: { t: number; n: number }[] = [];
   if (uptoMs > infoUptoMs) {
     for (const dlt of s.timing) {
       if (dlt.ts <= infoUptoMs) continue;
@@ -821,8 +828,29 @@ export async function getF1LiveState(
             if (!Number.isNaN(gi) && !Number.isNaN(code)) {
               segmentEvents.push({ t: dlt.ts, n: +numStr, s: si, i: gi, c: code });
             }
+            // (blank count tallied below to spot a lap reset)
           }
         }
+      }
+    }
+    // A delta that blanks a dozen or more mini-sectors for one driver is the line crossing.
+    const blanked: Record<number, number> = {};
+    for (const e of segmentEvents) if (e.c === 0) blanked[e.n] = (blanked[e.n] ?? 0) + 1;
+    for (const dlt of s.timing) {
+      if (dlt.ts <= infoUptoMs) continue;
+      if (dlt.ts > uptoMs) break;
+      for (const [numStr, upd] of Object.entries(dlt.lines)) {
+        const secs = (upd as { Sectors?: unknown }).Sectors;
+        if (!secs || typeof secs !== "object") continue;
+        let zeros = 0;
+        for (const sv of Object.values(secs as Record<string, { Segments?: unknown }>)) {
+          const segs = sv?.Segments;
+          if (!segs || typeof segs !== "object") continue;
+          for (const gv of Object.values(segs as Record<string, { Status?: number }>)) {
+            if (Number(gv?.Status ?? -1) === 0) zeros++;
+          }
+        }
+        if (zeros >= 12) lapResets.push({ t: dlt.ts, n: +numStr });
       }
     }
   }
@@ -1009,6 +1037,7 @@ export async function getF1LiveState(
     formationLap,
     durationMs: s.durationMs,
     segmentEvents,
+    lapResets,
   };
 }
 
