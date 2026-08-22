@@ -277,6 +277,11 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
   // endedAt / raceLapsCompleteAt this is the REAL instant, not when this process happened to
   // notice — so "how long ago did it end" survives a fresh connection or a serverless restart.
   let sessionFinishedTs: number | null = null;
+  // Ordered SessionStatus transitions with F1's own timestamps ("Started"/"Finished"/...).
+  // Qualifying emits a Started+Finished pair PER SEGMENT, so this is what lets the segment
+  // clock use real boundaries instead of assumed durations, and lets the inter-segment break
+  // be MEASURED from this very session rather than assumed.
+  let statusHistory: { ts: number; status: string }[] = [];
   // When the race's own LapCount first reached TotalLaps (the chequered flag, from real lap
   // data — not a schedule guess). SessionStatus/ArchiveStatus can lag well behind the actual
   // flag (podium/post-race coverage keeps the session "Started" for a while) — this is a more
@@ -308,6 +313,7 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
       sessionStartedTs = null;
       segmentStartedTs = null;
       sessionFinishedTs = null;
+      statusHistory = [];
       raceLapsCompleteAt = null;
       telBuffer = [];
       endedAt = null;
@@ -432,17 +438,22 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
       }
       const statusEntries = Array.isArray(d.StatusSeries) ? d.StatusSeries : Object.values(d.StatusSeries ?? {});
       for (const st of statusEntries) {
+        if (!st.SessionStatus) continue;
+        const ts = st.Utc ? Date.parse(st.Utc) : Date.now();
+        if (!Number.isFinite(ts)) continue;
+        if (!statusHistory.some((h) => h.ts === ts && h.status === st.SessionStatus)) {
+          statusHistory.push({ ts, status: st.SessionStatus });
+          statusHistory.sort((a, b) => a.ts - b.ts);
+        }
         if (st.SessionStatus === "Started") {
-          const ts = st.Utc ? Date.parse(st.Utc) : Date.now();
           if (sessionStartedTs === null) sessionStartedTs = ts; // first only — lights out
           if (segmentStartedTs === null || ts > segmentStartedTs) segmentStartedTs = ts;
         }
         // F1 stamps the real end instant here. Everything else that tracks "when did this
         // end" (endedAt, raceLapsCompleteAt) records when THIS PROCESS first noticed, which
         // restarts on every fresh connection — useless for "how long ago did it finish".
-        if (st.SessionStatus === "Finished" && st.Utc) {
-          const ts = Date.parse(st.Utc);
-          if (Number.isFinite(ts) && (sessionFinishedTs === null || ts > sessionFinishedTs)) sessionFinishedTs = ts;
+        if (st.SessionStatus === "Finished" && (sessionFinishedTs === null || ts > sessionFinishedTs)) {
+          sessionFinishedTs = ts;
         }
       }
     } else if (topic === "Position.z") {
@@ -866,16 +877,38 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
     // `nextInMs` is an ESTIMATE (see QUALI_BREAK_MS); it's only shown during the break and is
     // replaced by the real clock the instant F1 starts the segment, so it can't drift.
     const qualiClock = (() => {
-      if (!qualifyingPart || !qualifyingPartHistory.length) {
-        return { remainingMs: null as number | null, segmentEnded: false, nextInMs: null as number | null };
-      }
+      const none = { remainingMs: null as number | null, segmentEnded: false, nextInMs: null as number | null };
+      if (!qualifyingPart || !qualifyingPartHistory.length) return none;
+      const now = Date.now();
       const segStart = qualiSegmentStart();
-      const segEndsAt = segStart + qualiSegmentMs(qualifyingPart, sessionInfo.Name);
-      const remainingMs = Math.max(0, segEndsAt - Date.now());
-      if (remainingMs > 0) return { remainingMs, segmentEnded: false, nextInMs: null as number | null };
-      // Segment over. The final segment has nothing to count down to.
+
+      // Is the CURRENT segment over? Answered by F1's own transitions where possible — a
+      // "Finished" later than the last "Started" means we're in the break — and only falling
+      // back to the assumed duration when the feed hasn't said so yet. That matters because
+      // a red-flagged or extended segment doesn't respect the assumed 12/10/8 at all.
+      const lastStarted = [...statusHistory].reverse().find((h) => h.status === "Started")?.ts ?? null;
+      const lastFinished = [...statusHistory].reverse().find((h) => h.status === "Finished")?.ts ?? null;
+      const finishedPerFeed = lastFinished != null && (lastStarted == null || lastFinished > lastStarted);
+      const assumedEndsAt = segStart + qualiSegmentMs(qualifyingPart, sessionInfo.Name);
+      const segEndedAt = finishedPerFeed ? lastFinished! : assumedEndsAt;
+
+      if (!finishedPerFeed && now < assumedEndsAt) {
+        return { remainingMs: assumedEndsAt - now, segmentEnded: false, nextInMs: null as number | null };
+      }
       if (qualifyingPart >= QUALI_LAST_PART) return { remainingMs: 0, segmentEnded: true, nextInMs: null as number | null };
-      const untilNext = segEndsAt + QUALI_BREAK_MS - Date.now();
+
+      // Break length: MEASURED from this same session's earlier Finished -> Started
+      // transition when one has already happened (Q1->Q2 teaches us Q2->Q3), falling back to
+      // the value measured at Zandvoort only for the first break of a session. Self-correcting
+      // rather than trusting one hardcoded number across every event.
+      let breakMs = QUALI_BREAK_MS;
+      for (let i = 0; i < statusHistory.length - 1; i++) {
+        if (statusHistory[i].status === "Finished" && statusHistory[i + 1].status === "Started") {
+          const observed = statusHistory[i + 1].ts - statusHistory[i].ts;
+          if (observed > 60_000 && observed < 30 * 60_000) breakMs = observed; // sanity-bounded
+        }
+      }
+      const untilNext = segEndedAt + breakMs - now;
       return { remainingMs: 0, segmentEnded: true, nextInMs: untilNext > 0 ? untilNext : null };
     })();
 
