@@ -192,9 +192,30 @@ export type VisitorRelayResult =
   | { status: "too_many" };
 
 /* --------------------------- pure helpers (no session state) --------------------------- */
+/** True for {"0":…,"3":…} — F1's shorthand for "these indices of an array changed". */
+function isIndexPatch(v: unknown): v is Record<string, unknown> {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return false;
+  const keys = Object.keys(v as Record<string, unknown>);
+  return keys.length > 0 && keys.every((k) => /^\d+$/.test(k));
+}
+
 function deepMerge(target: Dict, src: Dict) {
   for (const [k, v] of Object.entries(src)) {
     const cur = target[k];
+    // See the matching guard in f1feed.ts: an index-keyed patch against a stored array must
+    // merge by index instead of replacing the array with just the changed member.
+    if (Array.isArray(cur) && isIndexPatch(v)) {
+      for (const [ik, iv] of Object.entries(v)) {
+        const i = Number(ik);
+        const slot = (cur as unknown[])[i];
+        if (iv && typeof iv === "object" && !Array.isArray(iv) && slot && typeof slot === "object" && !Array.isArray(slot)) {
+          deepMerge(slot as Dict, iv as Dict);
+        } else {
+          (cur as unknown[])[i] = iv;
+        }
+      }
+      continue;
+    }
     if (v && typeof v === "object" && !Array.isArray(v) && cur && typeof cur === "object" && !Array.isArray(cur)) {
       deepMerge(cur as Dict, v as Dict);
     } else {
@@ -330,10 +351,18 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
   // F1's own graphics keep the previous lap's sectors on screen until new ones replace them;
   // this is that memory.
   let lastSectors: Record<string, { value: string; overallFastest: boolean; personalFastest: boolean }[]> = {};
-  // Same problem, one level down: a delta often carries only the mini-sector that just
-  // changed, so rendering the raw array blanked the rest and the bars visibly flashed on
-  // every poll. Merge each update into the last known set per driver/sector instead.
-  let lastSegments: Record<string, number[][]> = {};
+  /**
+   * Timestamped history of each driver's sector/mini-sector state.
+   *
+   * The map deliberately renders ~20s behind the freshest position frame so the dots can be
+   * interpolated smoothly, and the client sends that playback instant back as `asOf`. The
+   * free-feed path already honours it (getF1LiveState's `infoUptoMs`), but the relay was
+   * always answering with live "now" — so in the token environment the sectors and
+   * mini-sector bars ran ~20s AHEAD of the car they belong to, which is exactly the
+   * "sectors and driver tracker aren't in sync" symptom. Keeping a short history lets the
+   * relay answer for the same instant the dots are showing.
+   */
+  let sectorHistory: { t: number; byDriver: Record<string, SectorTime[]> }[] = [];
   // When the race's own LapCount first reached TotalLaps (the chequered flag, from real lap
   // data — not a schedule guess). SessionStatus/ArchiveStatus can lag well behind the actual
   // flag (podium/post-race coverage keeps the session "Started" for a while) — this is a more
@@ -367,7 +396,7 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
       sessionFinishedTs = null;
       statusHistory = [];
       lastSectors = {};
-      lastSegments = {};
+      sectorHistory = [];
       raceLapsCompleteAt = null;
       telBuffer = [];
       endedAt = null;
@@ -948,17 +977,13 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
             personalFastest: shown?.personalFastest ?? false,
             // Segments always reflect the CURRENT lap in progress — that's the point of the
             // mini-sector bars — so they're never carried over.
-            segments: (() => {
-              const incoming = asList<{ Status?: number }>(sec?.Segments);
-              const prev = lastSegments[n]?.[si] ?? [];
-              const merged = [...prev];
-              incoming.forEach((g, gi) => {
-                if (g) merged[gi] = Number(g.Status ?? 0);
-              });
-              for (let gi = 0; gi < merged.length; gi++) if (merged[gi] == null) merged[gi] = 0;
-              (lastSegments[n] ??= [])[si] = merged;
-              return merged;
-            })(),
+            // Read straight from the accumulated state. deepMerge already folds each sparse
+            // delta into the stored Sectors[].Segments, so this is complete WITHOUT keeping a
+            // second memory of our own — and crucially it resets when F1 resets it at the
+            // start of a new lap. An earlier attempt to stop the bars flashing by merging
+            // into a remembered set carried the PREVIOUS lap's mini-sectors into the new one,
+            // so a driver who had just started a lap appeared almost through sector 1.
+            segments: asList<{ Status?: number }>(sec?.Segments).map((g) => Number(g?.Status ?? 0)),
           };
         }),
         speeds: Object.fromEntries(
@@ -987,7 +1012,7 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
     return { nums, mode, rows, order, fastestLap };
   }
 
-  async function getRelayState(): Promise<F1LiveState | null> {
+  async function getRelayState(asOfMs?: number): Promise<F1LiveState | null> {
     if (!(await ensureConnection())) return null;
     await refreshIfStale();
     // Live, OR finished-but-still-the-hub's-current-session (final classification stays up
@@ -1078,6 +1103,30 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
       const untilNext = segEndedAt + breakMs - now;
       return { remainingMs: 0, segmentEnded: true, nextInMs: untilNext > 0 ? untilNext : null, part: qualifyingPart };
     })();
+
+    // Record this instant's sectors, then serve whichever snapshot matches the client's
+    // playback clock. Without an `asOf` (any non-map consumer) the newest is used, so this
+    // is a no-op for them.
+    {
+      const snapshot: Record<string, SectorTime[]> = {};
+      for (const n of nums) snapshot[n] = rows[+n].sectors;
+      const now = Date.now();
+      if (!sectorHistory.length || now - sectorHistory[sectorHistory.length - 1].t > 200) {
+        sectorHistory.push({ t: now, byDriver: snapshot });
+        const cutoff = now - BUFFER_MS;
+        if (sectorHistory.length > 20 && sectorHistory[0].t < cutoff) {
+          sectorHistory = sectorHistory.filter((h) => h.t >= cutoff);
+        }
+      }
+      if (asOfMs) {
+        let pick: (typeof sectorHistory)[number] | undefined;
+        for (const h of sectorHistory) {
+          if (h.t <= asOfMs) pick = h;
+          else break;
+        }
+        if (pick) for (const n of nums) if (pick.byDriver[n]) rows[+n].sectors = pick.byDriver[n];
+      }
+    }
 
     return {
       mode,

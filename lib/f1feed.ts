@@ -32,9 +32,33 @@ function decodeZ(payload: string): unknown {
   return JSON.parse(zlib.inflateRawSync(buf).toString("utf8"));
 }
 
+/** True for {"0":…,"3":…} — F1's shorthand for "these indices of an array changed". */
+function isIndexPatch(v: unknown): v is Record<string, unknown> {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return false;
+  const keys = Object.keys(v as Record<string, unknown>);
+  return keys.length > 0 && keys.every((k) => /^\d+$/.test(k));
+}
+
 function deepMerge(target: Record<string, unknown>, src: Record<string, unknown>) {
   for (const [k, v] of Object.entries(src)) {
     const cur = target[k];
+    // An index-keyed patch against a stored ARRAY must merge into it, not replace it. F1
+    // sends Sectors/Segments as arrays in the snapshot and as {"3": {...}} in deltas; the
+    // old fall-through replaced the whole array with just the changed member, wiping
+    // mini-sectors 0-2 — which is why bars appeared blank mid-lap and flashed back when the
+    // next full snapshot arrived.
+    if (Array.isArray(cur) && isIndexPatch(v)) {
+      for (const [ik, iv] of Object.entries(v)) {
+        const i = Number(ik);
+        const slot = (cur as unknown[])[i];
+        if (iv && typeof iv === "object" && !Array.isArray(iv) && slot && typeof slot === "object" && !Array.isArray(slot)) {
+          deepMerge(slot as Record<string, unknown>, iv as Record<string, unknown>);
+        } else {
+          (cur as unknown[])[i] = iv && typeof iv === "object" ? structuredClone(iv) : iv;
+        }
+      }
+      continue;
+    }
     if (v && typeof v === "object" && !Array.isArray(v) && cur && typeof cur === "object" && !Array.isArray(cur)) {
       deepMerge(cur as Record<string, unknown>, v as Record<string, unknown>);
     } else if (v && typeof v === "object") {

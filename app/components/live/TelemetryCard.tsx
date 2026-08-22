@@ -19,12 +19,13 @@ import { getPlaybackT, getTel } from "./framesStore";
  * follows the progression but hasn't been seen in a capture yet.
  */
 const MINI_SECTOR: Record<number, string> = {
-  0: "bg-white/15",
-  2048: "bg-white/15",
-  2049: "bg-amber-400",
-  2051: "bg-emerald-400",
-  2052: "bg-violet-400",
-  2064: "bg-white/15",
+  0: "bg-white/25", // not reached yet
+  2048: "bg-white/25", // no time set
+  2049: "bg-amber-400", // slower than this driver's best
+  2051: "bg-emerald-400", // driver's personal best
+  2052: "bg-violet-400", // fastest anyone has gone there
+  2064: "bg-white/35", // in the pit lane — not a timed mini-sector, but it DID happen, so it
+  // stays visible rather than looking like a gap in the lap (neutral grey, not a 4th colour).
 };
 
 /** F1's colour semantics, on the dark card: purple = fastest anyone, green = personal best. */
@@ -183,7 +184,7 @@ export default function TelemetryCard({
                     return (
                       <span
                         key={j}
-                        className={`h-1.5 flex-1 rounded-sm ${code != null ? (MINI_SECTOR[code] ?? "bg-white/15") : "bg-white/10"}`}
+                        className={`h-1.5 flex-1 rounded-sm ${code != null ? (MINI_SECTOR[code] ?? "bg-white/25") : "bg-white/25"}`}
                         title={code != null ? `mini-sector ${j + 1} (status ${code})` : `mini-sector ${j + 1}`}
                       />
                     );

@@ -78,7 +78,11 @@ export async function GET(req: NextRequest) {
       const anchor = Math.floor(dur * r.anchorFrac);
       const span = Math.max(1, dur - anchor);
       const upto = anchor + ((Date.now() - r.restartedAtMs) % span);
-      const state = await getF1LiveState(r.sessionPath, r.sessionType, upto, false);
+      // `asOf` matters here exactly as much as in the normal replay branch below: the dots
+      // render ~20s behind for smooth interpolation, so computing sectors/flags at the raw
+      // fetch instant put them that far ahead of the car they describe. Omitting it here was
+      // why the test replay showed a driver's mini-sectors out of step with the tracker.
+      const state = await getF1LiveState(r.sessionPath, r.sessionType, upto, false, asOf ?? upto);
       return respond({
         status: "live",
         replay: true,
@@ -121,7 +125,9 @@ export async function GET(req: NextRequest) {
       //    `mapAvailable: false` tells the client to show a "tracking needs a token"
       //    placeholder rather than an empty map.
       {
-        const relay = await getRelayState();
+        // Pass the client's playback clock so the relay's sectors describe the SAME instant
+        // the car dots are rendering (the map runs ~20s behind for smooth interpolation).
+        const relay = await getRelayState(asOf);
         if (relay && relay.drivers.length > 0) {
           return respond({
             status: "live",
