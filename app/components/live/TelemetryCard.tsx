@@ -143,14 +143,36 @@ export default function TelemetryCard({
             {/* Always three slots. A delta can carry only the sector that changed (seen live:
                 21 drivers with all three, one with just S1), and rendering the raw array made
                 that driver's card collapse to a single lonely column. */}
-            {[0, 1, 2].map((i) => sectors[i] ?? { value: "", overallFastest: false, personalFastest: false, segments: [] }).map((sec, i) => (
+            {[0, 1, 2].map((i) => sectors[i] ?? { value: "", overallFastest: false, personalFastest: false, segments: [] }).map((sec, i) => {
+              // F1 does NOT clear a sector's Value when a driver crosses the line — last
+              // lap's time sits there until the sector is run again, and it's only rewritten
+              // once the sector COMPLETES. So "has any mini-sector lit" is the wrong test:
+              // the moment a car enters S1 of a new lap that goes true while Value is still
+              // last lap's. The sector's FINAL mini-sector is the signal that it has actually
+              // been completed this lap — at the line every mini-sector resets, so all three
+              // sectors blank immediately and each refills only as it is finished.
+              const segs = sec.segments ?? [];
+              const lit = (c?: number) => !!c && c !== 0 && c !== 2048;
+              // Testing only the FINAL mini-sector isn't safe: F1 under-reports individual
+              // ones (index 0 appears 787 times vs ~950 for indices 1-7 across a session), so
+              // a finished sector can be missing its last tick and read as unfinished. Count
+              // instead, tolerating a couple of gaps — mid-sector only a few are lit, so a
+              // sector in progress still reads as incomplete and stays blank.
+              const litCount = segs.filter(lit).length;
+              const complete = segs.length > 0 && litCount >= Math.max(1, segs.length - 2);
+              // The mini-sectors finish a beat before F1 writes the sector time, so keying the
+              // bar off `complete` alone briefly coloured a sector that still showed no time.
+              // One signal for both: a sector is only "done" once its time actually exists.
+              const show = complete && !!sec.value;
+              return (
               <div key={i}>
                 <div className="flex items-baseline justify-between gap-1">
                   <span className="eyebrow text-[0.5rem] text-white/40">S{i + 1}</span>
-                  {/* Nothing at all until this sector is actually completed — just the S1/S2/S3
-                      label. A dash read as "no data" rather than "not driven yet". */}
-                  <span className={`tnum font-timing text-sm font-bold ${sectorColourOnDark(sec)}`}>
-                    {sec.value}
+                  {/* Nothing until this sector is completed ON THIS LAP — just the S1/S2/S3
+                      label. `&nbsp;` rather than an empty string so the row keeps its height
+                      and the bars below stay aligned across all three columns. */}
+                  <span className={`tnum font-timing text-sm font-bold ${show ? sectorColourOnDark(sec) : "text-white/50"}`}>
+                    {show ? sec.value : "\u00A0"}
                   </span>
                 </div>
                 {/* One solid bar per sector, the way F1 TV shows it — the sector's own
@@ -161,27 +183,34 @@ export default function TelemetryCard({
                 <div className="mt-1">
                   <span
                     className={`block h-1.5 rounded-sm ${
-                      sec.overallFastest
-                        ? "bg-violet-400"
-                        : sec.personalFastest
-                          ? "bg-emerald-400"
-                          : sec.value
-                            ? "bg-amber-400"
-                            : "bg-white/20"
+                      // Gated on `complete`, not on the flags: F1 leaves Value and the
+                      // purple/green flags set from the PREVIOUS lap, so an un-run sector
+                      // would otherwise keep last lap's colour after the driver crossed
+                      // the line. Empty until the sector is actually finished this lap.
+                      !show
+                        ? "bg-white/20"
+                        : sec.overallFastest
+                          ? "bg-violet-400"
+                          : sec.personalFastest
+                            ? "bg-emerald-400"
+                            : "bg-amber-400"
                     }`}
                     title={
-                      sec.overallFastest
-                        ? "Fastest of anyone in this sector"
-                        : sec.personalFastest
-                          ? "Personal best sector"
-                          : sec.value
+                      !show
+                        ? "Not completed yet this lap"
+                        : sec.overallFastest
+                          ? "Fastest of anyone in this sector"
+                          : sec.personalFastest
+                            ? "Personal best sector"
+                            : sec.value
                             ? "Slower than this driver's best"
                             : "No time set yet"
                     }
                   />
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
