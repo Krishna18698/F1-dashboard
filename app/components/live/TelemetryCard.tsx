@@ -43,14 +43,12 @@ export default function TelemetryCard({
   driver,
   onClose,
   sectors,
-  speeds,
   showTelemetry = true,
 }: {
   num: number;
   driver?: Driver;
   onClose: () => void;
   sectors?: { value: string; overallFastest: boolean; personalFastest: boolean; segments: number[] }[];
-  speeds?: Record<string, { value: string; overallFastest: boolean; personalFastest: boolean }>;
   /** CarData is token-gated; without it the live readout is empty, but the SECTORS below
    *  still work (TimingData is ungated) — so the card renders without the telemetry strip
    *  rather than not rendering at all. */
@@ -183,23 +181,6 @@ export default function TelemetryCard({
               </div>
             ))}
           </div>
-          {speeds && (
-            <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1">
-              {["I1", "I2", "FL", "ST"].map((k) => {
-                const sp = speeds[k];
-                if (!sp?.value) return null;
-                return (
-                  <span key={k} className="text-[0.55rem] text-white/40">
-                    {k}{" "}
-                    <span className={`tnum font-timing text-xs font-semibold ${sectorColourOnDark(sp)}`}>
-                      {sp.value}
-                    </span>
-                    <span className="text-[0.5rem]"> km/h</span>
-                  </span>
-                );
-              })}
-            </div>
-          )}
         </div>
       )}
     </div>
