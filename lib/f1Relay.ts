@@ -39,6 +39,10 @@ function qualiSegmentMs(part: number, sessionName?: string): number {
   return (sprint ? SPRINT_QUALI_DURATION_MS : QUALI_DURATION_MS)[part] ?? 0;
 }
 const LIVE_GRACE_MS = 120_000; // keep live tracking on 2 min after a session ends
+// Backstop only. A finished session normally stops showing because F1's hub advances to the
+// next one (which resets this state); this just stops a stalled hub pinning a finished result
+// on screen forever. Generous on purpose — it should almost never be what ends the display.
+const SHOW_FINISHED_MAX_MS = 6 * 3600_000;
 const WEEKEND_FLIP_MS = 300_000; // flip the hero to the next weekend 5 min after the race ends
 // A visitor's connection stays open just long enough to catch a few incremental position/
 // telemetry updates beyond the initial snapshot, then always tears down — never held any
@@ -143,6 +147,9 @@ export interface F1LiveState {
    * "frames will never arrive", and show an honest placeholder instead of a dead map.
    */
   mapAvailable: boolean;
+  /** Session is over, but this is still F1's current session — the board is showing a FINAL
+   *  classification rather than a live one. */
+  sessionEnded: boolean;
 }
 export interface SessionResult {
   session_name: string;
@@ -694,6 +701,38 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
     return endedAt != null && Date.now() < endedAt + LIVE_GRACE_MS;
   }
 
+  /**
+   * A session that has FINISHED but is still the one F1's hub is serving — i.e. the final
+   * classification is real, current, and worth showing rather than throwing away.
+   *
+   * Previously `getRelayState()` returned null once `liveOrGrace()` lapsed (2 min past the
+   * flag), so the whole Driver Live Tracker collapsed to "no live session" while F1 still had
+   * the complete final result. Rather than pick an arbitrary display window, this ends when
+   * the HUB moves on: it replaces SessionInfo with the next session, which resets this state
+   * automatically. `SHOW_FINISHED_MAX_MS` is only a backstop for the hub sitting on a
+   * finished session indefinitely (e.g. overnight), not the normal exit path.
+   */
+  function finishedButCurrent(): boolean {
+    if (liveOrGrace()) return false;
+    if (!sessionInfo) return false;
+    // Decided from the DATA, never from whether THIS process happened to watch the session
+    // run. On serverless every request can land on a freshly-started instance that connected
+    // long after the flag — gating on a `sawLive` flag meant the final classification showed
+    // only on the one instance that had been up the whole time, i.e. essentially never in
+    // production. F1's own status is what makes it final.
+    const status = (sessionStatus?.Status ?? "").toLowerCase();
+    const archive = (sessionInfo.ArchiveStatus?.Status ?? "").toLowerCase();
+    if (!ENDED.has(status) && archive !== "generating" && archive !== "complete") return false;
+    // Anchor on when it actually ended so a hub parked on an old session can't pin a stale
+    // result on screen indefinitely. EndDate is the fallback for a fresh process that has no
+    // observed end instant of its own.
+    const endMs =
+      endedAt ??
+      raceLapsCompleteAt ??
+      (sessionInfo.EndDate ? Date.parse(sessionInfo.EndDate + "Z") - offsetMs(sessionInfo.GmtOffset) : null);
+    return endMs != null && Date.now() < endMs + SHOW_FINISHED_MAX_MS;
+  }
+
   function classify() {
     const nums = Object.keys(timing).filter((k) => /^\d+$/.test(k) && Object.keys(timing[k]).length);
     const mode = modeOf(sessionInfo?.Type);
@@ -756,7 +795,10 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
   async function getRelayState(): Promise<F1LiveState | null> {
     if (!(await ensureConnection())) return null;
     await refreshIfStale();
-    if (!sessionInfo || !liveOrGrace()) return null;
+    // Live, OR finished-but-still-the-hub's-current-session (final classification stays up
+    // instead of the whole tracker vanishing 2 min after the flag).
+    const ended = finishedButCurrent();
+    if (!sessionInfo || (!liveOrGrace() && !ended)) return null;
 
     const { nums, mode, rows, order, fastestLap } = classify();
     if (!nums.length) return null;
@@ -809,11 +851,13 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
       // 10:01:52Z — LapCount {CurrentLap:1,TotalLaps:24}, SessionStatus "Inactive", and no
       // "Started" anywhere in StatusSeries.
       formationLap:
+        !ended &&
         mode === "race" &&
         (sessionStartedTs != null
           ? Date.now() < sessionStartedTs
           : Number(lapCount?.CurrentLap ?? 0) >= 1),
       mapAvailable: !anonymous,
+      sessionEnded: ended,
     };
   }
 

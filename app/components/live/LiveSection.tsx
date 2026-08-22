@@ -40,10 +40,12 @@ function Header({
   live,
   label,
   freeFeed,
+  ended,
 }: {
   live?: boolean;
   label: string;
   freeFeed?: boolean;
+  ended?: boolean;
 }) {
   return (
     <div className="mb-4 flex flex-wrap items-end gap-x-4 gap-y-1 border-b-2 border-ink pb-2">
@@ -51,10 +53,18 @@ function Header({
         <span className="whitespace-nowrap">
           Live <span className="italic text-red">Tracking</span>
         </span>
-        {live && (
+        {live && !ended && (
           <span className="flex items-center gap-1.5 whitespace-nowrap rounded-full bg-red px-2.5 py-1 text-[0.6rem] font-bold tracking-wider text-white">
             <span className="live-dot h-1.5 w-1.5 rounded-full bg-white" />
             LIVE
+          </span>
+        )}
+        {/* Session is over but still F1's current one — the board below is a FINAL
+            classification, so say so rather than leaving a red LIVE dot on a finished race. */}
+        {ended && (
+          <span className="flex items-center gap-1.5 whitespace-nowrap rounded-full bg-ink px-2.5 py-1 text-[0.6rem] font-bold tracking-wider text-white">
+            <span aria-hidden>&#127937;</span>
+            FINAL
           </span>
         )}
         {freeFeed && (
@@ -177,16 +187,23 @@ export default function LiveSection() {
       ? [...s.order.filter((n) => !s.knockedOut!.has(n)), ...s.order.filter((n) => s.knockedOut!.has(n))]
       : s.order;
   const sessionLabel = `${s.session?.location} · ${s.session?.session_name}`;
-  const label = s.replay ? `Replay · ${sessionLabel}` : `${sessionLabel} · on track now`;
+  const label = s.replay
+    ? `Replay · ${sessionLabel}`
+    : s.sessionEnded
+      ? `${sessionLabel} · final classification`
+      : `${sessionLabel} · on track now`;
 
   const freeFeed = s.source === "free";
   // The feed can't carry car positions at all (anonymous hub connection), as opposed to
   // simply not having received any yet — the map would never draw, so don't render one.
   const mapUnavailable = s.mapAvailable === false;
+  // Session finished, but still F1's current one — the board is a FINAL classification.
+  // Never in replay (that's a past session by definition and already labelled as such).
+  const ended = !s.replay && s.sessionEnded === true;
 
   return (
     <section>
-      <Header live={!s.replay} label={label} freeFeed={freeFeed} />
+      <Header live={!s.replay} label={label} freeFeed={freeFeed} ended={ended} />
       <ViewToggle view={view} onChange={changeView} />
       {s.replay && (
         <p className="-mt-3 mb-4 text-xs text-muted">
@@ -334,7 +351,7 @@ export default function LiveSection() {
       {/* `trackingReady` normally holds Race Control back until the map has frames, so the
           two don't appear out of order. With no map at all there are no frames to wait for —
           gating on them would hide Race Control permanently. */}
-      <RaceControl ready={trackingReady || mapUnavailable} view={view} replayT0={replayT0} />
+      <RaceControl ready={trackingReady || mapUnavailable || ended} view={view} replayT0={replayT0} />
     </section>
   );
 }
