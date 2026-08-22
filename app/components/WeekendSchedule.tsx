@@ -81,9 +81,14 @@ export default function WeekendSchedule({
                     LIVE
                   </span>
                 ) : isNext ? (
-                  /* Quieter than the LIVE chip on purpose — same black card, so the pill has
-                     to carry the difference between "running now" and "up next". */
-                  <span className="rounded-sm bg-white/10 px-1.5 py-0.5 text-[0.5rem] font-bold tracking-wide text-white/70 ring-1 ring-white/25">
+                  /* Red when nothing is on track — NEXT is then the most useful thing on the
+                     card and should carry the emphasis. It only drops to the quiet chip while
+                     a session IS live, so it doesn't compete with the LIVE dot beside it. */
+                  <span
+                    className={`rounded-sm px-1.5 py-0.5 text-[0.5rem] font-bold tracking-wide ${
+                      live ? "bg-white/10 text-white/70 ring-1 ring-white/25" : "bg-red text-white"
+                    }`}
+                  >
                     NEXT
                   </span>
                 ) : done ? (
