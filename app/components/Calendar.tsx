@@ -63,7 +63,14 @@ export default function Calendar({
                 R{race.round.padStart(2, "0")}
               </span>
               {current && (
-                <span className="rounded-sm bg-red px-1.5 py-0.5 text-[0.55rem] font-bold tracking-wide text-white">
+                /* Same black card either way — it's the same featured round. The PILL is what
+                   separates "this weekend is running right now" from "this is simply the one
+                   coming up": solid red for CURRENT, a quieter outlined chip for NEXT. */
+                <span
+                  className={`rounded-sm px-1.5 py-0.5 text-[0.55rem] font-bold tracking-wide ${
+                    underway ? "bg-red text-white" : "bg-white/10 text-white/70 ring-1 ring-white/25"
+                  }`}
+                >
                   {underway ? "CURRENT" : "NEXT"}
                 </span>
               )}

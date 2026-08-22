@@ -56,22 +56,17 @@ export default function WeekendSchedule({
           const isLive = liveLabel === s.label;
           const done = !isLive && Date.parse(s.iso) <= now;
           const isNext = !isLive && i === nextIdx;
-          // LIVE and NEXT used to share one black treatment, so "on track right now" and
-          // "coming up later" looked identical. Only the LIVE session is filled dark now;
-          // NEXT stays on the light card and is marked with a red outline instead.
-          const dark = isLive;
+          const dark = isLive || isNext; // black card like the season calendar's current round
           return (
             <div
               key={s.label}
               className={[
                 "rounded-lg border p-3 transition-colors",
-                isLive
-                  ? "carbon-bg border-red text-white ring-2 ring-red/40"
-                  : isNext
-                    ? "border-red/50 bg-paper ring-1 ring-red/20"
-                    : done
-                      ? "border-line bg-panel/60 opacity-70"
-                      : "border-line bg-paper",
+                dark
+                  ? "carbon-bg border-white/10 text-white"
+                  : done
+                    ? "border-line bg-panel/60 opacity-70"
+                    : "border-line bg-paper",
               ].join(" ")}
             >
               <div className="flex items-center justify-between">
@@ -79,12 +74,14 @@ export default function WeekendSchedule({
                   {s.short}
                 </span>
                 {isLive ? (
-                  <span className="flex items-center gap-1 text-[0.5rem] font-bold tracking-wide text-white">
-                    <span className="live-dot h-1.5 w-1.5 rounded-full bg-red" />
+                  <span className="flex items-center gap-1 rounded-sm bg-red px-1.5 py-0.5 text-[0.5rem] font-bold tracking-wide text-white">
+                    <span className="live-dot h-1.5 w-1.5 rounded-full bg-white" />
                     LIVE
                   </span>
                 ) : isNext ? (
-                  <span className="rounded-sm bg-red px-1.5 py-0.5 text-[0.5rem] font-bold tracking-wide text-white">
+                  /* Quieter than the LIVE chip on purpose — same black card, so the pill has
+                     to carry the difference between "running now" and "up next". */
+                  <span className="rounded-sm bg-white/10 px-1.5 py-0.5 text-[0.5rem] font-bold tracking-wide text-white/70 ring-1 ring-white/25">
                     NEXT
                   </span>
                 ) : done ? (
