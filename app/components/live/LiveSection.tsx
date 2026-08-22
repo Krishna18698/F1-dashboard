@@ -216,7 +216,24 @@ export default function LiveSection() {
               <span className="eyebrow mb-2 block text-[0.6rem] text-muted">
                 Driver <span className="text-red">Tracker</span>
               </span>
-              <div className="flex aspect-square flex-col items-center justify-center gap-2 rounded-lg carbon-bg px-6 text-center ring-1 ring-white/10">
+              <div className="relative flex aspect-square flex-col items-center justify-center gap-2 rounded-lg carbon-bg px-6 text-center ring-1 ring-white/10">
+                {/* LapCount is NOT one of the token-gated topics (only Position.z and
+                    CarData.z are), so the race lap counter is available here too — it just
+                    used to be rendered exclusively inside TrackMap, which this placeholder
+                    replaces. Same placement/styling as the map's own badge. */}
+                {s.mode === "race" && (s.totalLaps ?? 0) > 0 && !s.formationLap && (
+                  <span
+                    className="tnum absolute right-3 top-3 rounded-full bg-black/60 px-2.5 py-1 font-mono text-[0.65rem] font-bold tracking-wider text-white/85"
+                    title="Progress through the race — lap X of Y"
+                  >
+                    LAP {s.currentLap ?? 0}/{s.totalLaps}
+                  </span>
+                )}
+                {s.mode === "race" && s.formationLap && (
+                  <span className="absolute right-3 top-3 rounded-full bg-yellow-400/85 px-2.5 py-1 text-[0.65rem] font-bold tracking-wider text-black">
+                    FORMATION LAP
+                  </span>
+                )}
                 <p className="text-sm text-white/70">Live driver tracking needs an F1 TV token.</p>
                 <p className="text-xs text-white/45">
                   Timing, tyres, and Race Control below are live right now — only the car
