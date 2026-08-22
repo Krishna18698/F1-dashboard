@@ -798,7 +798,21 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
         qualifyingPart && qualifyingPartHistory.length
           ? Math.max(0, qualiSegmentMs(qualifyingPart, sessionInfo.Name) - (Date.now() - qualiSegmentStart()))
           : null,
-      formationLap: mode === "race" && sessionStartedTs != null && Date.now() < sessionStartedTs,
+      // Two different situations, because the green light is known at different times.
+      // REPLAY-style (the whole session already loaded): sessionStartedTs is known up front,
+      // so the formation lap is simply "before it".
+      // LIVE: the "Started" event HASN'T HAPPENED YET during the formation lap — that's the
+      // whole point of it — so sessionStartedTs is still null and `now < sessionStartedTs`
+      // could never once be true. Live formation lap is instead "a race is running, cars are
+      // on their lap, and no green light has arrived": LapCount is published (CurrentLap 1)
+      // while SessionStatus is still Inactive. Measured during the Zandvoort Sprint at
+      // 10:01:52Z — LapCount {CurrentLap:1,TotalLaps:24}, SessionStatus "Inactive", and no
+      // "Started" anywhere in StatusSeries.
+      formationLap:
+        mode === "race" &&
+        (sessionStartedTs != null
+          ? Date.now() < sessionStartedTs
+          : Number(lapCount?.CurrentLap ?? 0) >= 1),
       mapAvailable: !anonymous,
     };
   }
