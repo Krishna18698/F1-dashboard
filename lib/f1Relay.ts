@@ -39,10 +39,13 @@ function qualiSegmentMs(part: number, sessionName?: string): number {
   return (sprint ? SPRINT_QUALI_DURATION_MS : QUALI_DURATION_MS)[part] ?? 0;
 }
 const LIVE_GRACE_MS = 120_000; // keep live tracking on 2 min after a session ends
-// Backstop only. A finished session normally stops showing because F1's hub advances to the
-// next one (which resets this state); this just stops a stalled hub pinning a finished result
-// on screen forever. Generous on purpose — it should almost never be what ends the display.
-const SHOW_FINISHED_MAX_MS = 6 * 3600_000;
+// How long the FINAL classification stays on the Driver Live Tracker after a session ends.
+// Originally this waited for F1's hub to advance to the next session, but that can be hours
+// (Sprint ends ~10:35, Qualifying isn't until 13:00) and left a finished session sitting in
+// the live area long after anyone would call it current. 20 min matches the window liveNow()
+// already uses to call a race over. The result itself isn't lost when this lapses — the hero
+// results ticker keeps it for 24h, which is the right home for "what happened earlier".
+const SHOW_FINISHED_MAX_MS = 20 * 60_000;
 const WEEKEND_FLIP_MS = 300_000; // flip the hero to the next weekend 5 min after the race ends
 // A visitor's connection stays open just long enough to catch a few incremental position/
 // telemetry updates beyond the initial snapshot, then always tears down — never held any
@@ -259,6 +262,10 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
   // green. `sessionStartedTs` deliberately stays pinned to the first one — that's lights-out
   // for formation-lap detection, a different question.
   let segmentStartedTs: number | null = null;
+  // F1's own timestamp for the chequered flag / session end (StatusSeries "Finished"). Unlike
+  // endedAt / raceLapsCompleteAt this is the REAL instant, not when this process happened to
+  // notice — so "how long ago did it end" survives a fresh connection or a serverless restart.
+  let sessionFinishedTs: number | null = null;
   // When the race's own LapCount first reached TotalLaps (the chequered flag, from real lap
   // data — not a schedule guess). SessionStatus/ArchiveStatus can lag well behind the actual
   // flag (podium/post-race coverage keeps the session "Started" for a while) — this is a more
@@ -289,6 +296,7 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
       stintFirstSeenAt = {};
       sessionStartedTs = null;
       segmentStartedTs = null;
+      sessionFinishedTs = null;
       raceLapsCompleteAt = null;
       telBuffer = [];
       endedAt = null;
@@ -417,6 +425,13 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
           const ts = st.Utc ? Date.parse(st.Utc) : Date.now();
           if (sessionStartedTs === null) sessionStartedTs = ts; // first only — lights out
           if (segmentStartedTs === null || ts > segmentStartedTs) segmentStartedTs = ts;
+        }
+        // F1 stamps the real end instant here. Everything else that tracks "when did this
+        // end" (endedAt, raceLapsCompleteAt) records when THIS PROCESS first noticed, which
+        // restarts on every fresh connection — useless for "how long ago did it finish".
+        if (st.SessionStatus === "Finished" && st.Utc) {
+          const ts = Date.parse(st.Utc);
+          if (Number.isFinite(ts) && (sessionFinishedTs === null || ts > sessionFinishedTs)) sessionFinishedTs = ts;
         }
       }
     } else if (topic === "Position.z") {
@@ -707,10 +722,11 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
    *
    * Previously `getRelayState()` returned null once `liveOrGrace()` lapsed (2 min past the
    * flag), so the whole Driver Live Tracker collapsed to "no live session" while F1 still had
-   * the complete final result. Rather than pick an arbitrary display window, this ends when
-   * the HUB moves on: it replaces SessionInfo with the next session, which resets this state
-   * automatically. `SHOW_FINISHED_MAX_MS` is only a backstop for the hub sitting on a
-   * finished session indefinitely (e.g. overnight), not the normal exit path.
+   * the complete final result — the result flashed up for two minutes and vanished.
+   *
+   * Bounded by `SHOW_FINISHED_MAX_MS` rather than by the hub advancing to the next session:
+   * the gap between sessions is often hours, which left a finished Sprint parked in the live
+   * area 40 min after the flag, reading as though it were still running.
    */
   function finishedButCurrent(): boolean {
     if (liveOrGrace()) return false;
@@ -726,7 +742,11 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
     // Anchor on when it actually ended so a hub parked on an old session can't pin a stale
     // result on screen indefinitely. EndDate is the fallback for a fresh process that has no
     // observed end instant of its own.
+    // F1's own "Finished" timestamp FIRST — endedAt/raceLapsCompleteAt are both stamped with
+    // Date.now() at the moment this process noticed, so on a fresh connection they read as
+    // "just ended" no matter how long ago it really was, and the window never expired.
     const endMs =
+      sessionFinishedTs ??
       endedAt ??
       raceLapsCompleteAt ??
       (sessionInfo.EndDate ? Date.parse(sessionInfo.EndDate + "Z") - offsetMs(sessionInfo.GmtOffset) : null);
