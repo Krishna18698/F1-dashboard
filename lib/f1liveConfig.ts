@@ -55,5 +55,13 @@ export const F1_LIVE = {
     // this to the current time (e.g. `node -e "console.log(Date.now())"`); Next hot-reloads
     // this config module on save, so it takes effect on the next poll.
     restartedAtMs: 1784109249282,
+    /**
+     * Dev-only: make the TEST replay behave like a TOKENLESS LIVE session. The static archive
+     * serves Position.z and CarData.z happily, but F1's live hub gates both behind a token,
+     * so a plain replay flatters what a tokenless visitor actually sees. With this on, car
+     * positions and telemetry are withheld and mapAvailable is forced false — leaving exactly
+     * the ungated topics.
+     */
+    maskTokenGated: false,
   },
 } as const;

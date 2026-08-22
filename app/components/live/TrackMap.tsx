@@ -337,16 +337,16 @@ export default function TrackMap({
   // an empty (or driver-less) track for a couple seconds before any dot appeared.
   if (!bounds || drivers.size === 0 || !hasFrames) {
     return (
-      <div className="self-start">
+      <div className="flex min-h-0 flex-1 flex-col">
         <span className="eyebrow mb-2 block text-[0.6rem] text-muted">
           Driver <span className="text-red">Tracker</span>
         </span>
         {failed ? (
-          <div className="flex aspect-square items-center justify-center rounded-lg carbon-bg px-6 text-center text-sm text-white/40">
+          <div className="flex h-full min-h-80 items-center justify-center rounded-lg carbon-bg px-6 text-center text-sm text-white/40">
             Track outline unavailable for this circuit — timing &amp; tyres below still update live.
           </div>
         ) : (
-          <div className="relative aspect-square overflow-hidden rounded-lg carbon-bg ring-1 ring-white/10">
+          <div className="relative h-full min-h-80 overflow-hidden rounded-lg carbon-bg ring-1 ring-white/10">
             <div className="skeleton-dark absolute inset-6 rounded-full opacity-60" />
             <span className="absolute inset-0 flex items-center justify-center text-sm text-white/40">
               {!bounds ? "Loading circuit…" : "Loading drivers…"}
@@ -368,12 +368,15 @@ export default function TrackMap({
       : null;
 
   return (
-    <div className="self-start">
+    // Fixed square, and shrink-0 so nothing below can squeeze it: the circuit is the
+    // centrepiece and a squashed map reads badly. The tyre card below absorbs the height
+    // change instead when a driver is selected.
+    <div className="flex shrink-0 flex-col">
       <span className="eyebrow mb-2 block text-[0.6rem] text-muted">
         Driver <span className="text-red">Tracker</span>
       </span>
       <div
-        className="relative aspect-square overflow-hidden rounded-lg carbon-bg ring-1 ring-white/10"
+        className="relative aspect-square w-full overflow-hidden rounded-lg carbon-bg ring-1 ring-white/10"
         style={{
           boxShadow: tint ? `inset 0 0 0 3px ${tint.color}, inset 0 0 60px ${tint.color}33` : "none",
           transition: "box-shadow 0.6s ease",

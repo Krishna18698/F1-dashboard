@@ -452,6 +452,12 @@ export interface F1LiveRow {
   /** S1/S2/S3 with F1's purple/green flags — same shape the relay emits, so the UI is
    *  identical whether a session is live or being replayed from the archive. */
   sectors: { value: string; overallFastest: boolean; personalFastest: boolean; segments: number[] }[];
+  /** I1/I2/FL/ST speed traps — from TimingData, so ungated and available without a token. */
+  speeds: Record<string, { value: string; overallFastest: boolean; personalFastest: boolean }>;
+  /** This driver's BEST S1/S2/S3 of the session, in seconds. The live sector values only
+   *  describe the current lap, so a "where is the lap being lost" comparison needs the best
+   *  each driver has managed, tracked separately. */
+  bestSectors: (number | null)[];
 }
 /** A mini-sector that F1 has already reported but the car dots haven't reached yet. */
 export interface SegmentEvent {
@@ -696,6 +702,7 @@ export async function getF1LiveState(
   // lap's, and must not be shown however complete the mini-sectors look.
   const valueSetAt: Record<string, number[]> = {};
   const lapResetAt: Record<string, number> = {};
+  const bestSectorOf: Record<string, (number | null)[]> = {};
   for (const dlt of s.timing) {
     if (dlt.ts > infoUptoMs) break;
     for (const [numStr, upd] of Object.entries(dlt.lines)) {
@@ -704,7 +711,14 @@ export async function getF1LiveState(
       let zeros = 0;
       for (const [sk, sv] of Object.entries(secs as Record<string, { Value?: string; Segments?: unknown }>)) {
         const si = Number(sk);
-        if (!Number.isNaN(si) && sv?.Value) (valueSetAt[numStr] ??= [])[si] = dlt.ts;
+        if (!Number.isNaN(si) && sv?.Value) {
+          (valueSetAt[numStr] ??= [])[si] = dlt.ts;
+          const secs = parseLapTime(sv.Value);
+          if (secs != null) {
+            const cur = (bestSectorOf[numStr] ??= [null, null, null])[si];
+            if (cur == null || secs < cur) bestSectorOf[numStr][si] = secs;
+          }
+        }
         const segs = sv?.Segments;
         if (segs && typeof segs === "object") {
           for (const gv of Object.values(segs as Record<string, { Status?: number }>)) {
@@ -783,6 +797,12 @@ export async function getF1LiveState(
       // Read from the merge at `infoUptoMs` — the same instant the car dots are rendering —
       // so a mini-sector lights up exactly as the car reaches it on screen, not 20s early.
       // Normalized to three dense slots so the UI can't receive holes (they serialize null).
+      bestSectors: bestSectorOf[numStr] ?? [null, null, null],
+      speeds: Object.fromEntries(
+        Object.entries((t.Speeds ?? {}) as Record<string, { Value?: string; OverallFastest?: boolean; PersonalFastest?: boolean }>).map(
+          ([k, v]) => [k, { value: v?.Value ?? "", overallFastest: Boolean(v?.OverallFastest), personalFastest: Boolean(v?.PersonalFastest) }],
+        ),
+      ),
       sectors: (() => {
         const raw = t.Sectors as unknown;
         const list = Array.isArray(raw)

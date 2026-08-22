@@ -83,14 +83,19 @@ export async function GET(req: NextRequest) {
       // fetch instant put them that far ahead of the car they describe. Omitting it here was
       // why the test replay showed a driver's mini-sectors out of step with the tracker.
       const state = await getF1LiveState(r.sessionPath, r.sessionType, upto, false, asOf ?? upto);
+      // `maskTokenGated` reproduces a tokenless LIVE session: withhold exactly what F1's hub
+      // withholds without a token (car positions and telemetry), so what's left is what a
+      // tokenless visitor genuinely receives rather than what the archive happens to hold.
+      const masked = (F1_LIVE.replay as { maskTokenGated?: boolean }).maskTokenGated === true;
       return respond({
         status: "live",
         replay: true,
         circuitKey: r.circuitKey,
         session: { location: r.location, session_name: r.name },
         ...state,
-        frames: newFrames(state.frames, since),
-        telFrames: newTel(state.telFrames, since),
+        ...(masked ? { mapAvailable: false } : {}),
+        frames: masked ? [] : newFrames(state.frames, since),
+        telFrames: masked ? [] : newTel(state.telFrames, since),
       });
     }
 

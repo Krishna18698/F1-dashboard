@@ -45,7 +45,7 @@ export default function TyreAllocation({
   const columns = columnCount === 2 ? [sortedOrder.slice(0, half), sortedOrder.slice(half)] : [sortedOrder];
 
   return (
-    <div className="self-start">
+    <div className="flex h-full flex-col">
       <div className="mb-2 flex items-center gap-2">
         <span className="eyebrow block text-[0.6rem] text-muted">
           Tyre <span className="text-red">Allocation</span>
@@ -57,10 +57,10 @@ export default function TyreAllocation({
           WEEKEND LEFT
         </span>
       </div>
-      <div className="carbon-bg overflow-x-auto rounded-lg p-2.5 ring-1 ring-white/10 sm:p-3">
-        <div className={`grid grid-cols-1 gap-x-3 gap-y-1 ${columnCount === 2 ? "lg:grid-cols-2" : ""}`}>
+      <div className="carbon-bg flex min-h-0 flex-1 overflow-x-auto rounded-lg p-2.5 ring-1 ring-white/10 sm:p-3">
+        <div className={`grid w-full grid-cols-1 gap-x-3 gap-y-1 ${columnCount === 2 ? "lg:grid-cols-2" : ""}`}>
           {columns.map((col, colIdx) => (
-            <div key={colIdx} className="space-y-1">
+            <div key={colIdx} className="flex flex-col justify-around gap-1">
               {col.map((num) => {
                 const d = drivers.get(num);
                 const pos = positions.get(num) ?? order.indexOf(num) + 1;

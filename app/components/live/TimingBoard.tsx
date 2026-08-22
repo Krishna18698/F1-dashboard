@@ -5,8 +5,12 @@ import { Driver, IntervalRow, LapSummary } from "@/lib/openf1";
 import { SessionMode } from "./useLiveSession";
 import { formatDelta, formatGap, formatInterval, formatLap, hex } from "@/lib/format";
 
-// FIA quali format: Q1 cuts the field to 15, Q2 cuts to 10 — fixed regardless of grid size.
-const QUALI_CUTOFF: Record<number, number> = { 1: 15, 2: 10 };
+// Six drivers drop out of Q1 and six out of Q2, leaving ten for Q3 — the same in a sprint
+// qualifying. Written as "how many are eliminated" rather than "how many advance": the old
+// { 1: 15, 2: 10 } was the 20-car convention (20 -> 15 -> 10) and shaded SEVEN on the current
+// 22-car grid, which goes 22 -> 16 -> 10. Counting from the back is also immune to a grid
+// that changes size mid-season or a car sitting out.
+const ELIMINATED_PER_SEGMENT = 6;
 
 
 /** F1's own colour semantics: purple = fastest anyone, green = personal best. */
@@ -19,10 +23,11 @@ function sectorColour(s?: { overallFastest: boolean; personalFastest: boolean })
 
 /** Bottom N of the still-active (not yet eliminated) field, in current ranked order. */
 function dangerZone(order: number[], knockedOut: Set<number> | undefined, part: number | null | undefined): Set<number> {
-  const cutoff = part ? QUALI_CUTOFF[part] : undefined;
-  if (!cutoff) return new Set();
+  // Nothing to shade in the final segment — everyone left is racing for pole, not survival.
+  if (!part || part >= 3) return new Set();
   const active = order.filter((n) => !knockedOut?.has(n));
-  return active.length > cutoff ? new Set(active.slice(cutoff)) : new Set();
+  if (active.length <= ELIMINATED_PER_SEGMENT) return new Set();
+  return new Set(active.slice(-ELIMINATED_PER_SEGMENT));
 }
 
 /** Ticks a "remaining ms as of the last poll" value down locally in real time, resyncing
@@ -154,7 +159,7 @@ export default function TimingBoard({
       </div>
       <div className="overflow-hidden rounded-lg border border-line">
         <div
-          className={`grid ${cols} gap-2 border-b border-line bg-panel px-3 py-2 text-[0.6rem] font-bold tracking-wider text-muted`}
+          className={`grid ${cols} gap-2 border-b border-line bg-panel px-3 py-1.5 text-[0.6rem] font-bold tracking-wider text-muted`}
         >
           <span className="text-right">P</span>
           <span>Driver</span>

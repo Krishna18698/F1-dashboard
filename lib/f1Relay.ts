@@ -142,6 +142,7 @@ export interface F1LiveRow {
   stints: { compound: string; laps: number; age: number; isNew: boolean; segment: number | null }[]; // full tyre history (strategy bar)
   weekendTyresLeft: { compound: string; left: number }[]; // fresh sets left vs. the weekend allocation
   sectors: SectorTime[]; // S1/S2/S3 with F1's own purple/green flags
+  bestSectors: (number | null)[]; // best S1/S2/S3 of the session, seconds
   speeds: Record<string, SpeedTrap>; // I1 / I2 / FL / ST speed traps
 }
 export interface FastestLap {
@@ -381,6 +382,9 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
    * derives this by re-walking its delta history; live has to record it as updates land.
    */
   let valueSetAt: Record<string, number[]> = {};
+  /** Best S1/S2/S3 each driver has managed this session, in seconds. Live sector values only
+   *  describe the current lap, so the "where is the lap being lost" comparison needs this. */
+  let bestSectorOf: Record<string, (number | null)[]> = {};
   let lapResetAt: Record<string, number> = {};
   /** Mini-sector transitions and line crossings, timestamped, for the window the car dots
    *  haven't rendered yet (the map plays ~20s behind). Lets the client light a segment and
@@ -421,6 +425,7 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
       statusHistory = [];
       sectorHistory = [];
       valueSetAt = {};
+      bestSectorOf = {};
       lapResetAt = {};
       segmentEvents = [];
       lapResets = [];
@@ -488,7 +493,14 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
           let zeros = 0;
           for (const [sk, sv] of Object.entries(secs as Record<string, { Value?: string; Segments?: unknown }>)) {
             const si = Number(sk);
-            if (!Number.isNaN(si) && sv?.Value) (valueSetAt[n] ??= [])[si] = now;
+            if (!Number.isNaN(si) && sv?.Value) {
+              (valueSetAt[n] ??= [])[si] = now;
+              const secs = parseLapTime(sv.Value);
+              if (secs != null) {
+                const cur = (bestSectorOf[n] ??= [null, null, null])[si];
+                if (cur == null || secs < cur) bestSectorOf[n][si] = secs;
+              }
+            }
             const segs = sv?.Segments;
             if (segs && typeof segs === "object") {
               for (const [gk, gv] of Object.entries(segs as Record<string, { Status?: number }>)) {
@@ -1047,6 +1059,7 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
             segments: asList<{ Status?: number }>(sec?.Segments).map((g) => Number(g?.Status ?? 0)),
           };
         }),
+        bestSectors: bestSectorOf[n] ?? [null, null, null],
         speeds: Object.fromEntries(
           Object.entries(t.Speeds ?? {}).map(([k, v]) => [
             k,

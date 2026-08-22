@@ -6,6 +6,7 @@ import TrackMap from "./TrackMap";
 import TimingBoard from "./TimingBoard";
 import TyreTracker from "./TyreTracker";
 import TyreAllocation from "./TyreAllocation";
+import SectorDeltas from "./SectorDeltas";
 import TelemetryCard from "./TelemetryCard";
 import MyTokenCard from "./MyTokenCard";
 import RaceControl from "./RaceControl";
@@ -213,14 +214,17 @@ export default function LiveSection() {
       {!s.replay && <MyTokenCard tokenIssue={s.tokenIssue} ownerHasToken={s.ownerTokenConfigured} />}
 
       {/* Track map + clean running order side by side */}
+      {/* items-stretch (the grid default) lets the shorter column fill the taller one's
+          height; the left column then distributes that height between the tracker and the
+          tyre card so there's no gap under them — with or without a driver selected. */}
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="self-start">
+        <div className="flex flex-col gap-4">
           {F1_LIVE.driverTrackerDisabled && !s.replay ? (
-            <div className="self-start">
+            <div className="flex shrink-0 flex-col">
               <span className="eyebrow mb-2 block text-[0.6rem] text-muted">
                 Driver <span className="text-red">Tracker</span>
               </span>
-              <div className="flex aspect-square items-center justify-center rounded-lg carbon-bg px-6 text-center text-sm text-white/50 ring-1 ring-white/10">
+              <div className="flex aspect-square w-full items-center justify-center rounded-lg carbon-bg px-6 text-center text-sm text-white/50 ring-1 ring-white/10">
                 Temporarily unavailable — F1&apos;s own live position data is having issues
                 right now. Timing, tyres, and Race Control are unaffected.
               </div>
@@ -229,11 +233,11 @@ export default function LiveSection() {
             /* Everything on this page except the car positions is coming through live — F1
                serves timing/tyres/race control to anyone, but gates Position.z behind a
                token. Say that plainly instead of rendering a map that can never draw. */
-            <div className="self-start">
+            <div className="flex shrink-0 flex-col">
               <span className="eyebrow mb-2 block text-[0.6rem] text-muted">
                 Driver <span className="text-red">Tracker</span>
               </span>
-              <div className="relative flex aspect-square flex-col items-center justify-center gap-2 rounded-lg carbon-bg px-6 text-center ring-1 ring-white/10">
+              <div className="relative flex aspect-square w-full flex-col items-center justify-center gap-2 rounded-lg carbon-bg px-6 text-center ring-1 ring-white/10">
                 {/* LapCount is NOT one of the token-gated topics (only Position.z and
                     CarData.z are), so the race lap counter is available here too — it just
                     used to be rendered exclusively inside TrackMap, which this placeholder
@@ -259,6 +263,7 @@ export default function LiveSection() {
               </div>
             </div>
           ) : (
+            <div className="flex shrink-0 flex-col">
             <TrackMap
               circuitKey={s.circuitKey}
               drivers={s.drivers}
@@ -272,25 +277,25 @@ export default function LiveSection() {
               selectedNum={selected}
               onSelect={setSelected}
             />
+            </div>
           )}
-          {/* One card for the followed driver: live telemetry (token only — CarData.z is
-              gated) plus their sectors and speed traps, which come from the ungated
-              TimingData and so are shown in both environments. */}
-          {selected != null && (
+          {/* Only where there's live telemetry to show. Without a token CarData is gated, and
+              the card collapsed to sector times the timing board already carries in its own
+              S1/S2/S3 columns — an near-empty panel restating what's beside it. Selecting a
+              driver still highlights their row; there's just no card. */}
+          {selected != null && !mapUnavailable && (
             <TelemetryCard
               num={selected}
               driver={s.drivers.get(selected)}
               onClose={() => setSelected(null)}
               sectors={s.sectors?.get(selected)}
               lapResets={s.lapResets}
-              showTelemetry={!mapUnavailable}
             />
           )}
-          {/* Race mode: the Driver Live Tracker column is usually taller than the map, so
-              the Tyre Allocation card fills that leftover space here instead of sitting in
-              its own full-width row further down. */}
-          {s.mode === "race" && (
-            <div className="mt-4">
+          {/* Absorbs the column's spare height, and gives it back when the telemetry card
+              appears — so the tracker above keeps a constant size either way. */}
+          {(s.mode === "race" || s.mode === "quali") && (
+            <div className="flex min-h-0 flex-1 flex-col">
               <TyreAllocation
                 order={s.order}
                 drivers={s.drivers}
@@ -301,6 +306,10 @@ export default function LiveSection() {
             </div>
           )}
         </div>
+        {/* Right column: the board and the sector analysis that reads off it, stacked. Keeping
+            them together means "who is where" and "where each of them is losing it" sit in
+            the same column rather than across the page from one another. */}
+        <div className="self-start">
         <TimingBoard
           mode={s.mode}
           order={boardOrder}
@@ -319,6 +328,20 @@ export default function LiveSection() {
           selectedNum={selected}
           onSelect={setSelected}
         />
+          {/* Quali only for now: sector-by-sector deficits are the story of a qualifying lap.
+              Race gets the full-width Tyre Tracker below instead. Driven purely by sector
+              times, so it behaves the same with or without a token. */}
+          {s.mode === "quali" && (
+            <div className="mt-4">
+              <SectorDeltas
+                order={s.order}
+                drivers={s.drivers}
+                positions={s.positions}
+                bestSectors={s.bestSectors ?? new Map()}
+              />
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Tyre Tracker — the rich board: gained/lost + gap/int + last + stint bars + fastest lap.
@@ -341,20 +364,6 @@ export default function LiveSection() {
         </div>
       )}
 
-      {/* Tyre Allocation — qualifying: fresh sets left per compound, vs. the weekend
-          allocation. Shows every driver, including those already knocked out —
-          unlike the board above, this isn't about who's still fighting for a spot.
-          (Race mode renders this in the left column above instead — see there.) */}
-      {s.mode === "quali" && (
-        <div className="mt-4">
-          <TyreAllocation
-            order={s.order}
-            drivers={s.drivers}
-            positions={s.positions}
-            weekendTyresLeft={s.weekendTyresLeft ?? new Map()}
-          />
-        </div>
-      )}
       {/* `trackingReady` normally holds Race Control back until the map has frames, so the
           two don't appear out of order. With no map at all there are no frames to wait for —
           gating on them would hide Race Control permanently. */}
