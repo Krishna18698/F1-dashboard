@@ -394,6 +394,14 @@ export async function getReplayAnchorMs(sessionPath: string, live: boolean): Pro
   return 0;
 }
 
+interface SectorRaw {
+  Value?: string;
+  PreviousValue?: string;
+  OverallFastest?: boolean;
+  PersonalFastest?: boolean;
+  Segments?: unknown;
+}
+
 /* ------------------------------ state reducer ------------------------------ */
 export interface F1LiveRow {
   driver_number: number;
@@ -411,6 +419,9 @@ export interface F1LiveRow {
   grid: number;
   stints: { compound: string; laps: number; age: number; isNew: boolean; segment: number | null }[];
   weekendTyresLeft: { compound: string; left: number }[];
+  /** S1/S2/S3 with F1's purple/green flags — same shape the relay emits, so the UI is
+   *  identical whether a session is live or being replayed from the archive. */
+  sectors: { value: string; overallFastest: boolean; personalFastest: boolean; segments: number[] }[];
 }
 export interface F1LiveDriver {
   driver_number: number;
@@ -700,6 +711,42 @@ export async function getF1LiveState(
       grid: Number((appState[numStr]?.GridPos as string | number) ?? 0),
       stints,
       weekendTyresLeft: weekendMap[numStr] ?? DRY_COMPOUNDS.map((c) => ({ compound: c, left: WEEKEND_ALLOCATION[c] })),
+      // Replayed deltas are merged up to `infoUptoMs` by mergeUpto, so unlike the live relay
+      // there's no sparse-update problem to guard against here — the merged state already
+      // holds every sector seen so far. Still normalized to exactly three dense slots so the
+      // UI can't receive holes (which serialize as null).
+      sectors: (() => {
+        const raw = t.Sectors as unknown;
+        const list = Array.isArray(raw)
+          ? (raw as SectorRaw[])
+          : raw && typeof raw === "object"
+            ? Object.entries(raw as Record<string, SectorRaw>).reduce<SectorRaw[]>((acc, [k, v]) => {
+                const i = Number(k);
+                if (!Number.isNaN(i) && i >= 0 && i < 8) acc[i] = v;
+                return acc;
+              }, [])
+            : [];
+        return Array.from({ length: 3 }, (_, i) => {
+          const sec = list[i];
+          const segRaw = sec?.Segments as unknown;
+          const segs = Array.isArray(segRaw)
+            ? (segRaw as { Status?: number }[])
+            : segRaw && typeof segRaw === "object"
+              ? Object.entries(segRaw as Record<string, { Status?: number }>)
+                  .reduce<{ Status?: number }[]>((acc, [k, v]) => {
+                    const j = Number(k);
+                    if (!Number.isNaN(j) && j >= 0 && j < 64) acc[j] = v;
+                    return acc;
+                  }, [])
+              : [];
+          return {
+            value: sec?.Value || sec?.PreviousValue || "",
+            overallFastest: Boolean(sec?.OverallFastest),
+            personalFastest: Boolean(sec?.PersonalFastest),
+            segments: Array.from({ length: segs.length }, (_, j) => Number(segs[j]?.Status ?? 0)),
+          };
+        });
+      })(),
     };
     if (best != null && best < fastestMs && bt?.Value) {
       fastestMs = best;
