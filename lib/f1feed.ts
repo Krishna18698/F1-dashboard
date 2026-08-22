@@ -772,7 +772,11 @@ export async function getF1LiveState(
                   }, [])
               : [];
           return {
-            value: sec?.Value || sec?.PreviousValue || "",
+            // Only the CURRENT lap's time. F1 keeps the prior lap in PreviousValue, but
+            // falling back to it meant a driver who had just started a lap still showed last
+            // lap's three sector times — the bar should empty at the line and refill as each
+            // sector is actually completed.
+            value: sec?.Value || "",
             overallFastest: Boolean(sec?.OverallFastest),
             personalFastest: Boolean(sec?.PersonalFastest),
             segments: Array.from({ length: segs.length }, (_, j) => Number(segs[j]?.Status ?? 0)),

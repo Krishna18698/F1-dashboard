@@ -147,8 +147,10 @@ export default function TelemetryCard({
               <div key={i}>
                 <div className="flex items-baseline justify-between gap-1">
                   <span className="eyebrow text-[0.5rem] text-white/40">S{i + 1}</span>
+                  {/* Nothing at all until this sector is actually completed — just the S1/S2/S3
+                      label. A dash read as "no data" rather than "not driven yet". */}
                   <span className={`tnum font-timing text-sm font-bold ${sectorColourOnDark(sec)}`}>
-                    {sec.value || "–"}
+                    {sec.value}
                   </span>
                 </div>
                 {/* One solid bar per sector, the way F1 TV shows it — the sector's own
