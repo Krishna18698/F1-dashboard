@@ -110,6 +110,17 @@ export interface F1LiveDriver {
   team_name: string;
   full_name: string;
 }
+export interface SectorTime {
+  value: string; // e.g. "31.490" — empty while the sector is still being run
+  overallFastest: boolean; // purple: fastest anyone has gone in this sector
+  personalFastest: boolean; // green: this driver's own best
+  segments: number[]; // raw mini-sector Status codes (see MINI_SECTOR docs in the UI)
+}
+export interface SpeedTrap {
+  value: string;
+  overallFastest: boolean;
+  personalFastest: boolean;
+}
 export interface F1LiveRow {
   driver_number: number;
   position: number;
@@ -126,6 +137,8 @@ export interface F1LiveRow {
   grid: number; // starting grid position (0 = unknown) — for gained/lost indicator
   stints: { compound: string; laps: number; age: number; isNew: boolean; segment: number | null }[]; // full tyre history (strategy bar)
   weekendTyresLeft: { compound: string; left: number }[]; // fresh sets left vs. the weekend allocation
+  sectors: SectorTime[]; // S1/S2/S3 with F1's own purple/green flags
+  speeds: Record<string, SpeedTrap>; // I1 / I2 / FL / ST speed traps
 }
 export interface FastestLap {
   driver_number: number;
@@ -813,6 +826,14 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
         Retired?: boolean;
         Stopped?: boolean;
         KnockedOut?: boolean;
+        Sectors?: {
+          Value?: string;
+          PreviousValue?: string;
+          OverallFastest?: boolean;
+          PersonalFastest?: boolean;
+          Segments?: { Status?: number }[];
+        }[];
+        Speeds?: Record<string, { Value?: string; OverallFastest?: boolean; PersonalFastest?: boolean }>;
       };
       const stint = currentStint(n);
       const best = parseLapTime(t.BestLapTime?.Value);
@@ -833,6 +854,21 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
         grid: Number((app[n] as { GridPos?: string | number })?.GridPos ?? 0),
         stints: clampStintsToLaps(allStints(n), numberOfLaps),
         weekendTyresLeft: DRY_COMPOUNDS.map((c) => ({ compound: c, left: WEEKEND_ALLOCATION[c] })), // filled in below
+        // Per-sector timings straight from TimingData — ungated, so these work without a
+        // token too. `Value` empties out while a sector is being run and `PreviousValue`
+        // holds the last completed one, so fall back to it rather than flashing blank.
+        sectors: (t.Sectors ?? []).map((sec) => ({
+          value: sec?.Value || sec?.PreviousValue || "",
+          overallFastest: Boolean(sec?.OverallFastest),
+          personalFastest: Boolean(sec?.PersonalFastest),
+          segments: (sec?.Segments ?? []).map((g) => Number(g?.Status ?? 0)),
+        })),
+        speeds: Object.fromEntries(
+          Object.entries(t.Speeds ?? {}).map(([k, v]) => [
+            k,
+            { value: v?.Value ?? "", overallFastest: Boolean(v?.OverallFastest), personalFastest: Boolean(v?.PersonalFastest) },
+          ]),
+        ),
       };
       if (best != null && best < fastestMs && t.BestLapTime?.Value) {
         fastestMs = best;
