@@ -311,6 +311,12 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
   // clock use real boundaries instead of assumed durations, and lets the inter-segment break
   // be MEASURED from this very session rather than assumed.
   let statusHistory: { ts: number; status: string }[] = [];
+  // Last COMPLETED sector reading per driver. F1 blanks Value (and PreviousValue) for every
+  // sector the moment a driver starts a new lap, so a card showing the raw feed empties out
+  // to "-" for most of each lap and refills as sectors are set — which reads as flickering.
+  // F1's own graphics keep the previous lap's sectors on screen until new ones replace them;
+  // this is that memory.
+  let lastSectors: Record<string, { value: string; overallFastest: boolean; personalFastest: boolean }[]> = {};
   // When the race's own LapCount first reached TotalLaps (the chequered flag, from real lap
   // data — not a schedule guess). SessionStatus/ArchiveStatus can lag well behind the actual
   // flag (podium/post-race coverage keeps the session "Started" for a while) — this is a more
@@ -343,6 +349,7 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
       segmentStartedTs = null;
       sessionFinishedTs = null;
       statusHistory = [];
+      lastSectors = {};
       raceLapsCompleteAt = null;
       telBuffer = [];
       endedAt = null;
@@ -879,12 +886,26 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
           OverallFastest?: boolean;
           PersonalFastest?: boolean;
           Segments?: unknown;
-        }>(t.Sectors).map((sec) => ({
-          value: sec?.Value || sec?.PreviousValue || "",
-          overallFastest: Boolean(sec?.OverallFastest),
-          personalFastest: Boolean(sec?.PersonalFastest),
-          segments: asList<{ Status?: number }>(sec?.Segments).map((g) => Number(g?.Status ?? 0)),
-        })),
+        }>(t.Sectors).map((sec, si) => {
+          const live = sec?.Value || sec?.PreviousValue || "";
+          const remembered = lastSectors[n]?.[si];
+          if (live) {
+            (lastSectors[n] ??= [])[si] = {
+              value: live,
+              overallFastest: Boolean(sec?.OverallFastest),
+              personalFastest: Boolean(sec?.PersonalFastest),
+            };
+          }
+          const shown = live ? lastSectors[n][si] : remembered;
+          return {
+            value: shown?.value ?? "",
+            overallFastest: shown?.overallFastest ?? false,
+            personalFastest: shown?.personalFastest ?? false,
+            // Segments always reflect the CURRENT lap in progress — that's the point of the
+            // mini-sector bars — so they're never carried over.
+            segments: asList<{ Status?: number }>(sec?.Segments).map((g) => Number(g?.Status ?? 0)),
+          };
+        }),
         speeds: Object.fromEntries(
           Object.entries(t.Speeds ?? {}).map(([k, v]) => [
             k,

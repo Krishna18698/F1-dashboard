@@ -74,8 +74,10 @@ export default function WeekendSchedule({
                   {s.short}
                 </span>
                 {isLive ? (
-                  <span className="flex items-center gap-1 rounded-sm bg-red px-1.5 py-0.5 text-[0.5rem] font-bold tracking-wide text-white">
-                    <span className="live-dot h-1.5 w-1.5 rounded-full bg-white" />
+                  /* No filled pill here — the pulsing dot is the signal, and it already
+                     outranks the flat NEXT chip without competing with it. */
+                  <span className="flex items-center gap-1 text-[0.5rem] font-bold tracking-wide text-white">
+                    <span className="live-dot h-1.5 w-1.5 rounded-full bg-red" />
                     LIVE
                   </span>
                 ) : isNext ? (
