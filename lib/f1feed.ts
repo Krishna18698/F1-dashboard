@@ -447,6 +447,14 @@ export interface F1LiveRow {
    *  identical whether a session is live or being replayed from the archive. */
   sectors: { value: string; overallFastest: boolean; personalFastest: boolean; segments: number[] }[];
 }
+/** A mini-sector that F1 has already reported but the car dots haven't reached yet. */
+export interface SegmentEvent {
+  t: number; // session-relative ms, on the same clock as the position frames
+  n: number; // driver number
+  s: number; // sector index 0-2
+  i: number; // mini-sector index
+  c: number; // status code
+}
 export interface F1LiveDriver {
   driver_number: number;
   name_acronym: string;
@@ -471,6 +479,7 @@ export interface F1LiveState {
   qualifyingRemainingMs: number | null;
   formationLap: boolean;
   durationMs: number;
+  segmentEvents?: SegmentEvent[];
 }
 
 function mergeUpto(deltas: Delta[], uptoMs: number): Record<string, Record<string, unknown>> {
@@ -735,10 +744,9 @@ export async function getF1LiveState(
       grid: Number((appState[numStr]?.GridPos as string | number) ?? 0),
       stints,
       weekendTyresLeft: weekendMap[numStr] ?? DRY_COMPOUNDS.map((c) => ({ compound: c, left: WEEKEND_ALLOCATION[c] })),
-      // Replayed deltas are merged up to `infoUptoMs` by mergeUpto, so unlike the live relay
-      // there's no sparse-update problem to guard against here — the merged state already
-      // holds every sector seen so far. Still normalized to exactly three dense slots so the
-      // UI can't receive holes (which serialize as null).
+      // Read from the merge at `infoUptoMs` — the same instant the car dots are rendering —
+      // so a mini-sector lights up exactly as the car reaches it on screen, not 20s early.
+      // Normalized to three dense slots so the UI can't receive holes (they serialize null).
       sectors: (() => {
         const raw = t.Sectors as unknown;
         const list = Array.isArray(raw)
@@ -775,6 +783,35 @@ export async function getF1LiveState(
     if (best != null && best < fastestMs && bt?.Value) {
       fastestMs = best;
       fastestLap = { driver_number: num, tla: s.drivers[numStr]?.Tla ?? numStr, time: bt.Value, lap: Number(bt.Lap ?? 0) };
+    }
+  }
+
+  // Mini-sector transitions still "in flight": they've been published by F1 but the car dots
+  // haven't reached them yet (the map renders `infoUptoMs`, data exists up to `uptoMs`).
+  // Shipping them lets the client light each segment at the exact moment the dot arrives,
+  // instead of the whole set stepping forward once per poll — which is what made the bars
+  // visibly trail the car between polls.
+  const segmentEvents: { t: number; n: number; s: number; i: number; c: number }[] = [];
+  if (uptoMs > infoUptoMs) {
+    for (const dlt of s.timing) {
+      if (dlt.ts <= infoUptoMs) continue;
+      if (dlt.ts > uptoMs) break;
+      for (const [numStr, upd] of Object.entries(dlt.lines)) {
+        const secs = (upd as { Sectors?: unknown }).Sectors;
+        if (!secs || typeof secs !== "object") continue;
+        for (const [sk, sv] of Object.entries(secs as Record<string, unknown>)) {
+          const si = Number(sk);
+          const segs = (sv as { Segments?: unknown })?.Segments;
+          if (Number.isNaN(si) || !segs || typeof segs !== "object") continue;
+          for (const [gk, gv] of Object.entries(segs as Record<string, { Status?: number }>)) {
+            const gi = Number(gk);
+            const code = Number(gv?.Status ?? NaN);
+            if (!Number.isNaN(gi) && !Number.isNaN(code)) {
+              segmentEvents.push({ t: dlt.ts, n: +numStr, s: si, i: gi, c: code });
+            }
+          }
+        }
+      }
     }
   }
 
@@ -910,6 +947,7 @@ export async function getF1LiveState(
     qualifyingRemainingMs,
     formationLap,
     durationMs: s.durationMs,
+    segmentEvents,
   };
 }
 

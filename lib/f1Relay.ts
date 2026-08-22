@@ -1118,14 +1118,11 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
           sectorHistory = sectorHistory.filter((h) => h.t >= cutoff);
         }
       }
-      if (asOfMs) {
-        let pick: (typeof sectorHistory)[number] | undefined;
-        for (const h of sectorHistory) {
-          if (h.t <= asOfMs) pick = h;
-          else break;
-        }
-        if (pick) for (const n of nums) if (pick.byDriver[n]) rows[+n].sectors = pick.byDriver[n];
-      }
+      // NOTE: history is recorded but deliberately NOT rewound to `asOfMs`. Mini-sectors are
+      // the one field that should land the instant F1 reports them — delaying them to the
+      // map's playback clock made them visibly trail the car on track. The buffer is kept so
+      // this can be revisited without re-plumbing anything.
+      void asOfMs;
     }
 
     return {

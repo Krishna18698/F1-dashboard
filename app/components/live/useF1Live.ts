@@ -47,6 +47,7 @@ interface ApiResponse {
   source?: "token" | "free" | "visitor" | "free-live";
   mapAvailable?: boolean;
   sessionEnded?: boolean;
+  segmentEvents?: { t: number; n: number; s: number; i: number; c: number }[];
   mode?: LiveState["mode"];
   circuitKey?: number;
   session?: { location: string; session_name: string };
@@ -150,6 +151,7 @@ function toState(r: ApiResponse): LiveState {
     source: r.source,
     mapAvailable: r.mapAvailable,
     sessionEnded: r.sessionEnded,
+    segmentEvents: r.segmentEvents ?? [],
     circuitKey: r.circuitKey,
     frames: [], // positions live in framesStore now, not React state (keeps the map smooth)
     mode: r.mode ?? "race",

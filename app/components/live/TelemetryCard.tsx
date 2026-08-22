@@ -55,12 +55,17 @@ export default function TelemetryCard({
   driver,
   onClose,
   sectors,
+  segmentEvents,
   showTelemetry = true,
 }: {
   num: number;
   driver?: Driver;
   onClose: () => void;
   sectors?: { value: string; overallFastest: boolean; personalFastest: boolean; segments: number[] }[];
+  /** Mini-sectors F1 has already published that the car dots haven't reached yet. Applied
+   *  here, on the map's own playback clock, so a segment lights exactly as the dot arrives. */
+  segmentEvents?: { t: number; n: number; s: number; i: number; c: number }[];
+  num2?: never;
   /** CarData is token-gated; without it the live readout is empty, but the SECTORS below
    *  still work (TimingData is ungated) — so the card renders without the telemetry strip
    *  rather than not rendering at all. */
@@ -99,6 +104,30 @@ export default function TelemetryCard({
     const id = setInterval(tick, 120);
     return () => clearInterval(id);
   }, [num]);
+
+  // Re-evaluated on a fast timer against getPlaybackT() — the exact instant the dots are
+  // rendering. `sectors` from the server is the state AT that instant as of the last poll;
+  // any transition that has since become due is applied here, so the bars advance in step
+  // with the car instead of jumping forward once per poll.
+  const [liveSegs, setLiveSegs] = useState<number[][] | null>(null);
+  useEffect(() => {
+    const id = setInterval(() => {
+      const pt = getPlaybackT();
+      const base = (sectors ?? []).map((x) => [...(x?.segments ?? [])]);
+      if (!base.length) {
+        setLiveSegs(null);
+        return;
+      }
+      if (pt && segmentEvents?.length) {
+        for (const e of segmentEvents) {
+          if (e.n !== num || e.t > pt) continue;
+          (base[e.s] ??= [])[e.i] = e.c;
+        }
+      }
+      setLiveSegs(base);
+    }, 120);
+    return () => clearInterval(id);
+  }, [sectors, segmentEvents, num]);
 
   const color = hex(driver?.team_colour);
   const throttle = Math.max(0, Math.min(100, v?.throttle ?? 0));
@@ -180,7 +209,7 @@ export default function TelemetryCard({
                 </div>
                 <div className="mt-1 flex gap-0.5">
                   {Array.from({ length: segCount }, (_, j) => {
-                    const code = sec.segments?.[j];
+                    const code = (liveSegs?.[i] ?? sec.segments)?.[j];
                     return (
                       <span
                         key={j}
