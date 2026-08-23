@@ -7,6 +7,7 @@ import {
   getSchedule,
   getSeasonWinners,
   getStandingsRound,
+  hasRaceResult,
   weekendSessions,
 } from "@/lib/jolpica";
 import { getPaddockIntel } from "@/lib/news";
@@ -25,10 +26,14 @@ import LiveSection from "./components/live/LiveSection";
 
 // Dynamic: the hero consults the live relay to decide when a finished race weekend should
 // flip to the next round. Standings/news stay cached at the fetch layer.
+import { applyToConstructors, applyToDrivers, pointsFor } from "@/lib/championshipPoints";
+import { getRelayResults } from "@/lib/f1Relay";
+import { getStaticResults } from "@/lib/f1feed";
+
 export const dynamic = "force-dynamic";
 
 export default async function Page() {
-  const [rawNext, drivers, constructors, schedule, intel, standingsRound, winners, endedWeekend, liveStatus] =
+  const [rawNext, rawDrivers, rawConstructors, schedule, intel, standingsRound, winners, endedWeekend, liveStatus] =
     await Promise.all([
       getNextRace(),
       getDriverStandings().catch(() => []),
@@ -61,6 +66,50 @@ export default async function Page() {
     getPrevConstructorStandings(standingsRound - 1).catch(() => ({})),
   ]);
 
+
+  // The round whose result the page is deciding about, and whether Jolpica has it yet.
+  // `standingsRound` cannot answer that: on a SPRINT weekend Jolpica stamps its standings with
+  // the round as soon as it ingests the SPRINT, so straight after the Dutch GP it read
+  // "round 12" while holding only sprint points — the projection, which did have the race, was
+  // discarded as not-ahead and the page showed pre-race totals. Ask about the race directly.
+  const weekendRound =
+    (liveStatus && "round" in liveStatus ? (liveStatus.round ?? 0) : 0) || endedWeekend?.round || 0;
+  const raceIngested = weekendRound > 0 ? await hasRaceResult(weekendRound) : true;
+  // What the official standings already account for — the two sources below compare to this.
+  const lastScoredRound = raceIngested ? weekendRound : weekendRound - 1;
+
+  // Whichever source has the round FIRST wins. Fastest to slowest:
+  //   1. the live projection (ChampionshipPrediction) — applied client-side in the tables,
+  //      but token-gated and only served while the relay still holds the session;
+  //   2. this: the official totals plus the classification we already have, which needs no
+  //      token and keeps working long after the relay has let the session go;
+  //   3. Jolpica's official numbers, hours later, which then supersede both.
+  // Without step 2 the standings fell back to PRE-RACE totals the moment the relay's grace
+  // window closed, and stayed wrong until Jolpica caught up.
+  let drivers = rawDrivers;
+  let constructors = rawConstructors;
+  try {
+    const finished = (await getRelayResults()) ?? (await getStaticResults());
+    // Only a session that has actually finished, and only one Jolpica is still missing.
+    if (finished?.complete && finished.mode === "race" && !raceIngested && finished.top?.length) {
+      // `mode` is "race" for a sprint too, so read the name — awarding full race points for a
+      // sprint would silently inflate the table by up to 17 points a car.
+      const sprint = /sprint/i.test(finished.session_name ?? "");
+      const gained = pointsFor(finished.top, sprint);
+      const teamOf: Record<string, string> = {};
+      // LAST constructor, not the first: Jolpica lists every team a driver has raced for this
+      // season in order, so a mid-season switch (2026: LAW is "RB F1 Team THEN Red Bull") makes
+      // [0] the team he LEFT. Taking it credited his points to the old team, which showed up as
+      // Red Bull 180 / RB 72 against F1's own 186 / 66.
+      for (const d of rawDrivers) {
+        if (d.Driver.code) teamOf[d.Driver.code] = d.Constructors[d.Constructors.length - 1]?.name ?? "";
+      }
+      drivers = applyToDrivers(rawDrivers, gained);
+      constructors = applyToConstructors(rawConstructors, gained, teamOf);
+    }
+  } catch {
+    // Any failure here just leaves the official numbers in place.
+  }
   // Flip only once the race is actually NOT live for 5 min (from the feed) — never on a
   // wall-clock guess, so an extended/red-flagged race won't roll over early. Advances the
   // hero, weekend schedule and calendar to the next round together.
@@ -109,7 +158,7 @@ export default async function Page() {
         <div className="grid gap-10 lg:grid-cols-3">
           <Section title="Drivers'" emphasis="Championship" hint="2026 · latest round">
             {drivers.length ? (
-              <DriversTable standings={drivers} round={standingsRound} prev={prevDrivers} />
+              <DriversTable standings={drivers} resultsRound={lastScoredRound} prev={prevDrivers} />
             ) : (
               <p className="text-sm text-muted">Standings unavailable right now.</p>
             )}
@@ -117,7 +166,7 @@ export default async function Page() {
 
           <Section title="Constructors'" emphasis="Championship" hint="2026 season">
             {constructors.length ? (
-              <ConstructorsTable standings={constructors} round={standingsRound} prev={prevConstructors} />
+              <ConstructorsTable standings={constructors} resultsRound={lastScoredRound} prev={prevConstructors} />
             ) : (
               <p className="text-sm text-muted">Standings unavailable right now.</p>
             )}

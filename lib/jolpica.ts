@@ -216,6 +216,29 @@ export async function getStandingsRound(): Promise<number> {
   }
 }
 
+/**
+ * Has Jolpica actually published the RACE result for this round yet?
+ *
+ * The direct question, asked directly — rather than inferred from the standings' `round`,
+ * which on a sprint weekend advances as soon as the SPRINT is ingested and so claims the
+ * round while the race is still missing. Short revalidate because it gates whether we add a
+ * session's points ourselves: were this staler than the standings it guards, the race could
+ * be counted twice — once by Jolpica, once by us.
+ */
+export async function hasRaceResult(round: number): Promise<boolean> {
+  if (round < 1) return false;
+  try {
+    const d = await get<{ MRData: { RaceTable: { Races: { Results?: unknown[] }[] } } }>(
+      `/${SEASON}/${round}/results/`,
+      120,
+    );
+    return (d.MRData.RaceTable.Races?.[0]?.Results?.length ?? 0) > 0;
+  } catch {
+    // Unknown — treat as ingested so we never double-count.
+    return true;
+  }
+}
+
 export async function getSchedule(): Promise<Race[]> {
   const d = await get<{ MRData: { RaceTable: { Races: Race[] } } }>(`/${SEASON}/`);
   return d.MRData.RaceTable.Races ?? [];

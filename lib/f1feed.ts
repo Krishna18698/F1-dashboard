@@ -222,6 +222,10 @@ interface SessionCache {
   lap: { ts: number; data: Record<string, unknown> }[];
   track: { ts: number; status: string }[];
   rc: { ts: number; idx: string; msg: RcMessage }[]; // race control messages, flattened
+  /** SessionInfo.GmtOffset ("02:00:00"), for race control's local wall-clock announcements.
+   *  Null when the archive doesn't carry SessionInfo — the restart countdown is then omitted
+   *  rather than guessed. */
+  gmtOffset: string | null;
   qp: { ts: number; part: number }[]; // QualifyingPart transitions (1=Q1, 2=Q2, 3=Q3)
   sessionStartedTs: number | null; // SessionStatus:"Started" — lights-out/race-start instant
   /** Every SessionStatus transition with its session-relative timestamp. Qualifying emits a
@@ -252,7 +256,7 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
   // Completed session → static, cache forever. Live → 2s TTL so polls see fresh data.
   if (cached && (!live || Date.now() - cached.loadedAt < 2000)) return cached;
 
-  const [driverTxt, timingTxt, appTxt, posTxt, lapTxt, trackTxt, carTxt, rcTxt, qpTxt] = await Promise.all([
+  const [driverTxt, timingTxt, appTxt, posTxt, lapTxt, trackTxt, carTxt, rcTxt, qpTxt, infoTxt] = await Promise.all([
     fetchText(sessionPath, "DriverList.jsonStream").catch(() => ""),
     fetchText(sessionPath, "TimingData.jsonStream").catch(() => ""),
     fetchText(sessionPath, "TimingAppData.jsonStream").catch(() => ""),
@@ -262,7 +266,12 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
     fetchText(sessionPath, "CarData.z.jsonStream").catch(() => ""),
     fetchText(sessionPath, "RaceControlMessages.jsonStream").catch(() => ""),
     fetchText(sessionPath, "SessionData.jsonStream").catch(() => ""),
+    fetchText(sessionPath, "SessionInfo.json").catch(() => ""),
   ]);
+  let gmtOffset: string | null = null;
+  try {
+    gmtOffset = (JSON.parse(infoTxt.replace(/^\ufeff/, "")) as { GmtOffset?: string }).GmtOffset ?? null;
+  } catch {}
 
   const drivers: Record<string, RawDriver> = {};
   for (const raw of driverTxt.replace(/^﻿/, "").split(/\r?\n/)) {
@@ -391,6 +400,7 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
     track,
     rc,
     qp,
+    gmtOffset,
     sessionStartedTs,
     statusHist,
     car,
@@ -487,6 +497,11 @@ export interface F1LiveState {
   currentLap: number;
   fastestLap: { driver_number: number; tla: string; time: string; lap: number } | null;
   trackStatus: string | null;
+  /** F1 SessionStatus at this instant: "Started" | "Aborted" (red flag) | "Finished" | ... */
+  sessionStatus: string | null;
+  /** Announced restart instant while suspended, as an epoch the client can count down to.
+   *  Replay runs on a virtual clock, so this is rebased onto wall time. */
+  suspendedRestartMs: number | null;
   telFrames: { t: number; c: Record<string, [number, number, number, number]> }[];
   qualifyingPart: number | null;
   qualifyingRemainingMs: number | null;
@@ -952,6 +967,61 @@ export async function getF1LiveState(
     if (l.data.TotalLaps != null) totalLaps = Number(l.data.TotalLaps);
   }
 
+  // --- Red flag, restart countdown and extra formation laps ---------------------------
+  // Ports the logic from f1Relay so the REPLAY path exercises it too — the two engines keep
+  // separate F1LiveState shapes, so without this a replay showed none of it and a test could
+  // not tell a broken fix from an absent one.
+  //
+  // SessionStatus is authoritative for a suspension. TrackStatus is not: it returns to "1"
+  // (green) the moment marshals clear the track, while the race is still stopped.
+  let sessionStatus: string | null = null;
+  for (const h of s.statusHist) {
+    if (h.ts > infoUptoMs) break;
+    sessionStatus = h.status;
+  }
+
+  // Race control announces the restart as circuit-LOCAL wall clock, with no date and no zone
+  // ("RACE WILL RESUME AT 15:33"). The message's own Utc stamp supplies the date and GmtOffset
+  // the zone. The result is then rebased onto wall time: a replay runs a virtual clock, so an
+  // absolute epoch out of the archive would count down to an instant already long past.
+  let suspendedRestartMs: number | null = null;
+  if (s.gmtOffset && sessionStatus === "Aborted") {
+    const off = offsetMs(s.gmtOffset);
+    let newest = -Infinity;
+    let targetRel: number | null = null;
+    for (const { ts, msg } of s.rc) {
+      if (ts > infoUptoMs) break;
+      const hit = /RESUME(?:D)? AT (\d{1,2}):(\d{2})/i.exec(msg.Message ?? "");
+      if (!hit || !msg.Utc) continue;
+      const sentAbs = Date.parse(msg.Utc + "Z");
+      if (!Number.isFinite(sentAbs) || sentAbs <= newest) continue;
+      const localDay = new Date(sentAbs + off);
+      const targetAbs =
+        Date.UTC(localDay.getUTCFullYear(), localDay.getUTCMonth(), localDay.getUTCDate(), +hit[1], +hit[2]) - off;
+      targetRel = ts + (targetAbs - sentAbs);
+      newest = sentAbs;
+    }
+    if (targetRel != null) suspendedRestartMs = Date.now() + (targetRel - infoUptoMs);
+  }
+
+  // Formation laps that follow a restart. The plain `formationLap` above cannot see these:
+  // it is pinned to sessionStartedTs (lights out), so it is false ever after. F1 states them
+  // outright, so read its words instead of inferring. See the matching note in f1Relay for
+  // why the window closes off the lap counter.
+  let restartForming = false;
+  if (m === "race" && sessionStatus === "Started") {
+    let newest = -Infinity;
+    let lapOf: number | null = null;
+    for (const { ts, msg } of s.rc) {
+      if (ts > infoUptoMs) break;
+      if (!/EXTRA FORMATION LAP|STANDING START/i.test(msg.Message ?? "")) continue;
+      if (ts <= newest) continue;
+      newest = ts;
+      lapOf = Number(msg.Lap ?? 0) || null;
+    }
+    if (lapOf != null) restartForming = currentLap <= lapOf + 1;
+  }
+
   // Track status at this instant (yellow/SC/red map tint).
   let trackStatus: string | null = null;
   for (const t of s.track) {
@@ -1082,7 +1152,9 @@ export async function getF1LiveState(
     qualifyingRemainingMs,
     qualifyingSegmentEnded,
     nextQualifyingSegmentInMs,
-    formationLap,
+    formationLap: formationLap || restartForming,
+    sessionStatus,
+    suspendedRestartMs,
     durationMs: s.durationMs,
     segmentEvents,
     lapResets,

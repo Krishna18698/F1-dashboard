@@ -19,15 +19,15 @@ function projectedPoints(name: string, points?: Record<string, number>): number 
 
 export default function ConstructorsTable({
   standings,
-  round,
+  resultsRound,
   prev,
 }: {
   standings: ConstructorStanding[];
-  round: number;
+  resultsRound: number;
   prev?: Record<string, PrevStanding>;
 }) {
   const champ = useChampionship();
-  const useProjection = champ.available && (champ.round ?? 0) > round && !!champ.constructorPoints;
+  const useProjection = champ.available && (champ.round ?? 0) > resultsRound && !!champ.constructorPoints;
 
   const rows = useMemo(() => {
     if (!useProjection) return standings;

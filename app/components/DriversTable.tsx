@@ -8,17 +8,23 @@ import Movement from "./Movement";
 
 export default function DriversTable({
   standings,
-  round,
+  resultsRound,
   prev,
 }: {
   standings: DriverStanding[];
-  round: number;
+  resultsRound: number;
   prev?: Record<string, PrevStanding>;
 }) {
   const champ = useChampionship();
-  // Use the live projection only while it's AHEAD of Jolpica (instant post-race);
-  // once Jolpica processes the round, fall back to its official numbers.
-  const useProjection = champ.available && (champ.round ?? 0) > round && !!champ.driverPoints;
+  // Use the live projection only while it's AHEAD of Jolpica (instant post-race); once
+  // Jolpica ingests the race, fall back to its official numbers.
+  //
+  // Compared against the last round Jolpica has RACE RESULTS for, not against its standings
+  // round. Those differ on a sprint weekend: Jolpica stamps the standings with the round as
+  // soon as it ingests the SPRINT, so after the 2026 Dutch GP it reported "round 12" holding
+  // only sprint points, this test read 12 > 12 as false, and the projection — which did have
+  // the race — was thrown away in favour of pre-race totals.
+  const useProjection = champ.available && (champ.round ?? 0) > resultsRound && !!champ.driverPoints;
 
   const rows = useMemo(() => {
     if (!useProjection) return standings;
