@@ -11,8 +11,7 @@ import {
   weekendSessions,
 } from "@/lib/jolpica";
 import { getPaddockIntel } from "@/lib/news";
-import { getEndedWeekend } from "@/lib/f1Relay";
-import { getLiveStatusData } from "@/lib/liveStatus";
+import { getLiveStatusData, LiveStatusData } from "@/lib/liveStatus";
 import { requestNow } from "@/lib/now";
 import Hero from "./components/Hero";
 import WeekendSchedule from "./components/WeekendSchedule";
@@ -33,7 +32,7 @@ import { getStaticResults } from "@/lib/f1feed";
 export const dynamic = "force-dynamic";
 
 export default async function Page() {
-  const [rawNext, rawDrivers, rawConstructors, schedule, intel, standingsRound, winners, endedWeekend, liveStatus] =
+  const [rawNext, rawDrivers, rawConstructors, schedule, intel, standingsRound, winners, liveStatus] =
     await Promise.all([
       getNextRace(),
       getDriverStandings().catch(() => []),
@@ -42,18 +41,6 @@ export default async function Page() {
       getPaddockIntel().catch(() => []),
       getStandingsRound().catch(() => 0),
       getSeasonWinners().catch(() => ({})),
-      // Only the live feed knows when the race is REALLY over (handles red flags / extensions).
-      // Works with or without a token now (SessionInfo/SessionStatus are ungated), so the
-      // tokenless deploy gets the same accurate weekend flip too. It used to be skipped
-      // entirely without a token, so it now costs a relay connection on a cold start where it
-      // previously cost nothing — capped tighter than the other relay calls because this only
-      // changes anything during the 5 minutes after a race ends, which isn't worth making
-      // every other page load wait on. A warm instance reuses the connection and returns
-      // instantly; a timeout just means the hero flips on the next render instead.
-      Promise.race([
-        getEndedWeekend().catch(() => null),
-        new Promise<null>((r) => setTimeout(() => r(null), 1200)),
-      ]),
       // Seeds the hero/weekend-schedule "live" badge so the first client render already
       // reflects reality instead of flashing the countdown before the first client poll lands.
       getLiveStatusData().catch(() => ({ live: false })),
@@ -72,8 +59,10 @@ export default async function Page() {
   // the round as soon as it ingests the SPRINT, so straight after the Dutch GP it read
   // "round 12" while holding only sprint points — the projection, which did have the race, was
   // discarded as not-ahead and the page showed pre-race totals. Ask about the race directly.
+  // Falls back to the schedule's current weekend, so the computed standings below still work
+  // when the relay is unreachable and liveStatus came back bare.
   const weekendRound =
-    (liveStatus && "round" in liveStatus ? (liveStatus.round ?? 0) : 0) || endedWeekend?.round || 0;
+    (liveStatus && "round" in liveStatus ? (liveStatus.round ?? 0) : 0) || Number(rawNext?.round ?? 0) || 0;
   const raceIngested = weekendRound > 0 ? await hasRaceResult(weekendRound) : true;
   // What the official standings already account for — the two sources below compare to this.
   const lastScoredRound = raceIngested ? weekendRound : weekendRound - 1;
@@ -113,9 +102,61 @@ export default async function Page() {
   // Flip only once the race is actually NOT live for 5 min (from the feed) — never on a
   // wall-clock guess, so an extended/red-flagged race won't roll over early. Advances the
   // hero, weekend schedule and calendar to the next round together.
+  // The hero must ALWAYS be counting down to something — it may never sit on a weekend whose
+  // sessions are all in the past with no timer. Two rules, in order of precision:
+  //
+  //  1. The feed's own end instant. `liveStatus` already carries it (F1's "Finished" stamp,
+  //     not this process's idea of when it noticed), so this needs no extra relay connection.
+  //     It used to come from getEndedWeekend() wrapped in a 1200ms Promise.race — a cold
+  //     serverless instance cannot open a SignalR connection that fast, so in production it
+  //     lost that race on essentially every render and the hero never flipped at all, sitting
+  //     on the finished weekend showing "Weekend complete".
+  //  2. A pure-schedule guarantee, so the flip happens even with no feed at all: once every
+  //     session of the weekend is comfortably past, move on regardless.
+  //
+  // Both wait out WEEKEND_FLIP_MS first, which is the window where the hero deliberately
+  // still shows the just-finished weekend and its results before shifting to the upcoming one.
+  const WEEKEND_FLIP_MS = 300_000;
+  const now = requestNow();
   let nextRace = rawNext;
-  if (endedWeekend?.flipReady && nextRace && Number(nextRace.round) <= endedWeekend.round) {
-    nextRace = schedule.find((r) => Number(r.round) > endedWeekend.round) ?? nextRace;
+
+  const status = liveStatus as LiveStatusData;
+  const endedRound =
+    !status.live &&
+    (status.type ?? "").toLowerCase() === "race" &&
+    !/sprint/i.test(status.name ?? "") &&
+    status.endedAt != null &&
+    now >= status.endedAt + WEEKEND_FLIP_MS
+      ? (status.round ?? 0)
+      : 0;
+  if (endedRound > 0 && nextRace && Number(nextRace.round) <= endedRound) {
+    nextRace = schedule.find((r) => Number(r.round) > endedRound) ?? nextRace;
+  }
+
+  // Backstop: whatever the feed says (or doesn't), never leave the hero on a weekend that is
+  // entirely over. The last session is the race itself, so allow a generous run time before
+  // calling it done, then the same results window.
+  const RACE_RUN_MS = 3 * 3600_000;
+  if (nextRace) {
+    const sessions = weekendSessions(nextRace);
+    const lastStart = Date.parse(sessions[sessions.length - 1]?.iso ?? "");
+    if (Number.isFinite(lastStart) && now > lastStart + RACE_RUN_MS + WEEKEND_FLIP_MS) {
+      nextRace = schedule.find((r) => Number(r.round) > Number(nextRace!.round)) ?? nextRace;
+    }
+  }
+
+  // Absolute guarantee: the hero is NEVER left without something to count down to. If the
+  // selected weekend has no session still ahead of it and nothing is on track, move on — a
+  // card reading "Weekend complete" with a dead timer is never an acceptable resting state.
+  // Gated on `live` so a race running long (or red-flagged) is never cut short while the feed
+  // can still see it; if the feed is unreachable entirely, flipping beats a dead card.
+  //
+  // Also gated on the end instant being UNKNOWN. When the feed does report one, rule 1 owns
+  // the decision and deliberately holds the just-finished weekend for WEEKEND_FLIP_MS so its
+  // results get their moment — firing here instead would skip that window entirely.
+  const endUnknown = status.endedAt == null;
+  if (nextRace && !status.live && endUnknown && weekendSessions(nextRace).every((x) => Date.parse(x.iso) <= now)) {
+    nextRace = schedule.find((r) => Number(r.round) > Number(nextRace!.round)) ?? nextRace;
   }
 
   return (
