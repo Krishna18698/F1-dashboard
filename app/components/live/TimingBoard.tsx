@@ -55,6 +55,34 @@ function useCountdown(remainingMs: number | null | undefined): string | null {
   return `${Math.floor(totalSec / 60)}:${String(totalSec % 60).padStart(2, "0")}`;
 }
 
+/** Same ticker as above, but counting down to an ABSOLUTE instant rather than a remaining
+ *  duration. The clock is read inside the interval callback, never during render — reading it
+ *  in the render body is impure and produces unstable output across incidental re-renders.
+ *  Red-flag stoppages routinely run past an hour, so this grows an hours field rather than
+ *  reporting "94:12". */
+function useCountdownTo(atMs: number | null | undefined): string | null {
+  const [display, setDisplay] = useState<number | null>(null);
+  const target = useRef<number | null>(null);
+
+  useEffect(() => {
+    target.current = atMs ?? null;
+  }, [atMs]);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      setDisplay(target.current != null ? Math.max(0, target.current - Date.now()) : null);
+    }, 500);
+    return () => clearInterval(id);
+  }, []);
+
+  if (display == null) return null;
+  const totalSec = Math.floor(display / 1000);
+  const mm = Math.floor(totalSec / 60) % 60;
+  const ss = String(totalSec % 60).padStart(2, "0");
+  const hh = Math.floor(totalSec / 3600);
+  return hh > 0 ? `${hh}:${String(mm).padStart(2, "0")}:${ss}` : `${mm}:${ss}`;
+}
+
 /**
  * Driver Live Tracker — a clean running order: position, driver, gap to leader + interval
  * (race) or best lap + gap (quali/practice). The richer strategy view lives in the Tyre Tracker.
@@ -75,6 +103,9 @@ export default function TimingBoard({
   nextQualifyingSegmentInMs,
   sprintQuali,
   knockedOut,
+  suspended,
+  restartAtMs,
+  formationLap,
   selectedNum,
   onSelect,
 }: {
@@ -92,12 +123,28 @@ export default function TimingBoard({
   nextQualifyingSegmentInMs?: number | null;
   sprintQuali?: boolean;
   knockedOut?: Set<number>;
+  /** Race is red-flagged and stopped (F1 SessionStatus "Aborted"). */
+  suspended?: boolean;
+  /** Announced restart instant, epoch ms — drives the countdown while suspended. */
+  restartAtMs?: number | null;
+  /** Field is circulating but not racing — the pre-race formation lap, or one of the extra
+   *  formation laps that follow a red-flag restart. */
+  formationLap?: boolean;
   selectedNum?: number | null;
   onSelect?: (num: number | null) => void;
 }) {
   const isRace = mode === "race";
+  // While the race is stopped, gap/interval are frozen at the instant of the flag and F1 sends
+  // the leader a literal "LAP 3" in the gap field — so the timing column is worse than useless.
+  // Blank it entirely and leave a plain running order until the race actually resumes.
+  const redFlagged = isRace && suspended === true;
+  // Not racing, but moving — so the lap counter climbs and gaps look like a race when they are
+  // just queue spacing behind the safety car. Only shown when NOT suspended: a red flag is the
+  // louder state and the two should never stack.
+  const forming = isRace && !redFlagged && formationLap === true;
   const isQuali = mode === "quali";
   const countdown = useCountdown(qualifyingRemainingMs);
+  const restartIn = useCountdownTo(restartAtMs);
   const nextCountdown = useCountdown(nextQualifyingSegmentInMs);
   const segLabel = sprintQuali ? "SQ" : "Q";
   const fastest = [...laps.values()].reduce<number | null>((m, l) => {
@@ -120,12 +167,37 @@ export default function TimingBoard({
       ? "grid-cols-[2rem_1fr_4.5rem_3.5rem] sm:grid-cols-[2rem_1fr_repeat(3,4.25rem)_5rem_4rem]"
       : "grid-cols-[2rem_1fr_4.5rem_3.5rem]";
 
+  // Stretch to the bento row rather than sizing to content (the old `self-start`). At wider
+  // viewports the track map grows taller than the board's natural height, so a content-sized
+  // board ended ~30px above the Tyre Allocation card beside it and the two columns visibly
+  // failed to bottom out together. The rows below carry `grow`, so that slack is shared
+  // evenly across all 20-odd of them instead of pooling as dead space under the last one.
   return (
-    <div className="self-start">
+    <div className="flex min-h-0 flex-1 flex-col">
       <div className="mb-2 flex items-center gap-2">
         <span className="eyebrow block text-[0.6rem] text-muted">
           Driver Live <span className="text-red">Tracker</span>
         </span>
+        {redFlagged && (
+          /* The authoritative signal is SessionStatus "Aborted", NOT TrackStatus — the latter
+             goes back to "1" (green) as soon as marshals clear the wreck, while the race is
+             still stopped and the field is queued in the pit lane. */
+          <span className="flex items-center gap-1.5 rounded-sm bg-red px-1.5 py-0.5 text-[0.6rem] font-bold tracking-wider text-white">
+            <span className="live-dot h-1.5 w-1.5 rounded-full bg-white" />
+            RED FLAG · SUSPENDED
+          </span>
+        )}
+        {redFlagged && restartIn && (
+          <span className="text-[0.6rem] font-bold tracking-wider text-muted">
+            RESUMES IN <span className="tnum font-timing text-xs text-red">{restartIn}</span>
+          </span>
+        )}
+        {forming && (
+          <span className="flex items-center gap-1.5 rounded-sm bg-amber-400 px-1.5 py-0.5 text-[0.6rem] font-bold tracking-wider text-ink">
+            <span className="live-dot h-1.5 w-1.5 rounded-full bg-ink/70" />
+            FORMATION LAP
+          </span>
+        )}
         {isQuali && qualifyingPart && (
           /* A sprint weekend's segments are SQ1/SQ2/SQ3, not Q1/Q2/Q3 — same feed field,
              different session, and F1's own broadcast labels them separately.
@@ -157,14 +229,14 @@ export default function TimingBoard({
           </span>
         )}
       </div>
-      <div className="overflow-hidden rounded-lg border border-line">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-line">
         <div
           className={`grid ${cols} gap-2 border-b border-line bg-panel px-3 py-1.5 text-[0.6rem] font-bold tracking-wider text-muted`}
         >
           <span className="text-right">P</span>
           <span>Driver</span>
           {isRace ? (
-            <span className="text-right">Gap / Int</span>
+            <span className="text-right">{redFlagged ? "" : "Gap / Int"}</span>
           ) : (
             <>
               {showSectors && (
@@ -180,7 +252,7 @@ export default function TimingBoard({
           )}
         </div>
 
-        <ol className="divide-y divide-line">
+        <ol className="flex min-h-0 flex-1 flex-col divide-y divide-line">
           {order.map((num, i) => {
             const d = drivers.get(num);
             const pos = isRace ? (positions.get(num) ?? i + 1) : i + 1;
@@ -194,7 +266,7 @@ export default function TimingBoard({
               <li
                 key={num}
                 onClick={() => onSelect?.(isSel ? null : num)}
-                className={`grid ${cols} cursor-pointer items-center gap-2 px-2 py-1.5 transition-colors sm:px-3 sm:py-2 ${
+                className={`grid ${cols} grow cursor-pointer items-center gap-2 px-2 py-1.5 transition-colors sm:px-3 sm:py-2 ${
                   isSel
                     ? "bg-red/5 ring-1 ring-inset ring-red/30"
                     : inDanger
@@ -226,6 +298,11 @@ export default function TimingBoard({
                         DNF
                       </span>
                     </div>
+                  ) : redFlagged ? (
+                    /* Suspended: no timing at all. Everything F1 still sends in these fields is
+                       stale — frozen at the instant of the flag — so the running order stands
+                       on its own until the race resumes. */
+                    <span />
                   ) : (
                     <div className="text-right">
                       <span className="tnum block font-mono text-xs font-semibold">

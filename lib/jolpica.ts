@@ -4,6 +4,7 @@
  * Docs: https://github.com/jolpica/jolpica-f1
  */
 
+import { PRE_START_LIVE_MS } from "./liveWindow";
 const BASE = "https://api.jolpi.ca/ergast/f1";
 export const SEASON = "2026";
 
@@ -114,7 +115,7 @@ export function currentlyLiveWeekendSession(race: Race): WeekendSession | null {
     const start = Date.parse(s.iso);
     const duration = SESSION_DURATION_MS[s.short] ?? 60 * 60_000;
     const grace = POST_SESSION_GRACE_MS[s.short] ?? 5 * 60_000;
-    if (now >= start - 6 * 60_000 && now <= start + duration + grace) return s;
+    if (now >= start - PRE_START_LIVE_MS && now <= start + duration + grace) return s;
   }
   return null;
 }

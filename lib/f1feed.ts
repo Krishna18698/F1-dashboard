@@ -8,6 +8,7 @@
  * F1 sends incremental deltas, so we deep-merge lines up to a cutoff timestamp to
  * reconstruct state at any instant (which powers both replay and live polling).
  */
+import { PRE_START_LIVE_MS } from "./liveWindow";
 import zlib from "zlib";
 import { F1_LIVE } from "./f1liveConfig";
 
@@ -163,7 +164,7 @@ export async function resolveLiveSession(): Promise<ResolvedSession | null> {
   if (F1_LIVE.mode === "replay") return null;
   const now = Date.now();
   const live = (await flatSessions()).find(
-    (s) => now >= s.startMs - 6 * 60_000 && now <= s.endMs + 10 * 60_000,
+    (s) => now >= s.startMs - PRE_START_LIVE_MS && now <= s.endMs + 10 * 60_000,
   );
   return live ? { ...live, live: true, startWallMs: live.startMs } : null;
 }
@@ -1095,6 +1096,7 @@ export async function getStaticResults(): Promise<{
   session_name: string;
   mode: "race" | "quali" | "practice";
   complete: boolean;
+  live: boolean;
   endedAtMs: number;
   top: { pos: number; tla: string; team_colour: string; best: number | null; gap: string }[];
 } | null> {
@@ -1115,7 +1117,8 @@ export async function getStaticResults(): Promise<{
     const d = byNum.get(n);
     return { pos: r.position, tla: d?.name_acronym ?? String(n), team_colour: d?.team_colour ?? "", best: r.best, gap: r.gap_to_leader };
   });
-  return { session_name: session.name, mode: mode(session.type), complete: true, endedAtMs: session.endMs, top };
+  // Always a finished session — this picks the most recent one that has already ended.
+  return { session_name: session.name, mode: mode(session.type), complete: true, live: false, endedAtMs: session.endMs, top };
 }
 
 /**

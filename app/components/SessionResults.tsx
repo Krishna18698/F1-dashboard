@@ -15,6 +15,7 @@ interface Res {
   session_name?: string;
   mode?: "race" | "quali" | "practice";
   complete?: boolean;
+  live?: boolean;
   endedAtMs?: number;
   top?: Row[];
 }
@@ -122,10 +123,13 @@ export default function SessionResults() {
       <div className="mb-2 px-6 sm:px-8">
         <span
           className={`eyebrow inline-block rounded-sm px-2 py-1 text-[0.55rem] font-bold tracking-wide ${
-            r.complete ? "bg-white/15 text-white/75" : "bg-red text-white"
+            r.live ? "bg-red text-white" : "bg-white/15 text-white/75"
           }`}
         >
-          {r.session_name} · {r.complete ? "RESULT" : "LIVE"}
+          {/* Driven by `live`, not `!complete`. A session that hasn't started yet is also
+              "not complete", which had the ticker showing LIVE while the hero was still
+              counting down to lights out. */}
+          {r.session_name} · {r.live ? "LIVE" : "RESULT"}
         </span>
       </div>
 

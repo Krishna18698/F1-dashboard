@@ -57,6 +57,12 @@ export interface LiveState {
   grids?: Map<number, number>; // starting grid position per driver (gained/lost indicator)
   fastestLap?: { driver_number: number; tla: string; time: string; lap: number } | null;
   trackStatus?: string | null; // TrackStatus code — tints the map (yellow/SC/red)
+  /** F1's own SessionStatus. "Aborted" is the authoritative red-flag/suspension signal —
+   *  TrackStatus is NOT: it returns to "1" (green) once marshals clear the track, while the
+   *  race is still stopped and the cars are queued in the pit lane. */
+  sessionStatus?: string | null;
+  /** Announced restart instant (epoch ms) while suspended, else null. */
+  suspendedRestartMs?: number | null;
   formationLap?: boolean; // race hasn't gone green yet — tints the map yellow, like a flag
   qualifyingPart?: number | null; // 1=Q1, 2=Q2, 3=Q3 (quali sessions only)
   qualifyingRemainingMs?: number | null; // live countdown in the current segment

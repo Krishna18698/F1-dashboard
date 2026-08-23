@@ -15,6 +15,7 @@
  * host. On stateless serverless the connection can't persist across invocations anyway, so
  * both paths converge on "reconnect and fetch a fresh window" there.)
  */
+import { PRE_START_LIVE_MS } from "./liveWindow";
 import "server-only";
 import * as signalR from "@microsoft/signalr";
 import WsImpl from "ws";
@@ -162,6 +163,11 @@ export interface F1LiveState {
   totalLaps: number; // race distance (0 outside a race) — strategy bar axis
   currentLap: number;
   fastestLap: FastestLap | null;
+  /** F1 SessionStatus: "Started" | "Aborted" (red flag) | "Inactive" | "Finished" | "Ends". */
+  sessionStatus: string | null;
+  /** When race control has announced a restart ("RACE WILL RESUME AT 15:33"), that instant as
+   *  epoch ms. Null if no restart has been announced since the session was suspended. */
+  suspendedRestartMs: number | null;
   trackStatus: string | null; // TrackStatus code (1 clear, 2 yellow, 4 SC, 5 red, 6 VSC, 7 VSC ending)
   telFrames: TelFrame[]; // recent timestamped telemetry window (client plays back at the map's clock)
   qualifyingPart: number | null; // 1=Q1, 2=Q2, 3=Q3 (quali sessions only)
@@ -192,6 +198,10 @@ export interface SessionResult {
   session_name: string;
   mode: "race" | "quali" | "practice";
   complete: boolean;
+  /** Genuinely running right now — the SAME test the hero countdown uses, so the ticker can
+   *  never claim LIVE while the countdown is still ticking. `complete` can't stand in for
+   *  this: a session that hasn't STARTED is also "not complete". */
+  live: boolean;
   endedAtMs?: number; // when the session ended — client hides the bar 24h later
   top: { pos: number; tla: string; team_colour: string; best: number | null; gap: string }[];
 }
@@ -288,17 +298,34 @@ function modeOf(type?: string): F1LiveState["mode"] {
  * the shared lap axis / not lining up between drivers). Clamp the total to the driver's real
  * lap count, trimming the CURRENT (most recent) stint first since it's the one still live.
  */
-function clampStintsToLaps<T extends { laps: number }>(stints: T[], totalLaps: number): T[] {
-  const over = stints.reduce((a, s) => a + s.laps, 0) - totalLaps;
-  if (over <= 0 || !stints.length) return stints;
-  const out = stints.map((s) => ({ ...s }));
-  let remaining = over;
-  for (let i = out.length - 1; i >= 0 && remaining > 0; i--) {
-    const cut = Math.min(out[i].laps, remaining);
-    out[i].laps -= cut;
-    remaining -= cut;
+function clampStintsToLaps<T extends { laps: number }>(stints: T[], totalLaps: number, inPit = false): T[] {
+  if (!stints.length) return stints;
+  const diff = stints.reduce((a, s) => a + s.laps, 0) - totalLaps;
+  if (diff > 0) {
+    const out = stints.map((s) => ({ ...s }));
+    let remaining = diff;
+    for (let i = out.length - 1; i >= 0 && remaining > 0; i--) {
+      const cut = Math.min(out[i].laps, remaining);
+      out[i].laps -= cut;
+      remaining -= cut;
+    }
+    return out;
   }
-  return out;
+  // Stint length comes from TimingAppData while the lap time comes from TimingData, and F1
+  // publishes those independently — measured 1.0s to 5.0s apart at Zandvoort. That gap made
+  // the Tyre Tracker's bar visibly lag its own Last column by a beat every single lap. The
+  // driver's own lap count (TimingData, the SAME topic as the lap time) is the more current of
+  // the two, so credit the running stint with the lap immediately rather than waiting.
+  //
+  // Bounded to a single lap, and skipped in the pit lane: that is exactly when the in-lap
+  // belongs to the tyre coming OFF while F1 has already opened the next stint, so guessing
+  // would put the lap on the wrong tyre. There, F1's own data wins.
+  if (diff === -1 && !inPit) {
+    const out = stints.map((s) => ({ ...s }));
+    out[out.length - 1].laps += 1;
+    return out;
+  }
+  return stints;
 }
 
 /**
@@ -373,6 +400,24 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
    * relay answer for the same instant the dots are showing.
    */
   let sectorHistory: { t: number; byDriver: Record<string, SectorTime[]> }[] = [];
+  /** Rolling snapshots of the RUNNING ORDER only, so it can be served at the map's playback
+   *  clock. Deliberately excludes sectors (which stay live) and tyre stints. */
+  let orderHistory: {
+    t: number;
+    order: number[];
+    currentLap: number;
+    trackStatus: string | null;
+    by: Record<number, {
+      position: number;
+      gap: string;
+      interval: string;
+      laps: number;
+      inPit: boolean;
+      last: number | null;
+      tyreLaps: number;
+      stints: F1LiveRow["stints"];
+    }>;
+  }[] = [];
   /**
    * Which lap a sector time belongs to. F1 keeps a sector's Value across the start/finish
    * line and only overwrites it when that sector is next completed, so between the final
@@ -424,6 +469,7 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
       sessionFinishedTs = null;
       statusHistory = [];
       sectorHistory = [];
+      orderHistory = [];
       valueSetAt = {};
       bestSectorOf = {};
       lapResetAt = {};
@@ -917,7 +963,7 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
     let live: boolean;
     if (sessionInfo.StartDate) {
       const startMs = Date.parse(sessionInfo.StartDate + "Z") - offsetMs(sessionInfo.GmtOffset);
-      live = Number.isFinite(startMs) && Date.now() >= startMs - 60_000;
+      live = Number.isFinite(startMs) && Date.now() >= startMs - PRE_START_LIVE_MS;
     } else {
       live = status === "started" || status === "aborted";
     }
@@ -1025,7 +1071,7 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
         retired: Boolean(t.Retired || t.Stopped),
         knocked_out: Boolean(t.KnockedOut),
         grid: Number((app[n] as { GridPos?: string | number })?.GridPos ?? 0),
-        stints: clampStintsToLaps(allStints(n), numberOfLaps),
+        stints: clampStintsToLaps(allStints(n), numberOfLaps, Boolean(t.InPit)),
         weekendTyresLeft: DRY_COMPOUNDS.map((c) => ({ compound: c, left: WEEKEND_ALLOCATION[c] })), // filled in below
         // Per-sector timings straight from TimingData — ungated, so these work without a
         // token too. `Value` empties out while a sector is being run and `PreviousValue`
@@ -1199,18 +1245,90 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
       void asOfMs;
     }
 
+    // --- Running order, rewound to the map's playback clock ----------------------------
+    // The dots render ~20s behind the freshest frame so they interpolate smoothly, and the
+    // client sends that playback instant back as `asOf`. Until now `asOf` only filtered
+    // segmentEvents/lapResets — positions, gaps, lap count and flags were all served at the
+    // CURRENT instant, so the board showed an overtake roughly 20s before the dots performed
+    // it. Confirmed by differential probe: a request with `asOf` 120s in the past returned
+    // byte-identical rows, proving the parameter was doing nothing here.
+    //
+    // Only the running-order fields are rewound. Mini-sectors stay live on purpose (see the
+    // note above), and tyre stints stay live too — they turn over at a pit stop, which the
+    // board already signals through `in_pit`.
+    let outOrder = order;
+    let outLap = Number(lapCount?.CurrentLap ?? 0);
+    let outTrack = trackStatus?.Status ?? null;
+    {
+      const now = Date.now();
+      const last = orderHistory[orderHistory.length - 1];
+      if (!last || now - last.t > 250) {
+        const by: (typeof orderHistory)[number]["by"] = {};
+        for (const n of nums) {
+          const r = rows[+n];
+          // `last` and the stint bar ride the same clock as the position beside them. Leaving
+          // them live while the order was rewound split the Tyre Tracker across two instants
+          // ~20s apart — its own lap time describing a lap the dots had not reached.
+          by[+n] = {
+            position: r.position,
+            gap: r.gap_to_leader,
+            interval: r.interval,
+            laps: r.laps,
+            inPit: r.in_pit,
+            last: r.last,
+            tyreLaps: r.tyre_laps,
+            stints: r.stints,
+          };
+        }
+        orderHistory.push({ t: now, order: [...order], currentLap: outLap, trackStatus: outTrack, by });
+        const cutoff = now - BUFFER_MS;
+        if (orderHistory.length > 20 && orderHistory[0].t < cutoff) {
+          orderHistory = orderHistory.filter((h) => h.t >= cutoff);
+        }
+      }
+      if (asOfMs) {
+        // Newest snapshot at or before the requested instant. If the buffer doesn't reach that
+        // far back yet (fresh connection), the oldest one is the closest honest answer.
+        let pick: (typeof orderHistory)[number] | undefined;
+        for (const h of orderHistory) {
+          if (h.t <= asOfMs) pick = h;
+          else break;
+        }
+        pick ??= orderHistory[0];
+        if (pick) {
+          outOrder = pick.order.filter((n) => rows[n]);
+          outLap = pick.currentLap;
+          outTrack = pick.trackStatus;
+          for (const [k, v] of Object.entries(pick.by)) {
+            const r = rows[+k];
+            if (!r) continue;
+            r.position = v.position;
+            r.gap_to_leader = v.gap;
+            r.interval = v.interval;
+            r.laps = v.laps;
+            r.in_pit = v.inPit;
+            r.last = v.last;
+            r.tyre_laps = v.tyreLaps;
+            r.stints = v.stints;
+          }
+        }
+      }
+    }
+
     return {
       mode,
       session: { location: sessionInfo.Meeting?.Location ?? sessionInfo.Meeting?.Circuit?.ShortName ?? "F1", session_name: sessionName() },
       circuitKey: sessionInfo.Meeting?.Circuit?.Key,
       drivers: driverList,
-      order,
+      order: outOrder,
       rows,
       frames: frameBuffer.slice(-150), // ~45s window (covers the 20s delay + jitter)
       totalLaps: mode === "race" ? Number(lapCount?.TotalLaps ?? 0) : 0,
-      currentLap: Number(lapCount?.CurrentLap ?? 0),
+      currentLap: outLap,
       fastestLap,
-      trackStatus: trackStatus?.Status ?? null,
+      trackStatus: outTrack,
+      sessionStatus: sessionStatus?.Status ?? null,
+      suspendedRestartMs: restartAtMs(),
       telFrames: telBuffer.slice(-200), // ~45s at ~4Hz
       qualifyingPart: qualiClock.part ?? qualifyingPart,
       qualifyingRemainingMs: qualiClock.remainingMs,
@@ -1229,9 +1347,10 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
       formationLap:
         !ended &&
         mode === "race" &&
-        (sessionStartedTs != null
+        ((sessionStartedTs != null
           ? Date.now() < sessionStartedTs
-          : Number(lapCount?.CurrentLap ?? 0) >= 1),
+          : Number(lapCount?.CurrentLap ?? 0) >= 1) ||
+          restartFormationLap()),
       mapAvailable: !anonymous,
       sessionEnded: ended,
       // Only what's still ahead of the dots is useful to the client; anything older has
@@ -1270,6 +1389,63 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
   }
 
   /** Race control messages for the current event — only while a session is live. */
+  /**
+   * Race control announces a restart as circuit-LOCAL wall clock ("RACE WILL RESUME AT 15:33"),
+   * with no date and no zone. The message's own Utc stamp supplies the date and GmtOffset the
+   * zone, so this reconstructs the actual instant rather than trusting the viewer's clock to
+   * be in the circuit's timezone. Takes the most recently SENT such message — a delayed restart
+   * is announced again with a later time, and the newest one wins.
+   */
+  function restartAtMs(): number | null {
+    const off = offsetMs(sessionInfo?.GmtOffset);
+    let bestSent = -Infinity;
+    let target: number | null = null;
+    for (const m of Object.values(raceControl)) {
+      const hit = /RESUME(?:D)? AT (\d{1,2}):(\d{2})/i.exec(m.Message ?? "");
+      if (!hit || !m.Utc) continue;
+      const sent = Date.parse(m.Utc + "Z");
+      if (!Number.isFinite(sent) || sent <= bestSent) continue;
+      // Calendar date at the circuit when the message was sent.
+      const localDay = new Date(sent + off);
+      target =
+        Date.UTC(localDay.getUTCFullYear(), localDay.getUTCMonth(), localDay.getUTCDate(), +hit[1], +hit[2]) - off;
+      bestSent = sent;
+    }
+    return target;
+  }
+
+  /**
+   * Formation laps that follow a red-flag restart. The existing `formationLap` below cannot see
+   * these: it is pinned to `sessionStartedTs`, the FIRST "Started" (lights out), so once a race
+   * has begun `now < sessionStartedTs` is permanently false. Measured at Zandvoort 2026: the
+   * field was non-racing from 13:33:04 (restart) to 13:39:53 (standing start), across laps 3-5,
+   * while formationLap reported false and the lap counter climbed as though racing.
+   *
+   * Detected from race control's own words rather than inferred — F1 states it outright
+   * ("STANDING START" on lap 3, "EXTRA FORMATION LAP" on lap 4). TrackStatus is no help: it read
+   * "1" (green) throughout, the same trap as the red flag itself.
+   *
+   * LIMITATION: this feed publishes no explicit "green" message for a standing restart — the
+   * only precise marker of the actual start was the gaps compressing at launch, which is a
+   * display artefact, not a signal. So the window is closed off the lap counter instead: the
+   * announcement lands on lap n, the formation lap is n+1, and the field starts at the end of
+   * it. That clears one lap late in the worst case rather than dropping the indicator early.
+   */
+  function restartFormationLap(): boolean {
+    if ((sessionStatus?.Status ?? "") !== "Started") return false;
+    let lap: number | null = null;
+    let newest = -Infinity;
+    for (const m of Object.values(raceControl)) {
+      if (!/EXTRA FORMATION LAP|STANDING START/i.test(m.Message ?? "")) continue;
+      const ts = m.Utc ? Date.parse(m.Utc + "Z") : NaN;
+      if (!Number.isFinite(ts) || ts <= newest) continue;
+      newest = ts;
+      lap = Number(m.Lap ?? 0) || null;
+    }
+    if (lap == null) return false;
+    return Number(lapCount?.CurrentLap ?? 0) <= lap + 1;
+  }
+
   async function getRaceControl(): Promise<{
     available: boolean;
     trackStatus?: { Status?: string; Message?: string } | null;
@@ -1334,6 +1510,13 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
     const { nums, mode, rows, order } = classify();
     if (!nums.length) return null;
     const complete = sessionInfo.ArchiveStatus?.Status === "Complete" || ENDED.has((sessionStatus?.Status ?? "").toLowerCase());
+    const runningNow = liveNow();
+    // F1's hub switches to the next session well before it starts, so pre-race this held the
+    // RACE with a full grid but no lap times — the hero ticker showed "Race · RESULT" listing
+    // positions nobody had earned yet. Neither running nor finished means there is no result
+    // here to show: return null and let the caller fall back to the last session that
+    // actually finished (qualifying), which is what belongs on the ticker until lights out.
+    if (!runningNow && !complete) return null;
     const off = offsetMs(sessionInfo.GmtOffset);
     const endedAtMs = sessionInfo.EndDate
       ? Date.parse(sessionInfo.EndDate + "Z") - off
@@ -1344,6 +1527,7 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
       session_name: sessionName(),
       mode,
       complete,
+      live: runningNow,
       endedAtMs,
       top: order.map((n) => ({ pos: rows[n].position, tla: drivers[n]?.Tla ?? String(n), team_colour: drivers[n]?.TeamColour ?? "", best: rows[n].best, gap: rows[n].gap_to_leader })),
     };

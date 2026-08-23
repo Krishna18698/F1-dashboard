@@ -283,12 +283,14 @@ export default function LiveSection() {
               the card collapsed to sector times the timing board already carries in its own
               S1/S2/S3 columns — an near-empty panel restating what's beside it. Selecting a
               driver still highlights their row; there's just no card. */}
+          {/* Sectors on this card are quali-only: they're how a qualifying lap is read,
+              whereas a race is about gaps and strategy — there the card is telemetry alone. */}
           {selected != null && !mapUnavailable && (
             <TelemetryCard
               num={selected}
               driver={s.drivers.get(selected)}
               onClose={() => setSelected(null)}
-              sectors={s.sectors?.get(selected)}
+              sectors={s.mode === "quali" ? s.sectors?.get(selected) : undefined}
               lapResets={s.lapResets}
             />
           )}
@@ -309,7 +311,7 @@ export default function LiveSection() {
         {/* Right column: the board and the sector analysis that reads off it, stacked. Keeping
             them together means "who is where" and "where each of them is losing it" sit in
             the same column rather than across the page from one another. */}
-        <div className="self-start">
+        <div className="flex flex-col gap-4">
         <TimingBoard
           mode={s.mode}
           order={boardOrder}
@@ -325,6 +327,9 @@ export default function LiveSection() {
           qualifyingSegmentEnded={s.qualifyingSegmentEnded}
           nextQualifyingSegmentInMs={s.nextQualifyingSegmentInMs}
           knockedOut={s.knockedOut}
+          suspended={s.sessionStatus === "Aborted"}
+          restartAtMs={s.suspendedRestartMs}
+          formationLap={s.formationLap}
           selectedNum={selected}
           onSelect={setSelected}
         />
@@ -332,7 +337,7 @@ export default function LiveSection() {
               Race gets the full-width Tyre Tracker below instead. Driven purely by sector
               times, so it behaves the same with or without a token. */}
           {s.mode === "quali" && (
-            <div className="mt-4">
+            <div>
               <SectorDeltas
                 order={s.order}
                 drivers={s.drivers}
