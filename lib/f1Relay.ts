@@ -1260,7 +1260,17 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
     let outLap = Number(lapCount?.CurrentLap ?? 0);
     let outTrack = trackStatus?.Status ?? null;
     {
-      const now = Date.now();
+      // Key these by the SAME clock the client's `asOf` is derived from: F1's own position
+      // timestamps (see pushFrames — `Date.parse(f.Timestamp)`), NOT local wall time. Keying
+      // by Date.now() put the snapshots on a clock running ahead of the frame clock by the
+      // feed's delivery latency, so the rewind overshot.
+      //
+      // Measured against wall time at Zandvoort, lag behind live: the car dots sit ~24.1s back
+      // (Date.now() − asOf; note `since` − asOf reads only ~18s, because the newest frame the
+      // client holds is itself 7-9s old — that is the wrong yardstick). The board read 27.4s
+      // with Date.now() keying (~3.3s behind the dots) and 23.2s with the frame clock (~0.9s
+      // ahead, inside the 0-3s the board is stale between polls anyway).
+      const now = frameBuffer.at(-1)?.t ?? Date.now();
       const last = orderHistory[orderHistory.length - 1];
       if (!last || now - last.t > 250) {
         const by: (typeof orderHistory)[number]["by"] = {};
