@@ -199,8 +199,25 @@ function toState(r: ApiResponse): LiveState {
   };
 }
 
-export function useF1Live(view: "live" | "replay" = "live", replayT0?: number): LiveState {
-  const [state, setState] = useState<LiveState>(empty);
+/**
+ * `serverKnowsNothingLive` seeds the very first render.
+ *
+ * Everything else on the page is server-rendered and paints at once, while this section had to
+ * wait for the JS bundle, hydration, and its own first poll (~0.5 s) before it could say "no
+ * session" — so it visibly lagged the rest of the page every time nothing was on track. The
+ * server already knows the answer: page.tsx has liveStatus in hand when it renders. Passing it
+ * in lets the section open on the idle state instead of a spinner, exactly as the hero does
+ * with initialLiveStatus. Polling still starts immediately and overwrites this the moment a
+ * real answer lands, so a session starting between render and hydration is not missed.
+ */
+export function useF1Live(
+  view: "live" | "replay" = "live",
+  replayT0?: number,
+  serverKnowsNothingLive = false,
+): LiveState {
+  const [state, setState] = useState<LiveState>(
+    serverKnowsNothingLive && view === "live" ? { ...empty, status: "idle" } : empty,
+  );
 
   useEffect(() => {
     // Scoped to THIS effect instance, not a shared ref across re-runs — a stale in-flight

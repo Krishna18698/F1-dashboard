@@ -82,7 +82,7 @@ function Header({
   );
 }
 
-export default function LiveSection() {
+export default function LiveSection({ serverKnowsNothingLive = false }: { serverKnowsNothingLive?: boolean }) {
   const [view, setView] = useState<View>("live");
   // When switching INTO replay, stamp "now" as the anchor every consumer of replay data
   // (useF1Live for the map/board, RaceControl for messages) uses to compute the virtual
@@ -94,7 +94,7 @@ export default function LiveSection() {
     if (v === "replay") setReplayT0(Date.now());
     setView(v);
   };
-  const s = useF1Live(view, replayT0);
+  const s = useF1Live(view, replayT0, serverKnowsNothingLive);
   // Click-to-follow: selected driver is highlighted on the map + gets a telemetry card.
   const [selected, setSelected] = useState<number | null>(null);
   // Same signal TrackMap gates its own reveal on — Race Control was popping in well before

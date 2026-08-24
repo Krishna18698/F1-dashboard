@@ -256,7 +256,9 @@ export default async function Page() {
           </Section>
         )}
 
-        <LiveSection />
+        {/* The server already knows whether anything is on track; without this the section
+            paints a spinner until hydration plus its own first poll (~0.5 s) resolve. */}
+        <LiveSection serverKnowsNothingLive={!status.live} />
 
         {/* Wide 3-column row: standings + paddock intel use the side space */}
         <div className="grid gap-10 lg:grid-cols-3">
