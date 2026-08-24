@@ -8,9 +8,11 @@ import {
   getSeasonWinners,
   getStandingsRound,
   weekendSessions,
+  raceStartISO,
 } from "@/lib/jolpica";
 import { getPaddockIntel } from "@/lib/news";
-import { getLiveStatusData, LiveStatusData } from "@/lib/liveStatus";
+import { getLiveStatusData, LiveStatusData } from "@/lib/live/liveStatus";
+import { WEEKEND_FLIP_MS } from "@/lib/sessionWindows";
 import { requestNow } from "@/lib/now";
 import Hero from "./components/Hero";
 import WeekendSchedule from "./components/WeekendSchedule";
@@ -22,11 +24,12 @@ import PaddockIntel from "./components/PaddockIntel";
 import TokenBanner from "./components/TokenBanner";
 import LiveSection from "./components/live/LiveSection";
 
-// Dynamic: the hero consults the live relay to decide when a finished race weekend should
+// Dynamic: the hero consults the live socket to decide when a finished race weekend should
 // flip to the next round. Standings/news stay cached at the fetch layer.
 import { applyToConstructors, applyToDrivers, pointsFor } from "@/lib/championshipPoints";
-import { getRelayResults } from "@/lib/f1Relay";
-import { getStaticResults } from "@/lib/f1feed";
+import { getRoundResult, roundStoreConfigured, saveRoundResult } from "@/lib/store/roundResults";
+import { liveSocketResults } from "@/lib/live/liveSocket";
+import { liveArchiveResults } from "@/lib/live/liveArchive";
 
 export const dynamic = "force-dynamic";
 
@@ -48,7 +51,7 @@ export default async function Page() {
       // round trip to every cold start, and its static-feed fallback can pull megabytes.
       (async () => {
         try {
-          return (await getRelayResults()) ?? (await getStaticResults());
+          return (await liveSocketResults()) ?? (await liveArchiveResults());
         } catch {
           return null;
         }
@@ -68,6 +71,10 @@ export default async function Page() {
   // the round as soon as it ingests the SPRINT, so straight after the Dutch GP it read
   // "round 12" while holding only sprint points — the projection, which did have the race, was
   // discarded as not-ahead and the page showed pre-race totals. Ask about the race directly.
+  // One clock read for the whole render: the standings block and the hero flip below both
+  // measure against it, and they must agree.
+  const now = requestNow();
+
   // The last round Jolpica has published a race result for. Derived from `winners` (the P1 of
   // every race it has) rather than a dedicated request — same answer, already in the batch
   // above, and a separate call sat on the critical path of every cold start to learn it.
@@ -75,11 +82,11 @@ export default async function Page() {
 
   // Whichever source has the round FIRST wins. Fastest to slowest:
   //   1. the live projection (ChampionshipPrediction) — applied client-side in the tables,
-  //      but token-gated and only served while the relay still holds the session;
+  //      but token-gated and only served while the socket still holds the session;
   //   2. this: the official totals plus the classification we already have, which needs no
-  //      token and keeps working long after the relay has let the session go;
+  //      token and keeps working long after the socket has let the session go;
   //   3. Jolpica's official numbers, hours later, which then supersede both.
-  // Without step 2 the standings fell back to PRE-RACE totals the moment the relay's grace
+  // Without step 2 the standings fell back to PRE-RACE totals the moment the socket's grace
   // window closed, and stayed wrong until Jolpica caught up.
   let drivers = rawDrivers;
   let constructors = rawConstructors;
@@ -92,12 +99,54 @@ export default async function Page() {
     const round = schedule.find((r) => (finished?.session_name ?? "").startsWith(r.raceName))?.round;
     const scored = winners as Record<number, { code: string; name: string }>;
     const alreadyIngested = round ? scored[Number(round)] != null : true;
+
+    // The classification, from whichever source still has it.
+    //
+    // The socket only stays open for a short window after the flag now, so on a page load hours
+    // later `finished` is null — the durable snapshot is what keeps the standings right through
+    // the gap before Jolpica publishes (~21 h for the 2026 Dutch GP). Looked up by the last race
+    // whose start has passed, so it does not depend on the socket being reachable at all.
+    const lastRun = [...schedule]
+      .filter((r) => Date.parse(raceStartISO(r)) <= now)
+      .sort((a, b) => Number(b.round) - Number(a.round))[0];
+    const lastRunRound = Number(lastRun?.round ?? 0);
+    const lastRunIngested = lastRunRound > 0 && scored[lastRunRound] != null;
+
+    let places: { pos: number; tla: string }[] | null =
+      finished?.complete && finished.top?.length ? finished.top : null;
+    let sessionName = finished?.session_name ?? "";
+    if (!places && !lastRunIngested && lastRunRound > 0 && roundStoreConfigured()) {
+      const snap = await getRoundResult(lastRunRound);
+      if (snap) {
+        places = snap.places;
+        sessionName = snap.sessionName;
+      }
+    }
+
+    // Capture it once, while a source still has it. Guarded on the snapshot being absent so a
+    // page render is not a database write; `round_result` is keyed by round, so the flag-time
+    // classification is written exactly once and the cron re-check owns it after that.
+    if (finished?.complete && finished.top?.length && round && !alreadyIngested && roundStoreConfigured()) {
+      const existing = await getRoundResult(Number(round));
+      if (!existing) {
+        await saveRoundResult({
+          round: Number(round),
+          sessionName: finished.session_name ?? "",
+          places: finished.top.map((x) => ({ pos: x.pos, tla: x.tla })),
+        });
+      }
+    }
+
+    const usingSnapshot = !!places && !finished?.complete;
+    const effectiveRound = usingSnapshot ? lastRunRound : Number(round ?? 0);
+    const effectiveIngested = usingSnapshot ? lastRunIngested : alreadyIngested;
+
     // Only a session that has actually finished, and only one Jolpica is still missing.
-    if (finished?.complete && finished.mode === "race" && !alreadyIngested && finished.top?.length) {
+    if (places && (usingSnapshot || finished?.mode === "race") && !effectiveIngested && effectiveRound > 0) {
       // `mode` is "race" for a sprint too, so read the name — awarding full race points for a
       // sprint would silently inflate the table by up to 17 points a car.
-      const sprint = /sprint/i.test(finished.session_name ?? "");
-      const gained = pointsFor(finished.top, sprint);
+      const sprint = /sprint/i.test(sessionName);
+      const gained = pointsFor(places, sprint);
       const teamOf: Record<string, string> = {};
       // LAST constructor, not the first: Jolpica lists every team a driver has raced for this
       // season in order, so a mid-season switch (2026: LAW is "RB F1 Team THEN Red Bull") makes
@@ -117,8 +166,8 @@ export default async function Page() {
   // sessions are all in the past with no timer. Two rules, in order of precision:
   //
   //  1. The feed's own end instant. `liveStatus` already carries it (F1's "Finished" stamp,
-  //     not this process's idea of when it noticed), so this needs no extra relay connection.
-  //     It used to come from getEndedWeekend() wrapped in a 1200ms Promise.race — a cold
+  //     not this process's idea of when it noticed), so this needs no extra socket connection.
+  //     It used to come from liveSocketEndedWeekend() wrapped in a 1200ms Promise.race — a cold
   //     serverless instance cannot open a SignalR connection that fast, so in production it
   //     lost that race on essentially every render and the hero never flipped at all, sitting
   //     on the finished weekend showing "Weekend complete".
@@ -127,8 +176,6 @@ export default async function Page() {
   //
   // Both wait out WEEKEND_FLIP_MS first, which is the window where the hero deliberately
   // still shows the just-finished weekend and its results before shifting to the upcoming one.
-  const WEEKEND_FLIP_MS = 300_000;
-  const now = requestNow();
   let nextRace = rawNext;
 
   const status = liveStatus as LiveStatusData;

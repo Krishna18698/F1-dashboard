@@ -1,10 +1,10 @@
 "use client";
 
 import { startTransition, useEffect, useState } from "react";
-import { Driver, IntervalRow, LapSummary, StintRow } from "@/lib/openf1";
-import { F1_LIVE } from "@/lib/f1liveConfig";
+import { Driver, IntervalRow, LapSummary, StintRow } from "@/lib/timingTypes";
+import { F1_LIVE } from "@/lib/live/liveConfig";
 import { getStoredVisitorToken } from "@/lib/visitorToken";
-import type { LiveState } from "./useLiveSession";
+import type { LiveState } from "./liveTypes";
 import { getPlaybackT, newestFrameT, pushFrames, pushTel, resetFrames } from "./framesStore";
 
 interface ApiRow {

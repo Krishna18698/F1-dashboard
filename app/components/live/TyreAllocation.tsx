@@ -1,6 +1,6 @@
 "use client";
 
-import { Driver } from "@/lib/openf1";
+import { Driver } from "@/lib/timingTypes";
 import { hex } from "@/lib/format";
 
 const COLOR: Record<string, string> = { SOFT: "#e10600", MEDIUM: "#f5c518", HARD: "#ffffff" };

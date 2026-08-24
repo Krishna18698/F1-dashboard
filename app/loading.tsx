@@ -1,5 +1,5 @@
 /**
- * Route-level skeleton. The page is force-dynamic (it consults the live relay), so
+ * Route-level skeleton. The page is force-dynamic (it consults the live socket), so
  * without this users stare at a blank tab while the server fetches — this paints
  * instantly and mirrors the real layout so the swap causes no jumps.
  */

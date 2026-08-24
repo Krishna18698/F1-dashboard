@@ -10,7 +10,7 @@ const code = "rounded bg-white/10 px-1.5 py-0.5 font-mono text-[0.68rem] text-wh
  * Lets a visitor add their OWN F1 TV token for real-time tracking, instead of relying on
  * the site owner's. Stored ONLY in this browser's localStorage; sent to the server as a
  * request header (never a URL) on live-data polls, used for exactly that one request, and
- * never logged or persisted server-side — see the handling notes in lib/f1Relay.ts.
+ * never logged or persisted server-side — see the handling notes in lib/live/liveSocket.ts.
  */
 export default function MyTokenCard({
   tokenIssue,

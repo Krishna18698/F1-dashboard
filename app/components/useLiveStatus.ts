@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { usePolling } from "./usePolling";
-import type { LiveStatusData } from "@/lib/liveStatus";
+import type { LiveStatusData } from "@/lib/live/liveStatus";
 
 export type LiveStatus = LiveStatusData;
 

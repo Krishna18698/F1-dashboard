@@ -1,4 +1,4 @@
-import { IntervalRow } from "@/lib/openf1";
+import { IntervalRow } from "@/lib/timingTypes";
 
 /** Tyre compound → dot colour + short label. */
 export const TYRE: Record<string, { color: string; short: string }> = {

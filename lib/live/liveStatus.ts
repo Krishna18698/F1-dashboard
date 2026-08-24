@@ -4,9 +4,9 @@
  * the client's first /api/livestatus poll is in flight) and the API route the client then
  * polls afterwards.
  */
-import { getLiveStatus } from "./f1Relay";
-import { resolveLiveSession } from "./f1feed";
-import { currentlyLiveWeekendSession, getNextRace } from "./jolpica";
+import { liveSocketStatus } from "./liveSocket";
+import { liveArchiveSession } from "./liveArchive";
+import { currentlyLiveWeekendSession, getNextRace } from "../jolpica";
 
 export interface LiveStatusData {
   live: boolean;
@@ -18,17 +18,17 @@ export interface LiveStatusData {
 
 export async function getLiveStatusData(): Promise<LiveStatusData> {
   try {
-    // The relay knows the REAL session status (F1's own SessionStatus/ArchiveStatus), and now
+    // The socket knows the REAL session status (F1's own SessionStatus/ArchiveStatus), and now
     // works without a token too — so it's tried first either way. `name` being set means it
     // actually connected and knows which session this is; a bare {live:false} means it
     // couldn't connect, which is the only case worth falling through for.
-    const relay = await getLiveStatus();
-    if (relay.name) return relay;
+    const socket = await liveSocketStatus();
+    if (socket.name) return socket;
 
-    // Relay unreachable — free feed (real published data), else Jolpica's own schedule as a
+    // Socket unreachable — free feed (real published data), else Jolpica's own schedule as a
     // schedule-only estimate (F1's live-timing index can lag a session actually starting by
     // hours, or not list the meeting yet at all).
-    const live = await resolveLiveSession();
+    const live = await liveArchiveSession();
     if (live) {
       return { live: true, name: live.name, type: live.type };
     }

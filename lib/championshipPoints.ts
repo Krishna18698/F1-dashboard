@@ -2,7 +2,7 @@
  * Championship points for a session F1 has already classified but Jolpica hasn't ingested.
  *
  * Jolpica is the official source but runs hours behind, and the live projection
- * (ChampionshipPrediction) is token-gated and only served while the relay still holds the
+ * (ChampionshipPrediction) is token-gated and only served while the socket still holds the
  * session. Between those two the standings would otherwise sit on pre-race totals — so this
  * derives the same numbers from the classification we already have.
  *

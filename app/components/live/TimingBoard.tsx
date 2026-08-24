@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Driver, IntervalRow, LapSummary } from "@/lib/openf1";
-import { SessionMode } from "./useLiveSession";
+import { Driver, IntervalRow, LapSummary } from "@/lib/timingTypes";
+import { SessionMode } from "./liveTypes";
 import { formatDelta, formatGap, formatInterval, formatLap, hex } from "@/lib/format";
 
 // Six drivers drop out of Q1 and six out of Q2, leaving ten for Q3 — the same in a sprint

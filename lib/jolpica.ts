@@ -4,7 +4,7 @@
  * Docs: https://github.com/jolpica/jolpica-f1
  */
 
-import { PRE_START_LIVE_MS } from "./liveWindow";
+import { postEndLiveMs, PRE_START_LIVE_MS } from "./sessionWindows";
 const BASE = "https://api.jolpi.ca/ergast/f1";
 export const SEASON = "2026";
 
@@ -93,16 +93,6 @@ const SESSION_DURATION_MS: Record<string, number> = {
 // min uniformly to a 60-minute practice session left it reporting "happening right now" for
 // up to 20 minutes after a practice session had already finished on schedule, which practice/
 // quali/sprint sessions reliably do (no red-flag-length tail to cover). Race keeps the longer
-// buffer; everything else gets a short one for a slightly-late schedule instead.
-const POST_SESSION_GRACE_MS: Record<string, number> = {
-  FP1: 5 * 60_000,
-  FP2: 5 * 60_000,
-  FP3: 5 * 60_000,
-  SQ: 5 * 60_000,
-  Sprint: 5 * 60_000,
-  Quali: 5 * 60_000,
-  Race: 20 * 60_000,
-};
 
 /**
  * Which session of this weekend (if any) is happening right now, going purely by schedule
@@ -114,7 +104,7 @@ export function currentlyLiveWeekendSession(race: Race): WeekendSession | null {
   for (const s of weekendSessions(race)) {
     const start = Date.parse(s.iso);
     const duration = SESSION_DURATION_MS[s.short] ?? 60 * 60_000;
-    const grace = POST_SESSION_GRACE_MS[s.short] ?? 5 * 60_000;
+    const grace = postEndLiveMs(s.short, s.label);
     if (now >= start - PRE_START_LIVE_MS && now <= start + duration + grace) return s;
   }
   return null;
@@ -122,7 +112,7 @@ export function currentlyLiveWeekendSession(race: Race): WeekendSession | null {
 /**
  * Is any session of this weekend near enough that F1's live feed is worth a socket?
  *
- * The relay holds a WebSocket to livetiming.formula1.com, and opening one costs a negotiate +
+ * The socket holds a WebSocket to livetiming.formula1.com, and opening one costs a negotiate +
  * handshake + Subscribe + snapshot — seconds on a cold serverless instance. Outside a race
  * weekend it can only ever report "nothing is live", which the schedule already knows for
  * free. So the schedule decides whether the socket is worth opening at all.
@@ -257,7 +247,7 @@ export async function getNextRace(): Promise<Race | null> {
     const now = Date.now();
     // Backstop only (used when the live feed isn't available). Wide enough that it can
     // never roll over during a running/red-flagged race — the precise "5 min after the
-    // race is actually not live" flip is driven by the relay in page.tsx.
+    // race is actually not live" flip is driven by the socket in page.tsx.
     const RACE_OVER_MS = 6 * 3600_000;
     return races.find((r) => Date.parse(raceStartISO(r)) + RACE_OVER_MS > now) ?? null;
   } catch {

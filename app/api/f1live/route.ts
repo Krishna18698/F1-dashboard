@@ -1,7 +1,9 @@
 import { NextRequest } from "next/server";
-import { fallbackCandidates, getF1LiveState, getReplayAnchorMs, getSessionDuration, resolveLiveSession } from "@/lib/f1feed";
-import { getLiveStatus, getRelayState, getVisitorRelayState } from "@/lib/f1Relay";
-import { F1_LIVE } from "@/lib/f1liveConfig";
+import { liveArchiveSession, liveArchiveState } from "@/lib/live/liveArchive";
+import { replayArchiveAnchorMs, replayArchiveCandidates, replayArchiveDuration, replayArchiveState } from "@/lib/replay/replayArchive";
+import { liveSocketStatus, liveSocketState, liveSocketStateForVisitor } from "@/lib/live/liveSocket";
+import { F1_LIVE } from "@/lib/live/liveConfig";
+import { liveTestReplayDuration, liveTestReplayState } from "@/lib/live/liveTest";
 import { currentlyLiveWeekendSession, getNextRace } from "@/lib/jolpica";
 import { getTokenStatus } from "@/lib/f1Token";
 
@@ -74,7 +76,7 @@ export async function GET(req: NextRequest) {
     // 0) TEST replay — dev-only override, wins regardless of the requested view.
     if (F1_LIVE.replay.enabled) {
       const r = F1_LIVE.replay;
-      const dur = await getSessionDuration(r.sessionPath, false);
+      const dur = await liveTestReplayDuration(r.sessionPath, false);
       const anchor = Math.floor(dur * r.anchorFrac);
       const span = Math.max(1, dur - anchor);
       const upto = anchor + ((Date.now() - r.restartedAtMs) % span);
@@ -82,7 +84,7 @@ export async function GET(req: NextRequest) {
       // render ~20s behind for smooth interpolation, so computing sectors/flags at the raw
       // fetch instant put them that far ahead of the car they describe. Omitting it here was
       // why the test replay showed a driver's mini-sectors out of step with the tracker.
-      const state = await getF1LiveState(r.sessionPath, r.sessionType, upto, false, asOf ?? upto);
+      const state = await liveTestReplayState(r.sessionPath, r.sessionType, upto, false, asOf ?? upto);
       // `maskTokenGated` reproduces a tokenless LIVE session: withhold exactly what F1's hub
       // withholds without a token (car positions and telemetry), so what's left is what a
       // tokenless visitor genuinely receives rather than what the archive happens to hold.
@@ -101,10 +103,10 @@ export async function GET(req: NextRequest) {
 
     if (view === "live") {
       // 1) Visitor's own token — highest priority when supplied. Never logged, never
-      //    persisted; exists only for the duration of this one request (see f1Relay.ts).
+      //    persisted; exists only for the duration of this one request (see liveSocket.ts).
       const visitorToken = req.headers.get("x-f1-token");
       if (visitorToken) {
-        const result = await getVisitorRelayState(visitorToken);
+        const result = await liveSocketStateForVisitor(visitorToken);
         if (result.status === "ok") {
           return respond({
             status: "live",
@@ -123,34 +125,34 @@ export async function GET(req: NextRequest) {
         // falls through silently, no issue to flag.
       }
 
-      // 2) Real-time via the site's own relay. With F1_TV_TOKEN set this is the full feed
+      // 2) Real-time via the site's own socket. With F1_TV_TOKEN set this is the full feed
       //    (map included). WITHOUT one it still connects anonymously and returns everything
       //    except car positions/telemetry — timing board, tyres, race control, track status —
       //    which beats falling through to the static feed, whose archive lands hours late.
       //    `mapAvailable: false` tells the client to show a "tracking needs a token"
       //    placeholder rather than an empty map.
       {
-        // Pass the client's playback clock so the relay's sectors describe the SAME instant
+        // Pass the client's playback clock so the socket's sectors describe the SAME instant
         // the car dots are rendering (the map runs ~20s behind for smooth interpolation).
-        const relay = await getRelayState(asOf);
-        if (relay && relay.drivers.length > 0) {
+        const socket = await liveSocketState(asOf);
+        if (socket && socket.drivers.length > 0) {
           return respond({
             status: "live",
             replay: false,
-            source: relay.mapAvailable === false ? "free-live" : "token",
-            ...relay,
-            frames: newFrames(relay.frames, since),
-            telFrames: newTel(relay.telFrames, since),
+            source: socket.mapAvailable === false ? "free-live" : "token",
+            ...socket,
+            frames: newFrames(socket.frames, since),
+            telFrames: newTel(socket.telFrames, since),
           });
         }
       }
 
       // 3) Free feed — only a genuinely-live, published session. No fallback replay here;
       //    view=replay is the explicit way to see the most recent session instead.
-      const live = await resolveLiveSession();
+      const live = await liveArchiveSession();
       if (live && live.startWallMs != null) {
         const upto = Date.now() - live.startWallMs;
-        const state = await getF1LiveState(live.path, live.type, upto, true, asOf ?? upto);
+        const state = await liveArchiveState(live.path, live.type, upto, true, asOf ?? upto);
         if (state.drivers.length > 0) {
           return respond({
             status: "live",
@@ -175,7 +177,7 @@ export async function GET(req: NextRequest) {
         ? { location: live.location, session_name: live.name }
         : null;
       if (!scheduledLive) {
-        // ...but only when nothing better is available. The relay reads F1's OWN
+        // ...but only when nothing better is available. The socket reads F1's OWN
         // SessionStatus and now connects without a token, so whenever it can see the current
         // session it is authoritative — a schedule ESTIMATE must never contradict it. It used
         // to: Sprint Qualifying actually runs 44 min (16:30–17:14 per F1's own SessionInfo)
@@ -183,9 +185,9 @@ export async function GET(req: NextRequest) {
         // on claiming "Sprint Qualifying is happening right now" until 15:35 — 21 minutes
         // past the chequered flag. Tuning the assumed durations only ever moves that error
         // around; deferring to the feed removes it.
-        const relayStatus = await getLiveStatus();
-        const relayKnowsSession = !!relayStatus.name;
-        if (!relayKnowsSession) {
+        const socketStatus = await liveSocketStatus();
+        const socketKnowsSession = !!socketStatus.name;
+        if (!socketKnowsSession) {
           const race = await getNextRace();
           const activeSession = race ? currentlyLiveWeekendSession(race) : null;
           if (race && activeSession) {
@@ -203,13 +205,13 @@ export async function GET(req: NextRequest) {
     // view === "replay" — always the most recently completed session, from lights out,
     // looping, via the free feed. Deliberate, user-requested view — never idle just
     // because something else happens to be live; that's what view=live is for.
-    for (const c of await fallbackCandidates()) {
-      const dur = await getSessionDuration(c.path, false);
+    for (const c of await replayArchiveCandidates()) {
+      const dur = await replayArchiveDuration(c.path, false);
       if (!dur) continue;
-      const anchor = await getReplayAnchorMs(c.path, false);
+      const anchor = await replayArchiveAnchorMs(c.path, false);
       const span = Math.max(1, dur - anchor);
       const upto = anchor + ((Date.now() - replayT0) % span);
-      const state = await getF1LiveState(c.path, c.type, upto, false, asOf ?? upto);
+      const state = await replayArchiveState(c.path, c.type, upto, false, asOf ?? upto);
       if (state.drivers.length > 0) {
         return respond({
           status: "live",

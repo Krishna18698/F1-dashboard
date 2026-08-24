@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Driver } from "@/lib/openf1";
+import { Driver } from "@/lib/timingTypes";
 import { hex } from "@/lib/format";
 import { getPlaybackT, getTel } from "./framesStore";
 

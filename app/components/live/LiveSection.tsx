@@ -12,7 +12,7 @@ import MyTokenCard from "./MyTokenCard";
 import RaceControl from "./RaceControl";
 import { useHasFrames } from "./framesStore";
 import { getStoredVisitorToken } from "@/lib/visitorToken";
-import { F1_LIVE } from "@/lib/f1liveConfig";
+import { F1_LIVE } from "@/lib/live/liveConfig";
 
 type View = "live" | "replay";
 

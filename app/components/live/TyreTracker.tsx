@@ -1,6 +1,6 @@
 "use client";
 
-import { Driver, IntervalRow, LapSummary } from "@/lib/openf1";
+import { Driver, IntervalRow, LapSummary } from "@/lib/timingTypes";
 import { formatGap, formatInterval, formatLap, hex } from "@/lib/format";
 
 // Tyre compound → colour (F1 sidewall colours).

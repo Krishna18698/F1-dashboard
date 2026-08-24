@@ -8,18 +8,16 @@
  * F1 sends incremental deltas, so we deep-merge lines up to a cutoff timestamp to
  * reconstruct state at any instant (which powers both replay and live polling).
  */
-import { PRE_START_LIVE_MS } from "./liveWindow";
+import { postEndLiveMs, PRE_START_LIVE_MS, QUALI_DURATION_MS, SPRINT_QUALI_DURATION_MS } from "../sessionWindows";
 import zlib from "zlib";
-import { F1_LIVE } from "./f1liveConfig";
+import { F1_LIVE } from "../live/liveConfig";
 
 const UA = { "User-Agent": "BestHTTP" };
 const TS_LEN = 12; // "HH:MM:SS.mmm"
 // Standard FIA qualifying segment durations.
-const QUALI_DURATION_MS: Record<number, number> = { 1: 18 * 60_000, 2: 15 * 60_000, 3: 12 * 60_000 };
-// See the matching pair in f1Relay.ts — Sprint Qualifying's segments are shorter than a
+// See the matching pair in liveSocket.ts — Sprint Qualifying's segments are shorter than a
 // Saturday qualifying's, and both carry Type "Qualifying", so the session path is what
 // distinguishes them here (".../2026-08-21_Sprint_Qualifying/").
-const SPRINT_QUALI_DURATION_MS: Record<number, number> = { 1: 12 * 60_000, 2: 10 * 60_000, 3: 8 * 60_000 };
 
 /* --------------------------------- parsing --------------------------------- */
 function tsToMs(ts: string): number {
@@ -164,7 +162,7 @@ export async function resolveLiveSession(): Promise<ResolvedSession | null> {
   if (F1_LIVE.mode === "replay") return null;
   const now = Date.now();
   const live = (await flatSessions()).find(
-    (s) => now >= s.startMs - PRE_START_LIVE_MS && now <= s.endMs + 10 * 60_000,
+    (s) => now >= s.startMs - PRE_START_LIVE_MS && now <= s.endMs + postEndLiveMs(s.type, s.name),
   );
   return live ? { ...live, live: true, startWallMs: live.startMs } : null;
 }
@@ -333,7 +331,7 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
   }
 
   // RaceControlMessages: the first line's "Messages" is a full-snapshot ARRAY; every line
-  // after that is an index-keyed OBJECT delta (same shape the token relay parses). Flatten
+  // after that is an index-keyed OBJECT delta (same shape the token socket parses). Flatten
   // to a (ts, idx, msg) list so any instant can be reconstructed by merging up to it.
   const rc: { ts: number; idx: string; msg: RcMessage }[] = [];
   for (const raw of rcTxt.replace(/^﻿/, "").split(/\r?\n/)) {
@@ -460,7 +458,7 @@ export interface F1LiveRow {
   grid: number;
   stints: { compound: string; laps: number; age: number; isNew: boolean; segment: number | null }[];
   weekendTyresLeft: { compound: string; left: number }[];
-  /** S1/S2/S3 with F1's purple/green flags — same shape the relay emits, so the UI is
+  /** S1/S2/S3 with F1's purple/green flags — same shape the socket emits, so the UI is
    *  identical whether a session is live or being replayed from the archive. */
   sectors: { value: string; overallFastest: boolean; personalFastest: boolean; segments: number[] }[];
   /** I1/I2/FL/ST speed traps — from TimingData, so ungated and available without a token. */
@@ -561,7 +559,7 @@ function mode(type: string): F1LiveState["mode"] {
   return "race";
 }
 
-/** See the identical helper in f1Relay.ts for why this clamp is needed. */
+/** See the identical helper in liveSocket.ts for why this clamp is needed. */
 function clampStintsToLaps<T extends { laps: number }>(stints: T[], totalLaps: number): T[] {
   const over = stints.reduce((a, s) => a + s.laps, 0) - totalLaps;
   if (over <= 0 || !stints.length) return stints;
@@ -666,7 +664,7 @@ async function weekendTyresLeft(
 
 /**
  * Same weekend-allocation math as `weekendTyresLeft`, for callers that don't have a static
- * session path for the CURRENT session (the token relay runs the live one over its own
+ * session path for the CURRENT session (the token socket runs the live one over its own
  * WebSocket, not a static file) — matched by meeting name instead, against past FP/Quali
  * sessions of the same event that DO have a published static feed. `liveSessionUsed` is the
  * caller's own tally of fresh sets mounted so far in its live session.
@@ -928,7 +926,7 @@ export async function getF1LiveState(
       if (m === "race") return rows[a].position - rows[b].position;
       const ba = rows[a].best ?? Infinity;
       const bb = rows[b].best ?? Infinity;
-      // See the identical guard in f1Relay.ts: Infinity - Infinity is NaN, and a NaN
+      // See the identical guard in liveSocket.ts: Infinity - Infinity is NaN, and a NaN
       // comparator leaves every yet-to-set-a-time driver in arbitrary order. Tie on position.
       if (ba === bb) return rows[a].position - rows[b].position;
       return ba - bb;
@@ -946,7 +944,7 @@ export async function getF1LiveState(
   const leader = order[0];
   const traceStart = uptoMs - 110_000;
   const trace: { x: number; y: number }[] = [];
-  // Position buffer for smooth client playback (same shape the token relay emits).
+  // Position buffer for smooth client playback (same shape the token socket emits).
   const FRAME_WINDOW = 45_000;
   const outFrames: { t: number; c: Record<string, [number, number]> }[] = [];
   for (const f of s.frames) {
@@ -968,7 +966,7 @@ export async function getF1LiveState(
   }
 
   // --- Red flag, restart countdown and extra formation laps ---------------------------
-  // Ports the logic from f1Relay so the REPLAY path exercises it too — the two engines keep
+  // Ports the logic from liveSocket so the REPLAY path exercises it too — the two engines keep
   // separate F1LiveState shapes, so without this a replay showed none of it and a test could
   // not tell a broken fix from an absent one.
   //
@@ -1006,7 +1004,7 @@ export async function getF1LiveState(
 
   // Formation laps that follow a restart. The plain `formationLap` above cannot see these:
   // it is pinned to sessionStartedTs (lights out), so it is false ever after. F1 states them
-  // outright, so read its words instead of inferring. See the matching note in f1Relay for
+  // outright, so read its words instead of inferring. See the matching note in liveSocket for
   // why the window closes off the lap counter.
   let restartForming = false;
   if (m === "race" && sessionStatus === "Started") {
@@ -1042,13 +1040,13 @@ export async function getF1LiveState(
   // lights go green — so the announcement instant is NOT when the segment started running.
   // The green light (SessionStatus "Started") is, for the first segment; later segments
   // legitimately begin after it, so take whichever is later. Without this the clock opened
-  // a fresh segment already most of the way expired (see f1Relay.ts for the measured case).
+  // a fresh segment already most of the way expired (see liveSocket.ts for the measured case).
   const segStart =
     qualifyingPartStartTs != null && s.sessionStartedTs != null
       ? Math.max(qualifyingPartStartTs, s.sessionStartedTs)
       : qualifyingPartStartTs;
   const segDurations = /sprint/i.test(sessionPath) ? SPRINT_QUALI_DURATION_MS : QUALI_DURATION_MS;
-  // Segment clock, mirroring the live relay so replay behaves identically: a running
+  // Segment clock, mirroring the live socket so replay behaves identically: a running
   // countdown, then "SQ1 ENDED" with an estimated countdown to the next segment's green
   // light during the break. The break length is MEASURED from this session's own earlier
   // Finished -> Started gap (scanning forward past the "Inactive" F1 emits between them),
@@ -1173,7 +1171,7 @@ export async function getStaticResults(): Promise<{
   top: { pos: number; tla: string; team_colour: string; best: number | null; gap: string }[];
 } | null> {
   const now = Date.now();
-  // Any completed session type — matches the token path (getRelayResults), which shows
+  // Any completed session type — matches the token path (socketResults), which shows
   // whatever session F1's hub last had open, practice/sprint included. Restricting this to
   // race/qualifying only meant the free-feed (no-token) env never showed the results ticker
   // for a just-finished practice or sprint session at all.

@@ -1,12 +1,12 @@
 /**
- * Relay to F1's official live-timing feed (SignalR Core), authenticated with an F1 TV
+ * Socket to F1's official live-timing feed (SignalR Core), authenticated with an F1 TV
  * token. Server-only.
  *
  * Two ways this gets used:
  *  1. The site's own `F1_TV_TOKEN` — ONE persistent, long-lived connection shared by every
  *     visitor (the original design). Holds a continuously-buffered ~3.3 Hz Position.z stream
  *     so the client can play it back on a delay with smooth interpolation.
- *  2. A VISITOR's own token (`getVisitorRelayState`) — a fresh, isolated, short-lived
+ *  2. A VISITOR's own token (`liveSocketStateForVisitor`) — a fresh, isolated, short-lived
  *     connection per request: connect, collect a bounded window of updates, return, and
  *     always disconnect. Never shares state with the owner's session or with any other
  *     visitor. The token exists in server memory only for that one request.
@@ -15,14 +15,14 @@
  * host. On stateless serverless the connection can't persist across invocations anyway, so
  * both paths converge on "reconnect and fetch a fresh window" there.)
  */
-import { PRE_START_LIVE_MS } from "./liveWindow";
+import { PRE_START_LIVE_MS, QUALI_DURATION_MS, SPRINT_QUALI_DURATION_MS, WEEKEND_FLIP_MS } from "../sessionWindows";
 import "server-only";
 import * as signalR from "@microsoft/signalr";
 import WsImpl from "ws";
 import zlib from "zlib";
-import { DRY_COMPOUNDS, parseLapTime, weekendTyresLeftForMeeting, WEEKEND_ALLOCATION } from "./f1feed";
-import { looksLikeJwt } from "./tokenExpiry";
-import { getNextRace, withinFeedWindow } from "./jolpica";
+import { DRY_COMPOUNDS, flatSessions, parseLapTime, weekendTyresLeftForMeeting, WEEKEND_ALLOCATION } from "../archive/archiveParser";
+import { looksLikeJwt } from "../tokenExpiry";
+import { getNextRace, withinFeedWindow } from "../jolpica";
 
 const g = globalThis as unknown as { WebSocket?: unknown };
 if (typeof g.WebSocket === "undefined") g.WebSocket = WsImpl;
@@ -31,11 +31,9 @@ const HUB = "https://livetiming.formula1.com/signalrcore";
 const TOPICS = ["DriverList", "TimingData", "TimingAppData", "Position.z", "SessionInfo", "SessionStatus", "ChampionshipPrediction", "RaceControlMessages", "TrackStatus", "LapCount", "CarData.z", "SessionData"];
 const ENDED = new Set(["finished", "finalised", "ends"]);
 const BUFFER_MS = 45_000; // keep ~45s of position frames (covers a 20s playback delay)
-const QUALI_DURATION_MS: Record<number, number> = { 1: 18 * 60_000, 2: 15 * 60_000, 3: 12 * 60_000 };
 // Sprint Qualifying (SQ1/SQ2/SQ3) runs shorter segments than a Saturday qualifying — the
 // whole session is ~44 min end-to-end where a normal quali is ~60. Both arrive with
 // Type "Qualifying", so they're only distinguishable by name.
-const SPRINT_QUALI_DURATION_MS: Record<number, number> = { 1: 12 * 60_000, 2: 10 * 60_000, 3: 8 * 60_000 };
 function qualiSegmentMs(part: number, sessionName?: string): number {
   const sprint = /sprint/i.test(sessionName ?? "");
   return (sprint ? SPRINT_QUALI_DURATION_MS : QUALI_DURATION_MS)[part] ?? 0;
@@ -48,47 +46,83 @@ function qualiSegmentMs(part: number, sessionName?: string): number {
 // segment clock takes over, so an inaccurate estimate self-corrects rather than persisting.
 const QUALI_BREAK_MS = 7 * 60_000;
 const QUALI_LAST_PART = 3;
-const LIVE_GRACE_MS = 120_000; // keep live tracking on 2 min after a session ends
+// Grace after a CONFIRMED end — F1's own "Finished"/ArchiveStatus, not a schedule guess. That
+// is why it is far tighter than POST_END_LIVE_MS in sessionWindows.ts: there is nothing to absorb
+// here, the session is known to be over. The two are different quantities, not a disagreement.
+const LIVE_GRACE_MS = 120_000;
 // How long the FINAL classification stays on the Driver Live Tracker after a session ends,
 // measured from F1's OWN "Finished" timestamp. Then the tracker goes idle. The result isn't
 // lost when this lapses — the hero results ticker keeps it for 24h, which is the right home
 // for "what happened earlier"; the live tracker is for what's happening now.
 const SHOW_FINISHED_MAX_MS = 2 * 60_000;
-const WEEKEND_FLIP_MS = 300_000; // flip the hero to the next weekend 5 min after the race ends
 // A visitor's connection stays open just long enough to catch a few incremental position/
 // telemetry updates beyond the initial snapshot, then always tears down — never held any
 // longer than this per request, regardless of how long the visitor keeps polling.
 /**
- * When the socket to F1 is worth opening at all, as a window around each scheduled session.
+ * When the socket to F1 may be OPENED, as a window around each scheduled session.
  *
- * The relay keeps a WebSocket to livetiming.formula1.com; establishing one costs negotiate +
+ * Named for what it gates — socket lifetime — not for anything about a race. An earlier name,
+ * CONNECT_AFTER_MS, sat next to three genuine race durations (2 h typical, 3 h FIA maximum,
+ * 6 h next-race rollover) and read like a fourth. It is not one: a race is over long before
+ * this window closes.
+ *
+ * The socket keeps a WebSocket to livetiming.formula1.com; establishing one costs negotiate +
  * handshake + Subscribe + snapshot, which is the single largest cost of a cold serverless
  * render. For most of the calendar — every day between race weekends — it can only report
  * "nothing is live", something the weekend schedule already knows without any socket.
  *
- * AFTER is much larger than BEFORE because the feed stays useful long past the flag: the
- * results ticker and the computed championship points both read from it until Jolpica
- * publishes the round, which can take many hours. Past this window the standings fall back to
- * Jolpica's official numbers, which is the correct answer once it has caught up.
+ * BOTH are short, because nothing needs the socket outside them. Measured against the Dutch GP
+ * archive, the classification is byte-identical from lap 70 through the end of the session — it
+ * stops changing AT the flag. An open socket afterwards fetches nothing new.
+ *
+ * It used to be held for 8 h purely because a serverless cold start has no memory of the race
+ * and had to re-read those same unchanged values to fill the results ticker and the computed
+ * championship points. lib/store/roundResults.ts keeps the final classification instead, so
+ * that reason is gone and the socket closes 5 min after the flag.
+ *
+ * Whether a session is LIVE is a different question entirely, answered by liveNow() and the
+ * windows in sessionWindows.ts — nothing here keeps a finished session on screen.
  */
-const CONNECT_BEFORE_MS = 60 * 60_000;
-const CONNECT_AFTER_MS = 8 * 3600_000;
-/** Memoised so the gate itself never costs a request per relay call. */
+const SOCKET_OPEN_BEFORE_MS = 5 * 60_000;
+const SOCKET_OPEN_AFTER_MS = 5 * 60_000;
+/** Memoised so the gate itself never costs a request per socket call. */
 let feedWindow: { at: number; open: boolean } | null = null;
 
 async function feedWindowOpen(): Promise<boolean> {
   if (feedWindow && Date.now() - feedWindow.at < 300_000) return feedWindow.open;
+
+  // Two independent schedules, then fail open. They come from different providers, so an
+  // outage at one does not decide whether the site has live timing.
+  //
+  //  1. Jolpica — start times plus an assumed duration per session type.
+  //  2. F1's own Index.json — carries a real StartDate AND EndDate per session, so it needs no
+  //     assumption at all. Second only because it is the same host as the socket itself: if F1
+  //     is unreachable, the socket was not going to connect either way.
+  //  3. Neither answered — OPEN. A schedule we could not fetch must never be the reason a live
+  //     session looks dead; the worst case is one socket that reports nothing.
+  let open: boolean | null = null;
   try {
     const race = await getNextRace();
-    // No schedule to reason about — fail OPEN. A missing schedule must never be the reason a
-    // live session looks dead; the worst case here is one socket that reports nothing.
-    const open = race ? withinFeedWindow(race, CONNECT_BEFORE_MS, CONNECT_AFTER_MS) : true;
-    feedWindow = { at: Date.now(), open };
-    return open;
+    if (race) open = withinFeedWindow(race, SOCKET_OPEN_BEFORE_MS, SOCKET_OPEN_AFTER_MS);
   } catch {
-    return true;
+    // fall through to F1's own index
   }
+  if (open === null) {
+    try {
+      const now = Date.now();
+      open = (await flatSessions()).some(
+        (s) => now >= s.startMs - SOCKET_OPEN_BEFORE_MS && now <= s.endMs + SOCKET_OPEN_AFTER_MS,
+      );
+    } catch {
+      open = null;
+    }
+  }
+  if (open === null) return true;
+
+  feedWindow = { at: Date.now(), open };
+  return open;
 }
+
 
 const VISITOR_COLLECT_MS = 2_500;
 const MAX_CONCURRENT_VISITOR_CONNECTIONS = 20;
@@ -238,7 +272,7 @@ export interface SessionResult {
   endedAtMs?: number; // when the session ended — client hides the bar 24h later
   top: { pos: number; tla: string; team_colour: string; best: number | null; gap: string }[];
 }
-export type VisitorRelayResult =
+export type VisitorSocketResult =
   | { status: "ok"; state: F1LiveState }
   | { status: "invalid_token" }
   | { status: "no_session" }
@@ -255,7 +289,7 @@ function isIndexPatch(v: unknown): v is Record<string, unknown> {
 function deepMerge(target: Dict, src: Dict) {
   for (const [k, v] of Object.entries(src)) {
     const cur = target[k];
-    // See the matching guard in f1feed.ts: an index-keyed patch against a stored array must
+    // See the matching guard in archiveParser.ts: an index-keyed patch against a stored array must
     // merge by index instead of replacing the array with just the changed member.
     if (Array.isArray(cur) && isIndexPatch(v)) {
       for (const [ik, iv] of Object.entries(v)) {
@@ -364,9 +398,9 @@ function clampStintsToLaps<T extends { laps: number }>(stints: T[], totalLaps: n
 /**
  * Everything below is ONE session's worth of connection + state + derivation, in a factory
  * so it can be instantiated either once (the owner's persistent singleton, below) or fresh
- * per visitor request (`getVisitorRelayState`) with zero shared state between instances.
+ * per visitor request (`liveSocketStateForVisitor`) with zero shared state between instances.
  */
-function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
+function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
   let conn: signalR.HubConnection | null = null;
   let starting: Promise<void> | null = null;
   let lastRefresh = 0;
@@ -426,11 +460,11 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
    *
    * The map deliberately renders ~20s behind the freshest position frame so the dots can be
    * interpolated smoothly, and the client sends that playback instant back as `asOf`. The
-   * free-feed path already honours it (getF1LiveState's `infoUptoMs`), but the relay was
+   * free-feed path already honours it (getF1LiveState's `infoUptoMs`), but the socket was
    * always answering with live "now" — so in the token environment the sectors and
    * mini-sector bars ran ~20s AHEAD of the car they belong to, which is exactly the
    * "sectors and driver tracker aren't in sync" symptom. Keeping a short history lets the
-   * relay answer for the same instant the dots are showing.
+   * socket answer for the same instant the dots are showing.
    */
   let sectorHistory: { t: number; byDriver: Record<string, SectorTime[]> }[] = [];
   /** Rolling snapshots of the RUNNING ORDER only, so it can be served at the map's playback
@@ -728,9 +762,11 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
    * once with a token, showed exactly two topics differing: Position.z and CarData.z are
    * empty anonymously and populated with a token. Everything else (DriverList, TimingData,
    * TimingAppData, SessionInfo, SessionStatus, SessionData, RaceControlMessages, TrackStatus)
-   * is byte-for-byte identical either way. LapCount and ChampionshipPrediction were empty in
-   * BOTH — they're populated by session type (race/sprint), not withheld by auth, so don't
-   * mistake their absence on a practice session for gating.
+   * is byte-for-byte identical either way. LapCount was empty in BOTH — it is populated by
+   * session type, not withheld by auth, so don't mistake its absence on a practice session for
+   * gating. ChampionshipPrediction was ALSO empty in both, but that test proves nothing about
+   * it: F1 carries no projection during practice for anyone. Race-day evidence since suggests
+   * it IS gated (tokenless prod saw none while a token-backed instance saw a full set).
    *
    * That covers the timing board, tyres, race control and results — all of which the
    * tokenless deployment previously had to source from F1's free STATIC feed, which
@@ -1017,7 +1053,7 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
    * A session that has FINISHED but is still the one F1's hub is serving — i.e. the final
    * classification is real, current, and worth showing rather than throwing away.
    *
-   * Previously `getRelayState()` returned null once `liveOrGrace()` lapsed (2 min past the
+   * Previously `socketState()` returned null once `liveOrGrace()` lapsed (2 min past the
    * flag), so the whole Driver Live Tracker collapsed to "no live session" while F1 still had
    * the complete final result — the result flashed up for two minutes and vanished.
    *
@@ -1168,7 +1204,7 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
     return { nums, mode, rows, order, fastestLap };
   }
 
-  async function getRelayState(asOfMs?: number): Promise<F1LiveState | null> {
+  async function socketState(asOfMs?: number): Promise<F1LiveState | null> {
     if (!(await ensureConnection())) return null;
     await refreshIfStale();
     // Live, OR finished-but-still-the-hub's-current-session (final classification stays up
@@ -1549,7 +1585,7 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
     return { round: Number(sessionInfo.Meeting?.Number ?? 0), flipReady: Date.now() >= endedAt + WEEKEND_FLIP_MS };
   }
 
-  async function getRelayResults(): Promise<SessionResult | null> {
+  async function socketResults(): Promise<SessionResult | null> {
     if (!(await ensureConnection())) return null;
     await refreshIfStale();
     if (!sessionInfo) return null;
@@ -1583,12 +1619,12 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
     ensureConnection,
     connectAndCollect,
     disconnect,
-    getRelayState,
+    socketState,
     getChampionship,
     getRaceControl,
     getLiveStatus,
     getEndedWeekend,
-    getRelayResults,
+    socketResults,
   };
 }
 
@@ -1597,13 +1633,45 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
 // F1_TV_TOKEN when it's set (full data, unchanged), and falls back to an ANONYMOUS
 // connection when it isn't — which still serves timing/tyres/race control/results in real
 // time, instead of the hours-late static archive the tokenless deploy used to be stuck with.
-const ownerSession = createRelaySession({ allowAnonymous: true });
-export const getRelayState = ownerSession.getRelayState;
-export const getChampionship = ownerSession.getChampionship;
-export const getRaceControl = ownerSession.getRaceControl;
-export const getLiveStatus = ownerSession.getLiveStatus;
-export const getEndedWeekend = ownerSession.getEndedWeekend;
-export const getRelayResults = ownerSession.getRelayResults;
+const ownerSession = createLiveSocketSession({ allowAnonymous: true });
+
+/* ---------------------------------- LIVE · socket ---------------------------------------- */
+/** Timing board, tyres, sectors, and — with a token — car positions and telemetry. */
+export const liveSocketState = ownerSession.socketState;
+/** Projected championship points. Almost certainly token-gated — see the evidence note on
+ *  /api/championship. Tokenless deployments compute points from the classification instead. */
+export const liveSocketChampionship = ownerSession.getChampionship;
+/** Flags, investigations, restart announcements. Works tokenless. */
+export const liveSocketRaceControl = ownerSession.getRaceControl;
+/** live · name · type · endedAt · round for the current session. Works tokenless. */
+export const liveSocketStatus = ownerSession.getLiveStatus;
+/** The just-ended Grand Prix weekend, for the hero flip. Works tokenless. */
+export const liveSocketEndedWeekend = ownerSession.getEndedWeekend;
+/** Classification of the current or most recently finished session. Works tokenless. */
+export const liveSocketResults = ownerSession.socketResults;
+
+/* ------------------------------ LIVE · token vs tokenless -------------------------------- */
+/**
+ * There is no separate "tokenless" entry point, and there cannot be a useful one: the socket
+ * above is ONE connection per process, and whether it authenticated was decided at connect
+ * time (`anonymous = !token`). Every caller shares it, so two functions over it would return
+ * identical data by construction.
+ *
+ * What the token actually changes is narrow and measured: exactly two topics, Position.z and
+ * CarData.z — the car positions and telemetry. Everything else the app shows (timing board,
+ * tyres, sectors, race control, session status, results) is byte-for-byte identical with or
+ * without one. So the difference is "is there a map", not "is there a different feed", and it
+ * is reported per response as `mapAvailable`.
+ *
+ * To RUN the app as a tokenless deployment while holding a token, mask the two gated topics
+ * rather than opening a second unauthenticated socket — see `maskTokenGated` in liveConfig.
+ */
+
+/** True when the site has a token configured. `mapAvailable` on a response is the better
+ *  signal for "did we actually get the map", since a present token can still be expired. */
+export function liveSocketHasToken(): boolean {
+  return !!process.env.F1_TV_TOKEN?.trim();
+}
 
 /* --------------------------- per-visitor, bring-your-own-token --------------------------- */
 let activeVisitorConnections = 0;
@@ -1615,16 +1683,16 @@ let activeVisitorConnections = 0;
  * The token exists in server memory only for the few seconds this call takes to run, and is
  * never logged, written to disk, or placed in a URL anywhere in this path.
  */
-export async function getVisitorRelayState(token: string): Promise<VisitorRelayResult> {
+export async function liveSocketStateForVisitor(token: string): Promise<VisitorSocketResult> {
   if (!looksLikeJwt(token)) return { status: "invalid_token" };
   if (activeVisitorConnections >= MAX_CONCURRENT_VISITOR_CONNECTIONS) return { status: "too_many" };
 
   activeVisitorConnections++;
-  const session = createRelaySession();
+  const session = createLiveSocketSession();
   try {
     const connected = await session.connectAndCollect(token, VISITOR_COLLECT_MS);
     if (!connected) return { status: "invalid_token" };
-    const state = await session.getRelayState();
+    const state = await session.socketState();
     return state ? { status: "ok", state } : { status: "no_session" };
   } catch {
     return { status: "invalid_token" };

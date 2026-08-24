@@ -3,10 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { WeekendSession } from "@/lib/jolpica";
+import { WEEKEND_FLIP_MS } from "@/lib/sessionWindows";
 import { useLiveStatus, LiveStatus } from "./useLiveStatus";
 
 const pad = (n: number) => String(n).padStart(2, "0");
-const FLIP_MS = 300_000; // "Race ended" holds for 5 min, then flip to the next weekend
 
 function delta(ms: number) {
   ms = Math.max(0, ms);
@@ -56,11 +56,11 @@ export default function SessionSchedule({
   // Just after the race: show "Race ended" (no timer) for 5 min, then refresh so the
   // server advances the hero/schedule/calendar to the next round.
   const isRace = (type ?? "").toLowerCase() === "race";
-  const raceEnded = ready && !live && !!endedAt && isRace && now! < endedAt + FLIP_MS;
+  const raceEnded = ready && !live && !!endedAt && isRace && now! < endedAt + WEEKEND_FLIP_MS;
   const flipped = useRef<number | null>(null);
   useEffect(() => {
     if (!ready || !endedAt || !isRace) return;
-    if (now! >= endedAt + FLIP_MS && flipped.current !== endedAt) {
+    if (now! >= endedAt + WEEKEND_FLIP_MS && flipped.current !== endedAt) {
       flipped.current = endedAt; // fire once per race end — no refresh loop
       router.refresh();
     }

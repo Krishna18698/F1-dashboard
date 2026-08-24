@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Driver } from "@/lib/openf1";
+import { Driver } from "@/lib/timingTypes";
 import { Bounds, computeBounds, rotate, tracePath } from "@/lib/geo";
 import { hex } from "@/lib/format";
 import { trackStatusInfo } from "@/lib/trackStatus";

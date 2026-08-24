@@ -1,4 +1,4 @@
-import { getLiveStatusData } from "@/lib/liveStatus";
+import { getLiveStatusData } from "@/lib/live/liveStatus";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
