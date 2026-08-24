@@ -22,6 +22,7 @@ import WsImpl from "ws";
 import zlib from "zlib";
 import { DRY_COMPOUNDS, parseLapTime, weekendTyresLeftForMeeting, WEEKEND_ALLOCATION } from "./f1feed";
 import { looksLikeJwt } from "./tokenExpiry";
+import { getNextRace, withinFeedWindow } from "./jolpica";
 
 const g = globalThis as unknown as { WebSocket?: unknown };
 if (typeof g.WebSocket === "undefined") g.WebSocket = WsImpl;
@@ -57,6 +58,38 @@ const WEEKEND_FLIP_MS = 300_000; // flip the hero to the next weekend 5 min afte
 // A visitor's connection stays open just long enough to catch a few incremental position/
 // telemetry updates beyond the initial snapshot, then always tears down — never held any
 // longer than this per request, regardless of how long the visitor keeps polling.
+/**
+ * When the socket to F1 is worth opening at all, as a window around each scheduled session.
+ *
+ * The relay keeps a WebSocket to livetiming.formula1.com; establishing one costs negotiate +
+ * handshake + Subscribe + snapshot, which is the single largest cost of a cold serverless
+ * render. For most of the calendar — every day between race weekends — it can only report
+ * "nothing is live", something the weekend schedule already knows without any socket.
+ *
+ * AFTER is much larger than BEFORE because the feed stays useful long past the flag: the
+ * results ticker and the computed championship points both read from it until Jolpica
+ * publishes the round, which can take many hours. Past this window the standings fall back to
+ * Jolpica's official numbers, which is the correct answer once it has caught up.
+ */
+const CONNECT_BEFORE_MS = 60 * 60_000;
+const CONNECT_AFTER_MS = 8 * 3600_000;
+/** Memoised so the gate itself never costs a request per relay call. */
+let feedWindow: { at: number; open: boolean } | null = null;
+
+async function feedWindowOpen(): Promise<boolean> {
+  if (feedWindow && Date.now() - feedWindow.at < 300_000) return feedWindow.open;
+  try {
+    const race = await getNextRace();
+    // No schedule to reason about — fail OPEN. A missing schedule must never be the reason a
+    // live session looks dead; the worst case here is one socket that reports nothing.
+    const open = race ? withinFeedWindow(race, CONNECT_BEFORE_MS, CONNECT_AFTER_MS) : true;
+    feedWindow = { at: Date.now(), open };
+    return open;
+  } catch {
+    return true;
+  }
+}
+
 const VISITOR_COLLECT_MS = 2_500;
 const MAX_CONCURRENT_VISITOR_CONNECTIONS = 20;
 // How long to wait after a failed connect before trying again. Long enough to stop four
@@ -709,6 +742,9 @@ function createRelaySession(opts: { allowAnonymous?: boolean } = {}) {
     if (!token && !opts.allowAnonymous) return false;
     if (conn && conn.state === signalR.HubConnectionState.Connected) return true;
     if (Date.now() - lastConnectFailAt < CONNECT_RETRY_COOLDOWN_MS) return false;
+    // Checked only when about to open a NEW socket — an established one is always reused, so
+    // a session running past its scheduled window is never dropped mid-flight.
+    if (!(await feedWindowOpen())) return false;
     if (starting) {
       await starting.catch(() => {});
       return conn?.state === signalR.HubConnectionState.Connected;

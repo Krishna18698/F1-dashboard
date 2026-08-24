@@ -7,7 +7,6 @@ import {
   getSchedule,
   getSeasonWinners,
   getStandingsRound,
-  hasRaceResult,
   weekendSessions,
 } from "@/lib/jolpica";
 import { getPaddockIntel } from "@/lib/news";
@@ -32,7 +31,7 @@ import { getStaticResults } from "@/lib/f1feed";
 export const dynamic = "force-dynamic";
 
 export default async function Page() {
-  const [rawNext, rawDrivers, rawConstructors, schedule, intel, standingsRound, winners, liveStatus] =
+  const [rawNext, rawDrivers, rawConstructors, schedule, intel, standingsRound, winners, liveStatus, finished] =
     await Promise.all([
       getNextRace(),
       getDriverStandings().catch(() => []),
@@ -44,6 +43,16 @@ export default async function Page() {
       // Seeds the hero/weekend-schedule "live" badge so the first client render already
       // reflects reality instead of flashing the countdown before the first client poll lands.
       getLiveStatusData().catch(() => ({ live: false })),
+      // The just-finished classification, for the computed standings below. Depends on
+      // nothing, so it belongs in this batch — awaited separately it added a whole extra
+      // round trip to every cold start, and its static-feed fallback can pull megabytes.
+      (async () => {
+        try {
+          return (await getRelayResults()) ?? (await getStaticResults());
+        } catch {
+          return null;
+        }
+      })(),
     ]);
 
   // Standings after the PREVIOUS round → movement arrows (needs standingsRound, so a 2nd pass;
@@ -59,13 +68,10 @@ export default async function Page() {
   // the round as soon as it ingests the SPRINT, so straight after the Dutch GP it read
   // "round 12" while holding only sprint points — the projection, which did have the race, was
   // discarded as not-ahead and the page showed pre-race totals. Ask about the race directly.
-  // Falls back to the schedule's current weekend, so the computed standings below still work
-  // when the relay is unreachable and liveStatus came back bare.
-  const weekendRound =
-    (liveStatus && "round" in liveStatus ? (liveStatus.round ?? 0) : 0) || Number(rawNext?.round ?? 0) || 0;
-  const raceIngested = weekendRound > 0 ? await hasRaceResult(weekendRound) : true;
-  // What the official standings already account for — the two sources below compare to this.
-  const lastScoredRound = raceIngested ? weekendRound : weekendRound - 1;
+  // The last round Jolpica has published a race result for. Derived from `winners` (the P1 of
+  // every race it has) rather than a dedicated request — same answer, already in the batch
+  // above, and a separate call sat on the critical path of every cold start to learn it.
+  const lastScoredRound = Math.max(0, ...Object.keys(winners).map(Number));
 
   // Whichever source has the round FIRST wins. Fastest to slowest:
   //   1. the live projection (ChampionshipPrediction) — applied client-side in the tables,
@@ -77,10 +83,17 @@ export default async function Page() {
   // window closed, and stayed wrong until Jolpica caught up.
   let drivers = rawDrivers;
   let constructors = rawConstructors;
-  try {
-    const finished = (await getRelayResults()) ?? (await getStaticResults());
+  {
+    // Which round this classification actually belongs to, matched by name. It must NOT come
+    // from "the next race": getNextRace() rolls over a few hours after the flag, so by the time
+    // these results are being read it already points at the FOLLOWING round. Asking whether
+    // that round was ingested always answered "no", and the just-run race got added on top of
+    // official totals that already included it — every scorer inflated by their own points.
+    const round = schedule.find((r) => (finished?.session_name ?? "").startsWith(r.raceName))?.round;
+    const scored = winners as Record<number, { code: string; name: string }>;
+    const alreadyIngested = round ? scored[Number(round)] != null : true;
     // Only a session that has actually finished, and only one Jolpica is still missing.
-    if (finished?.complete && finished.mode === "race" && !raceIngested && finished.top?.length) {
+    if (finished?.complete && finished.mode === "race" && !alreadyIngested && finished.top?.length) {
       // `mode` is "race" for a sprint too, so read the name — awarding full race points for a
       // sprint would silently inflate the table by up to 17 points a car.
       const sprint = /sprint/i.test(finished.session_name ?? "");
@@ -96,8 +109,6 @@ export default async function Page() {
       drivers = applyToDrivers(rawDrivers, gained);
       constructors = applyToConstructors(rawConstructors, gained, teamOf);
     }
-  } catch {
-    // Any failure here just leaves the official numbers in place.
   }
   // Flip only once the race is actually NOT live for 5 min (from the feed) — never on a
   // wall-clock guess, so an extended/red-flagged race won't roll over early. Advances the

@@ -119,6 +119,27 @@ export function currentlyLiveWeekendSession(race: Race): WeekendSession | null {
   }
   return null;
 }
+/**
+ * Is any session of this weekend near enough that F1's live feed is worth a socket?
+ *
+ * The relay holds a WebSocket to livetiming.formula1.com, and opening one costs a negotiate +
+ * handshake + Subscribe + snapshot — seconds on a cold serverless instance. Outside a race
+ * weekend it can only ever report "nothing is live", which the schedule already knows for
+ * free. So the schedule decides whether the socket is worth opening at all.
+ *
+ * Deliberately generous in BOTH directions, because the risks are not symmetric: too WIDE
+ * merely opens a socket that reports nothing, while too NARROW makes a live session look dead.
+ * Callers should also fail OPEN when the schedule itself is unavailable.
+ */
+export function withinFeedWindow(race: Race, beforeMs: number, afterMs: number, now = Date.now()): boolean {
+  return weekendSessions(race).some((s) => {
+    const start = Date.parse(s.iso);
+    if (!Number.isFinite(start)) return false;
+    const duration = SESSION_DURATION_MS[s.short] ?? 60 * 60_000;
+    return now >= start - beforeMs && now <= start + duration + afterMs;
+  });
+}
+
 export interface DriverStanding {
   position: string;
   points: string;
@@ -194,7 +215,11 @@ export async function getSeasonWinners(): Promise<Record<number, { code: string;
         Races: { round: string; Results?: { Driver: { code?: string; familyName: string } }[] }[];
       };
     };
-  }>(`/${SEASON}/results/1/`, 3600);
+    // Short TTL on purpose: this doubles as the "has Jolpica ingested this round's RACE yet"
+    // gate for the computed standings. Were it staler than the standings it guards (600s), the
+    // two caches could straddle the moment Jolpica ingests — official totals already including
+    // the race while this still said they didn't — and the points would be added twice.
+  }>(`/${SEASON}/results/1/`, 120);
   const out: Record<number, { code: string; name: string }> = {};
   for (const r of d.MRData.RaceTable.Races ?? []) {
     const w = r.Results?.[0]?.Driver;
@@ -213,29 +238,6 @@ export async function getStandingsRound(): Promise<number> {
     return Number(t.StandingsLists[0]?.round ?? t.round ?? 0);
   } catch {
     return 0;
-  }
-}
-
-/**
- * Has Jolpica actually published the RACE result for this round yet?
- *
- * The direct question, asked directly — rather than inferred from the standings' `round`,
- * which on a sprint weekend advances as soon as the SPRINT is ingested and so claims the
- * round while the race is still missing. Short revalidate because it gates whether we add a
- * session's points ourselves: were this staler than the standings it guards, the race could
- * be counted twice — once by Jolpica, once by us.
- */
-export async function hasRaceResult(round: number): Promise<boolean> {
-  if (round < 1) return false;
-  try {
-    const d = await get<{ MRData: { RaceTable: { Races: { Results?: unknown[] }[] } } }>(
-      `/${SEASON}/${round}/results/`,
-      120,
-    );
-    return (d.MRData.RaceTable.Races?.[0]?.Results?.length ?? 0) > 0;
-  } catch {
-    // Unknown — treat as ingested so we never double-count.
-    return true;
   }
 }
 
