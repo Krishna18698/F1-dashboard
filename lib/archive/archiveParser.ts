@@ -81,10 +81,18 @@ export function parseLapTime(v?: string | null): number | null {
 }
 
 /* --------------------------------- fetching -------------------------------- */
-async function fetchText(sessionPath: string, feed: string): Promise<string> {
+/**
+ * `live` decides the caching, and it matters a lot: these streams are big — TimingData for a
+ * race is ~7.5 MB — and a FINISHED session's archive never changes again. Fetching it
+ * `no-store` meant every cold serverless start re-downloaded the whole thing to read a
+ * finishing order, which measured 7.5 s on /api/f1results in production while every other
+ * endpoint answered in under half a second. A completed session is now cached for a day; a
+ * live one still bypasses the cache so polls see fresh data.
+ */
+async function fetchText(sessionPath: string, feed: string, live = true): Promise<string> {
   const res = await fetch(`${F1_LIVE.base}/${sessionPath}${feed}`, {
     headers: UA,
-    cache: "no-store",
+    ...(live ? { cache: "no-store" as const } : { next: { revalidate: 86_400 } }),
   });
   if (!res.ok) throw new Error(`F1 feed ${feed} → ${res.status}`);
   return res.text();
@@ -255,16 +263,16 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
   if (cached && (!live || Date.now() - cached.loadedAt < 2000)) return cached;
 
   const [driverTxt, timingTxt, appTxt, posTxt, lapTxt, trackTxt, carTxt, rcTxt, qpTxt, infoTxt] = await Promise.all([
-    fetchText(sessionPath, "DriverList.jsonStream").catch(() => ""),
-    fetchText(sessionPath, "TimingData.jsonStream").catch(() => ""),
-    fetchText(sessionPath, "TimingAppData.jsonStream").catch(() => ""),
-    fetchText(sessionPath, "Position.z.jsonStream").catch(() => ""),
-    fetchText(sessionPath, "LapCount.jsonStream").catch(() => ""),
-    fetchText(sessionPath, "TrackStatus.jsonStream").catch(() => ""),
-    fetchText(sessionPath, "CarData.z.jsonStream").catch(() => ""),
-    fetchText(sessionPath, "RaceControlMessages.jsonStream").catch(() => ""),
-    fetchText(sessionPath, "SessionData.jsonStream").catch(() => ""),
-    fetchText(sessionPath, "SessionInfo.json").catch(() => ""),
+    fetchText(sessionPath, "DriverList.jsonStream", live).catch(() => ""),
+    fetchText(sessionPath, "TimingData.jsonStream", live).catch(() => ""),
+    fetchText(sessionPath, "TimingAppData.jsonStream", live).catch(() => ""),
+    fetchText(sessionPath, "Position.z.jsonStream", live).catch(() => ""),
+    fetchText(sessionPath, "LapCount.jsonStream", live).catch(() => ""),
+    fetchText(sessionPath, "TrackStatus.jsonStream", live).catch(() => ""),
+    fetchText(sessionPath, "CarData.z.jsonStream", live).catch(() => ""),
+    fetchText(sessionPath, "RaceControlMessages.jsonStream", live).catch(() => ""),
+    fetchText(sessionPath, "SessionData.jsonStream", live).catch(() => ""),
+    fetchText(sessionPath, "SessionInfo.json", live).catch(() => ""),
   ]);
   let gmtOffset: string | null = null;
   try {

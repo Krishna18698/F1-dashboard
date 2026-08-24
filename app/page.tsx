@@ -29,7 +29,6 @@ import LiveSection from "./components/live/LiveSection";
 import { applyToConstructors, applyToDrivers, pointsFor } from "@/lib/championshipPoints";
 import { getRoundResult, roundStoreConfigured, saveRoundResult } from "@/lib/store/roundResults";
 import { liveSocketResults } from "@/lib/live/liveSocket";
-import { liveArchiveResults } from "@/lib/live/liveArchive";
 
 export const dynamic = "force-dynamic";
 
@@ -46,12 +45,18 @@ export default async function Page() {
       // Seeds the hero/weekend-schedule "live" badge so the first client render already
       // reflects reality instead of flashing the countdown before the first client poll lands.
       getLiveStatusData().catch(() => ({ live: false })),
-      // The just-finished classification, for the computed standings below. Depends on
-      // nothing, so it belongs in this batch — awaited separately it added a whole extra
-      // round trip to every cold start, and its static-feed fallback can pull megabytes.
+      // The just-finished classification, for the computed standings below.
+      //
+      // SOCKET ONLY — no archive fallback here, deliberately. The archive answer means pulling
+      // the session's full streams (~7.5 MB of TimingData for a race) just to read a finishing
+      // order, and this render blocks on it: /api/f1results measured 7.5 s cold in production
+      // against under half a second for every other endpoint. Outside the socket's window this
+      // returns null in milliseconds and the durable snapshot below supplies the order instead.
+      // The archive is still the fallback for /api/f1results itself, which the client polls
+      // after paint rather than blocking the page on.
       (async () => {
         try {
-          return (await liveSocketResults()) ?? (await liveArchiveResults());
+          return await liveSocketResults();
         } catch {
           return null;
         }
