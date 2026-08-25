@@ -78,8 +78,16 @@ An editorial (white & F1-red) Formula 1 dashboard built with **Next.js + TypeScr
 | Standings, calendar, next race/sessions | [Jolpica-F1](https://github.com/jolpica/jolpica-f1) (Ergast successor) | No |
 | Circuit outlines (for the track map + corner numbers) | [MultiViewer](https://multiviewer.app/) circuits API | No |
 | Paddock Intel news | Motorsport / Autosport / Formula1.com RSS | No |
-| **Live timing, map, telemetry, race control (real-time)** | F1 official SignalR feed (`livetiming.formula1.com/signalrcore`) — Position, TimingData, CarData, TrackStatus, RaceControlMessages, LapCount | **F1 TV token** (site owner's, or a visitor's own) |
-| Live timing, map, race control (delayed, free) | F1 official **static** feed (`livetiming.formula1.com/static`) — same topics, no auth | No |
+| **Timing board, tyres, sectors, race control, session status — real-time** | F1 live-timing WebSocket (`livetiming.formula1.com/signalrcore`) | **No.** F1 serves these to an anonymous subscribe |
+| **Car positions (the map) + telemetry** | The same socket — `Position.z` and `CarData.z` | **F1 TV token** (the site's, or a visitor's own) |
+| Replay, and the fallback when the socket is closed | F1 **static** archive (`livetiming.formula1.com/static`) — published hours after a session | No |
+| Finished-round classification, kept after the socket closes | Supabase (optional) | Supabase URL + service-role key |
+
+Only **two** topics are actually gated, measured by an A-B subscribe against the same session:
+`Position.z` and `CarData.z`. Everything else is byte-for-byte identical with or without a
+token, which is why a tokenless deployment still gets a real-time board — it just has no map.
+(The live championship projection appears to be gated too; see the note in
+`app/api/championship/route.ts`.)
 
 Standings/calendar/news are fetched server-side and cached. Live data is proxied through the
 app's own API routes (`/api/f1live`, `/api/f1results`, `/api/racecontrol`, `/api/championship`,
@@ -116,12 +124,17 @@ instead of `.env.local`).
    > data only (no video); it doesn't use a video-stream slot, and your credentials stay on
    > your machine (never logged, never sent to the browser).
 
-**Option C — free, no token at all:** the app uses F1's free **static** feed — same map,
-board, tyres, race control and DNF/pit handling, just delayed and without the per-car
-telemetry card. The Live Tracking header shows a small **FREE FEED** badge in this mode.
-The free feed turns out not to be real-time for races (confirmed: it can take hours after a
-session ends to publish), so when nothing is genuinely live the app instead replays the most
-recently completed session — clearly badged **REPLAY**, never presented as live.
+**Option C — no token at all:** the app still connects to F1's live socket, anonymously. You
+get the timing board, tyres, sectors, race control, session status and results **in real
+time** — everything except the car dots and the telemetry card, which are the only two gated
+topics. The Live Tracking header shows a **FREE FEED** badge and the map area explains what a
+token would add, rather than sitting empty.
+
+This is a real improvement over the old behaviour, which fell back to F1's static archive:
+that archive publishes *hours* after a session (the 2026 Dutch GP race was still
+`ArchiveStatus: "Generating"` 42 minutes after the flag), so a tokenless deployment used to
+show nothing useful during a live race. The archive is now only used for **REPLAY** — an
+explicit view a visitor chooses, always badged as such and never presented as live.
 
 See [`.env.example`](.env.example) for all variables.
 
@@ -140,51 +153,97 @@ See [DEPLOY.md](DEPLOY.md) for deploying your own private instance to Vercel's f
 
 ## Architecture
 
+Everything under `lib/` is organised by **mode first, then source** — because a file named for
+its implementation (`f1Relay`, `f1feed`) never told you which mode it served, and one of them
+quietly served both.
+
 ```
 app/
-  page.tsx                      # dashboard composition (server component, force-dynamic)
-  loading.tsx                   # route-level shimmer skeleton
-  manifest.ts                   # PWA manifest
+  page.tsx                    # dashboard composition (server component, force-dynamic)
+  loading.tsx                 # route-level shimmer skeleton
   api/
-    f1live/route.ts             # live map + timing (relay if token, else static feed; incremental frames)
-    f1results/route.ts          # latest-session classification (for the ticker)
-    racecontrol/route.ts        # race control messages + track status
-    championship/route.ts       # live championship projection
-    circuit/route.ts            # MultiViewer circuit outline proxy
-    f1token/route.ts            # token presence/expiry (never the token itself)
-    livestatus/route.ts         # is a session live right now + which one
-    live/[endpoint]/route.ts    # OpenF1 proxy (optional alternative source)
+    f1live/route.ts           # live map + timing; the mode priority chain lives here
+    f1results/route.ts        # latest classification — socket, then snapshot, then archive
+    racecontrol/route.ts      # race control messages + track status
+    championship/route.ts     # live championship projection
+    circuit/route.ts          # MultiViewer circuit outline proxy
+    f1token/route.ts          # token presence/expiry (never the token itself)
+    livestatus/route.ts       # is a session live right now, and which one
+    cron/recheck/route.ts     # daily stewards re-check (Vercel Cron, secret-guarded)
   components/
     Hero.tsx, Calendar.tsx, WeekendSchedule.tsx, SessionSchedule.tsx,
-    DriversTable.tsx, ConstructorsTable.tsx, Movement.tsx (standings arrows),
-    SessionResults.tsx (ticker), PaddockIntel.tsx, TokenBanner.tsx
+    DriversTable.tsx, ConstructorsTable.tsx, Movement.tsx, SessionResults.tsx,
+    PaddockIntel.tsx, TokenBanner.tsx
     live/
-      LiveSection.tsx            # composes the whole live-tracking section
-      TrackMap.tsx               # track map: playback, interpolation, tint, telemetry select
-      TimingBoard.tsx            # Driver Live Tracker
-      TyreTracker.tsx            # strategy board (stints, gained/lost, fastest lap)
-      TelemetryCard.tsx          # speed/gear/throttle/RPM for the followed driver
-      RaceControl.tsx            # toast + drawer; reveal synced to the driver tracker
-      MyTokenCard.tsx            # bring-your-own-token entry/removal UI
-      framesStore.ts             # position buffer, decoupled from React state;
-                                  # useHasFrames() — "is tracking really showing yet"
+      LiveSection.tsx         # composes the live section; server-seeded so idle paints instantly
+      TrackMap.tsx            # playback, interpolation, tint, driver select
+      TimingBoard.tsx         # Driver Live Tracker
+      TyreTracker.tsx         # strategy board (stints, gained/lost, fastest lap)
+      TelemetryCard.tsx       # speed/gear/throttle/RPM for the followed driver
+      RaceControl.tsx         # toast + drawer, revealed in step with the map
+      MyTokenCard.tsx         # bring-your-own-token entry/removal
+      liveTypes.ts            # shape of the rendered session state
+      framesStore.ts          # position buffer, decoupled from React state
 lib/
-  jolpica.ts                     # standings / calendar / weekend sessions / winners
-  f1Relay.ts                     # server-only SignalR client — a session factory; one
-                                  # persistent instance (site's own token) + a fresh,
-                                  # isolated, auto-torn-down instance per visitor token
-  f1feed.ts                      # F1 free static-feed engine (parse / decode / reduce)
-  f1Token.ts                     # site's own token expiry decoding (server-only)
-  tokenExpiry.ts                 # shared JWT-expiry decode, safe client- or server-side
-  visitorToken.ts                # a visitor's own token: localStorage read/write/clear
-  trackStatus.ts                 # shared TrackStatus code → label/colour
-  news.ts                        # Paddock Intel RSS
-  format.ts, geo.ts, lapRecords.ts, teamColors.ts, now.ts, *Config.ts
+  live/
+    liveSocket.ts             # LIVE · F1's live-timing WebSocket. One shared connection,
+                              #   opened only inside a schedule window; plus a fresh,
+                              #   isolated, auto-torn-down session per visitor token
+    liveArchive.ts            # LIVE · static archive, fallback tier
+    liveTest.ts               # LIVE TEST · archive on a virtual clock, for development
+    liveStatus.ts             # LIVE · socket -> archive -> schedule status chain
+    liveConfig.ts             # LIVE · mode, base URL, test-replay switch
+  replay/
+    replayArchive.ts          # REPLAY · static archive, only via explicit ?view=replay
+  archive/
+    archiveParser.ts          # private core: parse/decode/reduce. No mode of its own —
+                              #   both liveArchive and replayArchive read through it
+  store/
+    roundResults.ts           # durable finished-round snapshot (Supabase; optional)
+  sessionWindows.ts           # every timing constant more than one file needs
+  timingTypes.ts              # timing data shapes (pure types, no network)
+  jolpica.ts                  # standings / calendar / weekend sessions / winners
+  championshipPoints.ts       # 2026 points tables + applying a session to standings
+  f1Token.ts, tokenExpiry.ts, visitorToken.ts, trackStatus.ts, news.ts,
+  format.ts, geo.ts, lapRecords.ts, teamColors.ts, now.ts
+supabase/
+  schema.sql                  # one table; run once in the SQL editor
+vercel.json                   # the daily cron registration
 ```
+
+### When the socket is open
+
+The WebSocket is expensive to open (negotiate + handshake + subscribe), and outside a session
+it can only ever report "nothing is live" — which the schedule already knows for free. So it
+opens **5 minutes before** a scheduled session and closes **5 minutes after**, and midweek it
+is never opened at all. The window comes from Jolpica, then F1's own `Index.json` if that
+fails, then fails **open** — a schedule we could not fetch must never be the reason a live
+session looks dead. An established connection is never dropped mid-session.
+
+### How results and points survive after the flag
+
+The classification stops changing at the chequered flag — measured against the Dutch GP
+archive, the top five are byte-identical from lap 70 to the end. But Jolpica takes hours to
+publish the official result (~21 h for that race), which used to leave the standings showing
+**pre-race** totals in between. Four sources cover the gap, fastest first:
+
+1. **Live projection** — F1's own `ChampionshipPrediction`, while the socket still holds the
+   session. Applied in the standings tables.
+2. **Computed** — official totals plus the classification the app already has. Needs no token,
+   and is what a tokenless deployment uses.
+3. **Snapshot** — the finishing order written to Supabase at the flag, so a serverless cold
+   start hours later does not have to re-read a 7.5 MB archive to fill the ticker. A daily
+   cron re-checks it once per round for stewards' penalties.
+4. **Jolpica** — official, and supersedes all of the above once published.
+
+Without Supabase configured every one of those still works except step 3; the app simply falls
+back to socket → archive → Jolpica as before.
 
 ## Notes
 
-- Built with the latest Next.js (App Router) + Tailwind v4. No database.
+- Built with the latest Next.js (App Router) + Tailwind v4. The only database is an
+  optional single-table Supabase project for finished-round results; everything else is
+  fetched and cached at the fetch layer.
 - Uses F1's undocumented live-timing feed (the same one FastF1 / MultiViewer use) — free and
   fine for **personal** use, but unofficial and not for commercial/public deployment.
 - Not affiliated with Formula 1. Data © their respective providers.
