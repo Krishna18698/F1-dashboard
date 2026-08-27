@@ -584,7 +584,19 @@ function clampStintsToLaps<T extends { laps: number }>(stints: T[], totalLaps: n
 // Standard dry-tyre weekend allocation (13 sets) for a normal (non-alternative-tyre) event —
 // the live feed has no topic for the FIA's actual per-round nomination (a separate published
 // document, and the exact split can vary slightly by round), so this is the common default.
+/**
+ * Sets of each dry compound a driver starts the weekend with.
+ *
+ * A SPRINT weekend is not the standard 13 sets — it is 12, weighted differently, and using the
+ * standard numbers there is wrong in BOTH directions. Verified against the 2026 Dutch GP
+ * archive by counting every stint flagged New across all five sessions: the most any driver
+ * took was 6 soft, 4 medium, 2 hard. Four mediums is impossible under the standard allocation
+ * of three — which is exactly what went wrong on screen. Hamilton took 3 new mediums over that
+ * weekend, so the card showed him 0 left while he told his engineer on the radio he still had
+ * a fresh set. He did: on a sprint weekend that is 4 - 3 = 1.
+ */
 export const WEEKEND_ALLOCATION: Record<string, number> = { SOFT: 8, MEDIUM: 3, HARD: 2 };
+export const SPRINT_WEEKEND_ALLOCATION: Record<string, number> = { SOFT: 6, MEDIUM: 4, HARD: 2 };
 export const DRY_COMPOUNDS = ["SOFT", "MEDIUM", "HARD"] as const;
 
 /** How many sets of each compound have been freshly mounted (feed's `New` flag) so far,
@@ -627,22 +639,27 @@ export async function newSetCountsForCompletedSession(sessionPath: string): Prom
   return counts;
 }
 
-/** Practice/Qualifying sessions of the same event (same meeting folder) that happened at or
- *  before this one — the sessions whose tyre usage counts against the same weekend allocation. */
-async function weekendPriorSessions(sessionPath: string): Promise<string[]> {
+/** 12 sets on a sprint weekend, 13 otherwise — see the note on the constants above. */
+function allocationForWeekend(sessionNames: string[]): Record<string, number> {
+  return sessionNames.some((n) => /·\s*sprint\s*$/i.test(n)) ? SPRINT_WEEKEND_ALLOCATION : WEEKEND_ALLOCATION;
+}
+
+/** Every session of the same event that happened BEFORE this one, plus that weekend's
+ *  allocation. All types count — a sprint is typed "Race", and excluding it credited drivers
+ *  with tyres they had already used. */
+async function weekendPriorSessions(
+  sessionPath: string,
+): Promise<{ paths: string[]; allocation: Record<string, number> }> {
   const prefix = sessionPath.split("/").slice(0, 2).join("/") + "/";
   const all = await flatSessions();
   const mine = all.find((s) => s.path === sessionPath);
-  if (!mine) return [];
-  return all
-    .filter(
-      (s) =>
-        s.path !== sessionPath &&
-        s.path.startsWith(prefix) &&
-        s.startMs <= mine.startMs &&
-        /practice|qualifying/i.test(s.type),
-    )
-    .map((s) => s.path);
+  const weekend = all.filter((s) => s.path.startsWith(prefix));
+  const allocation = allocationForWeekend(weekend.map((s) => s.name));
+  if (!mine) return { paths: [], allocation };
+  return {
+    paths: weekend.filter((s) => s.path !== sessionPath && s.startMs < mine.startMs).map((s) => s.path),
+    allocation,
+  };
 }
 
 /** Sets remaining (of the weekend's assumed dry-tyre allocation) per driver, per compound —
@@ -653,7 +670,10 @@ async function weekendTyresLeft(
   currentAppState: Record<string, Record<string, unknown>>,
 ): Promise<Record<string, { compound: string; left: number }[]>> {
   const total: Record<string, Record<string, number>> = {};
-  const priors = await weekendPriorSessions(sessionPath).catch(() => []);
+  const { paths: priors, allocation } = await weekendPriorSessions(sessionPath).catch(() => ({
+    paths: [] as string[],
+    allocation: WEEKEND_ALLOCATION,
+  }));
   for (const p of priors) {
     try {
       addCounts(total, await newSetCountsForCompletedSession(p));
@@ -665,7 +685,7 @@ async function weekendTyresLeft(
   for (const numStr of Object.keys(currentAppState).concat(Object.keys(total))) {
     if (out[numStr]) continue;
     const used = total[numStr] ?? {};
-    out[numStr] = DRY_COMPOUNDS.map((c) => ({ compound: c, left: Math.max(0, WEEKEND_ALLOCATION[c] - (used[c] ?? 0)) }));
+    out[numStr] = DRY_COMPOUNDS.map((c) => ({ compound: c, left: Math.max(0, allocation[c] - (used[c] ?? 0)) }));
   }
   return out;
 }
@@ -684,9 +704,21 @@ export async function weekendTyresLeftForMeeting(
 ): Promise<Record<string, { compound: string; left: number }[]>> {
   const total: Record<string, Record<string, number>> = {};
   const all = await flatSessions().catch(() => []);
-  const priors = all.filter(
-    (s) => s.name.startsWith(`${meetingName} · `) && s.startMs <= beforeStartMs && /practice|qualifying/i.test(s.type),
-  );
+  const weekend = all.filter((s) => s.name.startsWith(`${meetingName} · `));
+
+  // EVERY earlier session of the weekend counts against the same allocation — including the
+  // SPRINT. It was previously filtered out by a /practice|qualifying/ test on `type`, and a
+  // sprint arrives typed "Race", so sets taken in it were invisible and those drivers were
+  // credited with tyres they had already used. Six drivers took new sets in the 2026 Dutch GP
+  // sprint alone.
+  //
+  // Strictly BEFORE, not on-or-before: `beforeStartMs` is the current session's own start, and
+  // its usage arrives separately as `liveSessionUsed`. Including it here would count it twice
+  // the moment its archive was published.
+  const priors = weekend.filter((s) => s.startMs < beforeStartMs);
+
+  // A sprint anywhere in the weekend changes the allocation for the whole weekend.
+  const allocation = allocationForWeekend(weekend.map((s) => s.name));
   for (const p of priors) {
     try {
       addCounts(total, await newSetCountsForCompletedSession(p.path));
@@ -697,7 +729,7 @@ export async function weekendTyresLeftForMeeting(
   const out: Record<string, { compound: string; left: number }[]> = {};
   for (const numStr of Object.keys(total)) {
     const used = total[numStr];
-    out[numStr] = DRY_COMPOUNDS.map((c) => ({ compound: c, left: Math.max(0, WEEKEND_ALLOCATION[c] - (used[c] ?? 0)) }));
+    out[numStr] = DRY_COMPOUNDS.map((c) => ({ compound: c, left: Math.max(0, allocation[c] - (used[c] ?? 0)) }));
   }
   return out;
 }

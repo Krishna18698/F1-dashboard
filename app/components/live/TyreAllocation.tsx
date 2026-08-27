@@ -15,9 +15,14 @@ type Left = { compound: string; left: number };
 /**
  * Quali and race: how many fresh sets of each dry compound a driver has LEFT from the
  * weekend's tyre allocation — real usage (the feed's per-stint `New` flag, summed across
- * every prior session of the weekend + this one) subtracted from the standard 13-set
- * allocation (8S/3M/2H). The allocation split itself is an assumption (the feed has no
- * topic for the FIA's actual per-round nomination); the usage subtracted from it is real.
+ * every prior session of the weekend + this one) subtracted from that weekend's allocation:
+ * 13 sets normally (8S/3M/2H), 12 on a SPRINT weekend (6S/4M/2H).
+ *
+ * Getting that split wrong is visible on screen. With the standard numbers applied to the 2026
+ * Dutch GP — a sprint weekend — the card showed Hamilton 0 fresh mediums while he was on the
+ * radio saying he still had a set. He did: 4 - 3 = 1. The allocation is still an assumption
+ * (the feed carries no topic for the FIA's per-round nomination); the usage subtracted from it
+ * is real, and a driver taking 4 new mediums that weekend is what proves the sprint split.
  * Distinct from the Tyre Tracker's race-strategy bar, which is about lap distance within
  * one session.
  */
@@ -52,7 +57,7 @@ export default function TyreAllocation({
         </span>
         <span
           className="rounded-sm bg-white/10 px-1.5 py-0.5 text-[0.6rem] font-bold tracking-wider text-ink-soft"
-          title="New sets left vs. the standard 13-set weekend allocation (8 Soft / 3 Medium / 2 Hard) — real usage from FP1–FP3 + Qualifying, subtracted from the assumed allocation."
+          title="Fresh sets left this weekend — real usage from every earlier session, subtracted from the weekend's allocation (13 sets normally, 12 on a sprint weekend)."
         >
           WEEKEND LEFT
         </span>

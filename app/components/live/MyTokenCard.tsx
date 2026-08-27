@@ -101,13 +101,21 @@ export default function MyTokenCard({
   }
 
   return (
-    <div className="carbon-bg mb-4 rounded-lg px-4 py-3 ring-1 ring-white/10">
-      <div className="flex items-start justify-between gap-3">
+    <div className="carbon-bg mb-4 rounded-lg px-4 py-3.5 ring-1 ring-white/10">
+      <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <p className="text-sm font-semibold text-white">Add your own F1 TV token</p>
-          <p className="mt-0.5 text-xs text-white/55">
-            Get real-time tracking with your own subscription — kept only in your browser,
-            never stored on this site&apos;s server.
+          {/* Two lines, not one block: what it buys, then the privacy note a step dimmer.
+              Name the two things a token actually unlocks — only Position.z and CarData.z are
+              gated, measured by an A-B subscribe against the same session — so "real-time
+              tracking" oversold it: the board is already real-time without one. */}
+          <p className="mt-1 text-xs leading-relaxed text-white/60">
+            Unlocks the <span className="text-white/85">driver tracker map</span> and{" "}
+            <span className="text-white/85">live telemetry</span> — speed, gear, throttle and RPM.
+            Everything else already works without one.
+          </p>
+          <p className="mt-1 text-[0.7rem] leading-relaxed text-white/35">
+            Kept only in your browser, never stored on this site&apos;s server.
           </p>
         </div>
         <button

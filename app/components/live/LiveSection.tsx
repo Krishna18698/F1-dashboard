@@ -149,8 +149,15 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
                 <>
                   <p className="font-medium text-ink-soft">No live Formula 1 session is currently running.</p>
                   <p className="mt-1 text-ink-soft/80">
-                    Live driver tracking, telemetry, tyre strategy, and Race Control automatically
-                    become available when an official F1 session starts.{" "}
+                    {/* Say what actually arrives without a token. The old copy listed driver
+                        tracking and telemetry alongside everything else, which reads as a promise
+                        that all of it appears when a session starts — but those two are the only
+                        parts F1 gates. Everything named here works on an anonymous connection. */}
+                    When a session starts you&apos;ll get the{" "}
+                    <span className="font-medium text-ink-soft">timing board, tyre strategy, sector
+                    times and Race Control</span>{" "}
+                    live — no token needed. A token adds the driver tracker map and per-car
+                    telemetry.{" "}
                     <button onClick={() => changeView("replay")} className="font-semibold text-red underline underline-offset-2">
                       Click here
                     </button>{" "}
@@ -164,7 +171,9 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
                   automatically the moment an official session goes live, no action needed.
                 </p>
               )}
-              <div className="mt-3 max-w-md">
+              {/* Wider than the old max-w-md: at 28rem the card's copy wrapped to four cramped
+                  lines once it started naming what a token actually unlocks. */}
+              <div className="mt-3 max-w-2xl">
                 <MyTokenCard tokenIssue={s.tokenIssue} ownerHasToken={s.ownerTokenConfigured} />
               </div>
             </div>
