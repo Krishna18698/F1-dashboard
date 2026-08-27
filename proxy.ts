@@ -4,8 +4,12 @@ import { NextRequest, NextResponse } from "next/server";
  * Optional password gate. When DASHBOARD_PASSWORD is set (e.g. on the deployed
  * host), every route requires HTTP Basic auth — so only you can reach it. Left
  * unset locally, the dashboard is open (no prompt).
+ *
+ * Named `proxy` in a file called proxy.ts: Next 16 deprecated the `middleware`
+ * convention and renamed it, because "middleware" was routinely confused with
+ * Express middleware. Same behaviour, and it still runs before any route renders.
  */
-export function middleware(req: NextRequest) {
+export function proxy(req: NextRequest) {
   const expected = process.env.DASHBOARD_PASSWORD;
   if (!expected) return NextResponse.next();
 

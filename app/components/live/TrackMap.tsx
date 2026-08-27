@@ -26,6 +26,7 @@ export default function TrackMap({
   name,
   trackStatus,
   formationLap,
+  suspended,
   laps,
   selectedNum,
   onSelect,
@@ -38,6 +39,8 @@ export default function TrackMap({
   name?: string;
   trackStatus?: string | null;
   formationLap?: boolean;
+  /** Race is red-flagged (SessionStatus "Aborted") — outranks every other tint. */
+  suspended?: boolean;
   laps?: { current: number; total: number };
   selectedNum?: number | null;
   onSelect?: (num: number | null) => void;
@@ -361,14 +364,23 @@ export default function TrackMap({
   }
 
   // Track-status tint: yellow / SC-orange / red glow around the map while not clear.
-  // Formation lap gets the same treatment (yellow, like a Yellow Flag) — the race hasn't
-  // gone green yet, and trackStatus itself is usually still "clear" at that point.
+  //
+  // A SUSPENDED race outranks everything. TrackStatus cannot be trusted for it: through the
+  // 2026 Dutch GP red flag it read "5" briefly and then "2" (yellow) for the rest of the
+  // stoppage, and on the live feed it read "1" (green) the whole time, because marshals had
+  // cleared the track while the race was still stopped. A red-flagged race glowing yellow is
+  // the one state that must never be understated, so it is driven by SessionStatus instead.
+  //
+  // Formation lap is next, tinted yellow like a Yellow Flag — the race has not gone green yet,
+  // and trackStatus is usually still "clear" at that point.
   const ts = trackStatusInfo(trackStatus ?? undefined);
-  const tint = formationLap
-    ? { color: "#f5c518", label: "Formation Lap", dark: true }
-    : trackStatus && !ts.calm
-      ? { color: ts.color, label: ts.label, dark: trackStatus === "2" || trackStatus === "7" }
-      : null;
+  const tint = suspended
+    ? { color: "#e10600", label: "Race Suspended", dark: false }
+    : formationLap
+      ? { color: "#f5c518", label: "Formation Lap", dark: true }
+      : trackStatus && !ts.calm
+        ? { color: ts.color, label: ts.label, dark: trackStatus === "2" || trackStatus === "7" }
+        : null;
 
   return (
     // Fixed square, and shrink-0 so nothing below can squeeze it: the circuit is the

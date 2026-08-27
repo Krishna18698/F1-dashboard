@@ -1042,22 +1042,36 @@ export async function getF1LiveState(
     if (targetRel != null) suspendedRestartMs = Date.now() + (targetRel - infoUptoMs);
   }
 
-  // Formation laps that follow a restart. The plain `formationLap` above cannot see these:
-  // it is pinned to sessionStartedTs (lights out), so it is false ever after. F1 states them
-  // outright, so read its words instead of inferring. See the matching note in liveSocket for
-  // why the window closes off the lap counter.
+  // Formation laps that follow a RESTART. The plain `formationLap` above cannot see these: it
+  // is pinned to sessionStartedTs (lights out), so it is false ever after. F1 states them
+  // outright, so read its words rather than inferring.
+  //
+  // Only after a suspension, which is what makes it a RESTART. "STANDING START" is emitted at
+  // the NORMAL start too — the 2026 Dutch GP sent it at 13:01:10 on lap 1, then again at
+  // 13:33:47 on lap 3 for the actual restart. Matching it unconditionally flagged laps 1-2 of
+  // the racing as a formation lap, so the map showed FORMATION LAP with no lap counter until
+  // the red flag happened to clear it. A restart cannot precede the suspension it restarts
+  // from, so anchoring to the last "Aborted" separates the two without guessing.
   let restartForming = false;
   if (m === "race" && sessionStatus === "Started") {
-    let newest = -Infinity;
-    let lapOf: number | null = null;
-    for (const { ts, msg } of s.rc) {
-      if (ts > infoUptoMs) break;
-      if (!/EXTRA FORMATION LAP|STANDING START/i.test(msg.Message ?? "")) continue;
-      if (ts <= newest) continue;
-      newest = ts;
-      lapOf = Number(msg.Lap ?? 0) || null;
+    let suspendedAt = -Infinity;
+    for (const h of s.statusHist) {
+      if (h.ts > infoUptoMs) break;
+      if (h.status === "Aborted") suspendedAt = h.ts;
     }
-    if (lapOf != null) restartForming = currentLap <= lapOf + 1;
+    if (suspendedAt > -Infinity) {
+      let newest = -Infinity;
+      let lapOf: number | null = null;
+      for (const { ts, msg } of s.rc) {
+        if (ts > infoUptoMs) break;
+        if (ts < suspendedAt) continue;
+        if (!/EXTRA FORMATION LAP|STANDING START/i.test(msg.Message ?? "")) continue;
+        if (ts <= newest) continue;
+        newest = ts;
+        lapOf = Number(msg.Lap ?? 0) || null;
+      }
+      if (lapOf != null) restartForming = currentLap <= lapOf + 1;
+    }
   }
 
   // Track status at this instant (yellow/SC/red map tint).

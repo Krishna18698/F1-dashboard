@@ -1515,12 +1515,22 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
    */
   function restartFormationLap(): boolean {
     if ((sessionStatus?.Status ?? "") !== "Started") return false;
+
+    // Only messages AFTER a suspension count — that is what makes it a RESTART. F1 emits
+    // "STANDING START" at the normal start as well (2026 Dutch GP: 13:01:10 lap 1, then
+    // 13:33:47 lap 3 for the real restart), so matching it unconditionally flagged the opening
+    // laps of the race as a formation lap and withheld the lap counter until the red flag
+    // cleared it by accident.
+    let suspendedAt = -Infinity;
+    for (const h of statusHistory) if (h.status === "Aborted" && h.ts > suspendedAt) suspendedAt = h.ts;
+    if (suspendedAt === -Infinity) return false;
+
     let lap: number | null = null;
     let newest = -Infinity;
     for (const m of Object.values(raceControl)) {
       if (!/EXTRA FORMATION LAP|STANDING START/i.test(m.Message ?? "")) continue;
       const ts = m.Utc ? Date.parse(m.Utc + "Z") : NaN;
-      if (!Number.isFinite(ts) || ts <= newest) continue;
+      if (!Number.isFinite(ts) || ts < suspendedAt || ts <= newest) continue;
       newest = ts;
       lap = Number(m.Lap ?? 0) || null;
     }

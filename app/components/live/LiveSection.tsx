@@ -40,12 +40,10 @@ function ViewToggle({ view, onChange }: { view: View; onChange: (v: View) => voi
 function Header({
   live,
   label,
-  freeFeed,
   ended,
 }: {
   live?: boolean;
   label: string;
-  freeFeed?: boolean;
   ended?: boolean;
 }) {
   return (
@@ -68,16 +66,10 @@ function Header({
             FINAL
           </span>
         )}
-        {freeFeed && (
-          <span
-            className="whitespace-nowrap rounded-full border border-line px-2.5 py-1 text-[0.6rem] font-bold tracking-wider text-muted"
-            title="Running on F1's free public feed — add an F1 TV token (F1_TV_TOKEN) for real-time, smoother tracking."
-          >
-            FREE FEED
-          </span>
-        )}
       </h3>
-      <span className="eyebrow ml-auto text-right text-[0.6rem] text-muted">{label}</span>
+      {/* Wraps onto its own line on a phone, where a right-aligned caption reads as detached
+          from the heading above it — so it only pulls right once it shares the row. */}
+      <span className="eyebrow text-left text-[0.6rem] text-muted sm:ml-auto sm:text-right">{label}</span>
     </div>
   );
 }
@@ -203,7 +195,6 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
       ? `${sessionLabel} · final classification`
       : `${sessionLabel} · on track now`;
 
-  const freeFeed = s.source === "free";
   // The feed can't carry car positions at all (anonymous hub connection), as opposed to
   // simply not having received any yet — the map would never draw, so don't render one.
   const mapUnavailable = s.mapAvailable === false;
@@ -213,13 +204,8 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
 
   return (
     <section>
-      <Header live={!s.replay} label={label} freeFeed={freeFeed} ended={ended} />
+      <Header live={!s.replay} label={label} ended={ended} />
       <ViewToggle view={view} onChange={changeView} />
-      {s.replay && (
-        <p className="-mt-3 mb-4 text-xs text-muted">
-          Showing a replay of the most recent session, from lights out — not real-time.
-        </p>
-      )}
       {!s.replay && <MyTokenCard tokenIssue={s.tokenIssue} ownerHasToken={s.ownerTokenConfigured} />}
 
       {/* Track map + clean running order side by side */}
@@ -251,7 +237,7 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
                     CarData.z are), so the race lap counter is available here too — it just
                     used to be rendered exclusively inside TrackMap, which this placeholder
                     replaces. Same placement/styling as the map's own badge. */}
-                {s.mode === "race" && (s.totalLaps ?? 0) > 0 && !s.formationLap && (
+                {s.mode === "race" && (s.totalLaps ?? 0) > 0 && !s.formationLap && s.sessionStatus !== "Aborted" && (
                   <span
                     className="tnum absolute right-3 top-3 rounded-full bg-black/60 px-2.5 py-1 font-mono text-[0.65rem] font-bold tracking-wider text-white/85"
                     title="Progress through the race — lap X of Y"
@@ -259,7 +245,15 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
                     LAP {s.currentLap ?? 0}/{s.totalLaps}
                   </span>
                 )}
-                {s.mode === "race" && s.formationLap && (
+                {/* Same precedence as the map's own tint: a suspended race outranks a
+                    formation lap, and both outrank the lap counter. */}
+                {s.mode === "race" && s.sessionStatus === "Aborted" && (
+                  <span className="absolute right-3 top-3 flex items-center gap-1.5 rounded-full bg-red px-2.5 py-1 text-[0.65rem] font-bold tracking-wider text-white">
+                    <span className="live-dot h-1.5 w-1.5 rounded-full bg-white" />
+                    RED FLAG
+                  </span>
+                )}
+                {s.mode === "race" && s.sessionStatus !== "Aborted" && s.formationLap && (
                   <span className="absolute right-3 top-3 rounded-full bg-yellow-400/85 px-2.5 py-1 text-[0.65rem] font-bold tracking-wider text-black">
                     FORMATION LAP
                   </span>
@@ -282,6 +276,7 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
               name={s.session?.location}
               trackStatus={s.trackStatus}
               formationLap={s.formationLap}
+              suspended={s.sessionStatus === "Aborted"}
               laps={s.mode === "race" ? { current: s.currentLap ?? 0, total: s.totalLaps ?? 0 } : undefined}
               selectedNum={selected}
               onSelect={setSelected}
