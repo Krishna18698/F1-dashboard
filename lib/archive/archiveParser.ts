@@ -82,17 +82,26 @@ export function parseLapTime(v?: string | null): number | null {
 
 /* --------------------------------- fetching -------------------------------- */
 /**
- * `live` decides the caching, and it matters a lot: these streams are big — TimingData for a
- * race is ~7.5 MB — and a FINISHED session's archive never changes again. Fetching it
- * `no-store` meant every cold serverless start re-downloaded the whole thing to read a
- * finishing order, which measured 7.5 s on /api/f1results in production while every other
- * endpoint answered in under half a second. A completed session is now cached for a day; a
- * live one still bypasses the cache so polls see fresh data.
+ * Streams too large for Next's data cache. Its per-entry ceiling is 2 MB and these run to
+ * 3-13 MB for a race, so asking it to cache them fails the write AND logs an error per fetch —
+ * a wall of "items over 2MB can not be cached" on every archive read, with no caching to show
+ * for it. They are served from the in-process session cache instead, which has no such limit.
+ *
+ * Everything else in a session (DriverList, TimingAppData, LapCount, TrackStatus,
+ * RaceControlMessages, SessionData, SessionInfo) sits comfortably under 2 MB and does cache.
+ */
+const TOO_BIG_TO_CACHE = new Set(["TimingData.jsonStream", "Position.z.jsonStream", "CarData.z.jsonStream"]);
+
+/**
+ * `live` decides the caching: a FINISHED session's archive never changes again, so it is cached
+ * for a day, while a live one bypasses the cache so polls see fresh data. Combined with the
+ * size rule above, a completed session's small streams cache and its big ones do not.
  */
 async function fetchText(sessionPath: string, feed: string, live = true): Promise<string> {
+  const cacheable = !live && !TOO_BIG_TO_CACHE.has(feed);
   const res = await fetch(`${F1_LIVE.base}/${sessionPath}${feed}`, {
     headers: UA,
-    ...(live ? { cache: "no-store" as const } : { next: { revalidate: 86_400 } }),
+    ...(cacheable ? { next: { revalidate: 86_400 } } : { cache: "no-store" as const }),
   });
   if (!res.ok) throw new Error(`F1 feed ${feed} → ${res.status}`);
   return res.text();
@@ -633,8 +642,13 @@ const priorSessionNewSetCache = new Map<string, Record<string, Record<string, nu
 export async function newSetCountsForCompletedSession(sessionPath: string): Promise<Record<string, Record<string, number>>> {
   const cached = priorSessionNewSetCache.get(sessionPath);
   if (cached) return cached;
-  const s = await load(sessionPath, false);
-  const counts = countNewSetsByDriver(mergeUpto(s.app, Number.MAX_SAFE_INTEGER));
+  // TimingAppData ALONE — this reads tyre stint flags and nothing else. It used to call load(),
+  // which pulls all ten streams of the session; computing the weekend allocation walks every
+  // earlier session, so a single render was downloading ~25 MB of position and telemetry data
+  // to count how many new sets each driver had fitted. TimingAppData is a few hundred KB and,
+  // being under the 2 MB ceiling, actually caches.
+  const app = parseDeltas(await fetchText(sessionPath, "TimingAppData.jsonStream", false).catch(() => ""));
+  const counts = countNewSetsByDriver(mergeUpto(app, Number.MAX_SAFE_INTEGER));
   priorSessionNewSetCache.set(sessionPath, counts);
   return counts;
 }

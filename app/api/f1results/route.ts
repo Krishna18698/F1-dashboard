@@ -1,4 +1,5 @@
-import { liveSocketResults, liveSocketStatus } from "@/lib/live/liveSocket";
+import { liveSocketResults } from "@/lib/live/liveSocket";
+import { getSchedule, raceStartISO } from "@/lib/jolpica";
 import { liveArchiveResults } from "@/lib/live/liveArchive";
 import { getRoundResult, roundStoreConfigured } from "@/lib/store/roundResults";
 
@@ -30,8 +31,14 @@ export async function GET() {
     if (result) return Response.json({ status: "ok", ...result });
 
     if (roundStoreConfigured()) {
-      const status = await liveSocketStatus();
-      const round = status.round ?? 0;
+      // The round comes from the SCHEDULE, not the socket. Asking liveSocketStatus() for it was
+      // self-defeating: the socket is shut outside its window, which is precisely when this tier
+      // is supposed to answer — so it returned no round, the snapshot was skipped, and every
+      // request fell through to the multi-megabyte archive it exists to avoid.
+      const now = Date.now();
+      const round = (await getSchedule().catch(() => []))
+        .filter((r) => Date.parse(raceStartISO(r)) <= now)
+        .reduce((max, r) => Math.max(max, Number(r.round) || 0), 0);
       const snap = round > 0 ? await getRoundResult(round) : null;
       if (snap) {
         return Response.json({
