@@ -22,6 +22,7 @@
  * second, Jolpica last. Nothing breaks, the snapshot is simply not kept.
  */
 import "server-only";
+import { storeConfig, storeHeaders } from "./supabase";
 
 /** One driver's finishing position, as classified at the flag. */
 export interface StoredPlace {
@@ -43,33 +44,18 @@ export interface RoundResult {
 
 const TABLE = "round_result";
 
-function config(): { url: string; key: string } | null {
-  const url = process.env.SUPABASE_URL?.trim();
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
-  return url && key ? { url: url.replace(/\/+$/, ""), key } : null;
-}
-
 /** True when a durable store is available — callers use it to decide whether to bother. */
 export function roundStoreConfigured(): boolean {
-  return config() !== null;
-}
-
-function headers(key: string, extra: Record<string, string> = {}): Record<string, string> {
-  return {
-    apikey: key,
-    Authorization: `Bearer ${key}`,
-    "Content-Type": "application/json",
-    ...extra,
-  };
+  return storeConfig() !== null;
 }
 
 /** The stored snapshot for a round, or null if there is none (or no store). */
 export async function getRoundResult(round: number): Promise<RoundResult | null> {
-  const c = config();
+  const c = storeConfig();
   if (!c || !Number.isFinite(round) || round < 1) return null;
   try {
     const res = await fetch(`${c.url}/rest/v1/${TABLE}?round=eq.${round}&select=*`, {
-      headers: headers(c.key),
+      headers: storeHeaders(c.key),
       cache: "no-store",
     });
     if (!res.ok) return null;
@@ -102,12 +88,12 @@ export async function getRoundResult(round: number): Promise<RoundResult | null>
 export async function saveRoundResult(
   r: Omit<RoundResult, "capturedAt" | "recheckedAt"> & { recheckedAt?: number | null },
 ): Promise<boolean> {
-  const c = config();
+  const c = storeConfig();
   if (!c || !r.places.length) return false;
   try {
     const res = await fetch(`${c.url}/rest/v1/${TABLE}?on_conflict=round`, {
       method: "POST",
-      headers: headers(c.key, { Prefer: "resolution=merge-duplicates,return=minimal" }),
+      headers: storeHeaders(c.key, { Prefer: "resolution=merge-duplicates,return=minimal" }),
       body: JSON.stringify({
         round: r.round,
         session_name: r.sessionName,
