@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Driver } from "@/lib/timingTypes";
+import { SessionMode } from "./liveTypes";
 import { Bounds, computeBounds, rotate, tracePath } from "@/lib/geo";
 import { hex } from "@/lib/format";
 import { trackStatusInfo } from "@/lib/trackStatus";
@@ -27,6 +28,7 @@ export default function TrackMap({
   trackStatus,
   formationLap,
   suspended,
+  mode,
   laps,
   selectedNum,
   onSelect,
@@ -39,8 +41,10 @@ export default function TrackMap({
   name?: string;
   trackStatus?: string | null;
   formationLap?: boolean;
-  /** Race is red-flagged (SessionStatus "Aborted") — outranks every other tint. */
+  /** Session is red-flagged (SessionStatus "Aborted") — outranks every other tint. */
   suspended?: boolean;
+  /** Only a race gets "suspended" — practice and qualifying are stopped, not suspended. */
+  mode?: SessionMode;
   laps?: { current: number; total: number };
   selectedNum?: number | null;
   onSelect?: (num: number | null) => void;
@@ -374,8 +378,11 @@ export default function TrackMap({
   // Formation lap is next, tinted yellow like a Yellow Flag — the race has not gone green yet,
   // and trackStatus is usually still "clear" at that point.
   const ts = trackStatusInfo(trackStatus ?? undefined);
+  // "Race Suspended" is the right words only for a race. A red flag in practice or qualifying
+  // stops the session without suspending a classification, and calling FP1 a suspended race
+  // reads as a bug — so name the flag itself outside the race.
   const tint = suspended
-    ? { color: "#e10600", label: "Race Suspended", dark: false }
+    ? { color: "#e10600", label: mode === "race" ? "Race Suspended" : "Red Flag", dark: false }
     : formationLap
       ? { color: "#f5c518", label: "Formation Lap", dark: true }
       : trackStatus && !ts.calm

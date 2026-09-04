@@ -106,6 +106,9 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
   // have, MyTokenCard below already tells them its status ("active"/expired/issue), and
   // showing this banner too would just repeat the same reassurance twice.
   const showLiveFeedBanner = s.ownerTokenConfigured && !hasVisitorToken;
+  // Either token already covers this visitor: the owner's serves everyone, and their own
+  // overrides it. Used to keep the idle copy from inviting a token that's already in play.
+  const tokenInPlay = s.ownerTokenConfigured || hasVisitorToken;
 
   if (s.status === "error" || s.status === "idle" || s.status === "loading") {
     // Minimized: nothing is live, so collapse to a slim card explaining what's coming.
@@ -129,12 +132,28 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
                   <p className="font-medium text-ink-soft">
                     {s.scheduledLive.location} · {s.scheduledLive.session_name} is happening right now.
                   </p>
+                  {/* The board is empty at this point because F1's hub hasn't pushed a driver
+                      list yet — /api/f1live only reports "live" once drivers.length > 0, and a
+                      published start time leads the feed by a few minutes. A token does NOT
+                      change that, so don't imply it will: it only ever adds the map and
+                      telemetry. The old copy told everyone to "add your token below" even when
+                      one was already configured, pointing at a card MyTokenCard hides in exactly
+                      that case — so gate the token sentence on nobody having one. */}
                   <p className="mt-1 text-ink-soft/80">
-                    Add your F1 TV token below to watch live, or{" "}
+                    Waiting for F1 to start sending timing for this session — the board appears on
+                    its own the moment it does.
+                    {!tokenInPlay && (
+                      <>
+                        {" "}
+                        A token adds the driver tracker map and telemetry; everything else works
+                        without one.
+                      </>
+                    )}{" "}
+                    Or{" "}
                     <button onClick={() => changeView("replay")} className="font-semibold text-red underline underline-offset-2">
-                      click here
+                      see a replay
                     </button>{" "}
-                    to watch a replay of the most recent session instead.
+                    of the most recent session instead.
                   </p>
                 </>
               ) : (
@@ -153,7 +172,7 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
                     <button onClick={() => changeView("replay")} className="font-semibold text-red underline underline-offset-2">
                       Click here
                     </button>{" "}
-                    to watch a replay of the most recent session instead.
+                    to see a replay of the most recent session instead.
                   </p>
                 </>
               )}
@@ -277,6 +296,7 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
               trackStatus={s.trackStatus}
               formationLap={s.formationLap}
               suspended={s.sessionStatus === "Aborted"}
+              mode={s.mode}
               laps={s.mode === "race" ? { current: s.currentLap ?? 0, total: s.totalLaps ?? 0 } : undefined}
               selectedNum={selected}
               onSelect={setSelected}
