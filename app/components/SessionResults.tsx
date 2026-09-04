@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatLap, hex } from "@/lib/format";
 
 interface Row {
@@ -44,8 +44,21 @@ function Item({ d, isRace }: { d: Row; isRace: boolean }) {
 /** Rolling news-ticker of the latest session's standings on the hero card. */
 const CACHE_KEY = "pitwall:lastResult";
 
+/**
+ * Never replace a result with an older one. The archive tier answers with the most recent
+ * session F1 has PUBLISHED, which mid-weekend can be a race from a fortnight ago — that used to
+ * overwrite the session actually on screen (and its localStorage copy) with something
+ * showable() then refused to draw, blanking the bar. Observed after Italian GP FP1.
+ * `>=` rather than `>` so a live session, whose endedAtMs is its fixed scheduled end, still
+ * updates itself as laps come in.
+ */
+const fresher = (next: Res, prev: Res | null) => !prev || (next.endedAtMs ?? 0) >= (prev.endedAtMs ?? 0);
+
 export default function SessionResults() {
   const [r, setR] = useState<Res | null>(null);
+  // The poll loop is created once (empty dep array), so reading `r` inside it would always see
+  // the first render's value. The ref tracks what is actually on screen.
+  const latest = useRef<Res | null>(null);
 
   useEffect(() => {
     let on = true;
@@ -63,7 +76,10 @@ export default function SessionResults() {
           const cached = localStorage.getItem(CACHE_KEY);
           if (cached && on) {
             const parsed = JSON.parse(cached) as Res;
-            if (showable(parsed)) setR(parsed); // don't restore something we won't render
+            if (showable(parsed)) {
+              latest.current = parsed;
+              setR(parsed); // don't restore something we won't render
+            }
           }
         } catch {}
       }
@@ -79,11 +95,18 @@ export default function SessionResults() {
         const d = (await (await fetch("/api/f1results", { cache: "no-store" })).json()) as Res;
         if (!on) return;
         if (d.status === "ok" && d.top?.length) {
+          // Poll cadence follows what the server reports even when the result is rejected
+          // below, so a live session is still refreshed every 15 s.
           complete = d.complete ?? true;
-          setR(d);
-          try {
-            localStorage.setItem(CACHE_KEY, JSON.stringify(d));
-          } catch {}
+          // Accept only what we would actually render, and only if it is not older than what
+          // is already showing — an "ok" response is not on its own reason to overwrite.
+          if (showable(d) && fresher(d, latest.current)) {
+            latest.current = d;
+            setR(d);
+            try {
+              localStorage.setItem(CACHE_KEY, JSON.stringify(d));
+            } catch {}
+          }
         }
         // status "none"/"off" → keep showing the stored result, don't clear.
       } catch {}
