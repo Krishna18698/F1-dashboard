@@ -163,7 +163,9 @@ app/
   loading.tsx                 # route-level shimmer skeleton
   api/
     f1live/route.ts           # live map + timing; the mode priority chain lives here
-    f1results/route.ts        # latest classification — socket, then snapshot, then archive
+    f1results/route.ts        # latest classification — socket, session snapshot, OpenF1,
+                              #   round snapshot, then archive; every tier that yields a
+                              #   finished result writes it back to the session snapshot
     racecontrol/route.ts      # race control messages + track status
     championship/route.ts     # live championship projection
     circuit/route.ts          # MultiViewer circuit outline proxy
@@ -198,8 +200,14 @@ lib/
   archive/
     archiveParser.ts          # private core: parse/decode/reduce. No mode of its own —
                               #   both liveArchive and replayArchive read through it
+  openf1/
+    openf1Results.ts          # fallback classification source; free tier is locked out
+                              #   (401) for the duration of any live F1 session
   store/
     roundResults.ts           # durable finished-round snapshot (Supabase; optional)
+    sessionResults.ts         # last completed session of ANY type — practice and quali
+                              #   included, which nothing else retains once the socket shuts
+    supabase.ts               # shared REST config for both stores
   sessionWindows.ts           # every timing constant more than one file needs
   timingTypes.ts              # timing data shapes (pure types, no network)
   jolpica.ts                  # standings / calendar / weekend sessions / winners
@@ -207,7 +215,7 @@ lib/
   f1Token.ts, tokenExpiry.ts, visitorToken.ts, trackStatus.ts, news.ts,
   format.ts, geo.ts, lapRecords.ts, teamColors.ts, now.ts
 supabase/
-  schema.sql                  # one table; run once in the SQL editor
+  schema.sql                  # two tables; run once in the SQL editor
 vercel.json                   # the daily cron registration
 ```
 
@@ -231,9 +239,17 @@ publish the official result (~21 h for that race), which used to leave the stand
    session. Applied in the standings tables.
 2. **Computed** — official totals plus the classification the app already has. Needs no token,
    and is what a tokenless deployment uses.
-3. **Snapshot** — the finishing order written to Supabase at the flag, so a serverless cold
-   start hours later does not have to re-read a 7.5 MB archive to fill the ticker. A daily
-   cron re-checks it once per round for stewards' penalties.
+3. **Snapshot** — the finishing order written to Supabase, so a serverless cold start hours
+   later does not have to re-read a 7.5 MB archive to fill the ticker. A daily cron re-checks
+   it once per round for stewards' penalties.
+
+   Two tables, for two different jobs. `round_result` keeps a race's classification and feeds
+   championship points. `session_result` keeps the most recent finished session of *any* type,
+   which matters because practice and qualifying exist nowhere else once the socket shuts five
+   minutes after the flag — F1's own archive does not publish a session for roughly another
+   40-60 minutes, and until it does the results ticker has nothing to show. Every tier that
+   produces a finished classification writes back to it, so a session missed at the time is
+   backfilled by any later visit rather than staying lost.
 4. **Jolpica** — official, and supersedes all of the above once published.
 
 Without Supabase configured every one of those still works except step 3; the app simply falls
@@ -242,7 +258,7 @@ back to socket → archive → Jolpica as before.
 ## Notes
 
 - Built with the latest Next.js (App Router) + Tailwind v4. The only database is an
-  optional single-table Supabase project for finished-round results; everything else is
+  optional two-table Supabase project for finished results; everything else is
   fetched and cached at the fetch layer.
 - Uses F1's undocumented live-timing feed (the same one FastF1 / MultiViewer use) — free and
   fine for **personal** use, but unofficial and not for commercial/public deployment.

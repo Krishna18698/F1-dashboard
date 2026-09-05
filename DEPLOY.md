@@ -27,6 +27,7 @@ serverless deployment is not paying to keep anything alive between race weekends
    | `SUPABASE_URL` | optional | `https://<ref>.supabase.co` — see below |
    | `SUPABASE_SERVICE_ROLE_KEY` | optional | the **service_role** key, not `anon` |
    | `CRON_SECRET` | with Supabase | any long random string (`openssl rand -hex 32`) |
+   | `OPENF1_API_KEY` | rarely | only if you want the OpenF1 fallback during a live session — its free tier returns 401 for every endpoint, past sessions included, while any F1 session is running |
 
 4. Click **Deploy**. In ~1 min you get a URL like `https://f1-dashboard-xxx.vercel.app`.
 
@@ -43,15 +44,23 @@ serverless deployment is not paying to keep anything alive between race weekends
 The socket closes 5 minutes after the chequered flag, because the classification stops
 changing there — an open connection afterwards fetches nothing new. Without somewhere to keep
 the final order, a cold serverless start hours later has to re-read the static archive to fill
-the results ticker, and that is a ~7.5 MB download (measured at 8-9 s). One small table
-removes it.
+the results ticker, and that is a ~7.5 MB download (measured at 8-9 s). Two small tables
+remove it.
+
+It matters most for practice and qualifying. Those exist *only* in the live socket, and F1's
+own archive does not publish a session for roughly 40-60 minutes after it ends (measured at the
+2026 Italian GP) — so without this the ticker sits empty for the best part of an hour after
+every session.
 
 > A SQLite **file** cannot do this job on Vercel: the filesystem is ephemeral and
 > per-invocation, so it would work in local dev and silently lose every race in production.
 
 1. Create a free project at [supabase.com](https://supabase.com), in the **same region** you
    chose for Vercel's functions.
-2. SQL Editor → New query → paste [`supabase/schema.sql`](supabase/schema.sql) → Run.
+2. SQL Editor → New query → paste [`supabase/schema.sql`](supabase/schema.sql) → Run. It
+   creates two tables: `round_result` (a race's classification, which feeds championship
+   points) and `session_result` (the most recent finished session of any type, which keeps the
+   results ticker fed). Re-running it is safe — both are `create table if not exists`.
 3. Settings → API → copy the **Project URL** and the **`service_role`** key into
    `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`. Do not use the `anon` key — it cannot
    bypass RLS and every write fails silently.
