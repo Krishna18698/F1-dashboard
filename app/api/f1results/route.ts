@@ -1,6 +1,6 @@
 import { liveSocketResults } from "@/lib/live/liveSocket";
 import { getSchedule, raceStartISO } from "@/lib/jolpica";
-import { liveArchiveResults } from "@/lib/live/liveArchive";
+import { liveArchiveLatestEnd, liveArchiveResults } from "@/lib/live/liveArchive";
 import { getRoundResult, roundStoreConfigured } from "@/lib/store/roundResults";
 import { getLatestSessionResult, saveSessionResult, type StoredSessionRow } from "@/lib/store/sessionResults";
 import { openF1LatestResult } from "@/lib/openf1/openf1Results";
@@ -48,6 +48,11 @@ export const maxDuration = 20;
 // so the worst case is a handful of redundant writes rather than duplicate rows.
 const saved = new Set<string>();
 
+/** Slack between a stored `endedAtMs` (from the socket's SessionInfo) and the index's own end
+ *  time for the same session, so a few seconds of disagreement doesn't look like a newer
+ *  session. Sessions are hours apart, so this can be generous without ever masking a real one. */
+const STALE_TOLERANCE_MS = 5 * 60_000;
+
 /**
  * Store a finished classification, whichever tier produced it.
  *
@@ -87,7 +92,16 @@ export async function GET() {
 
     // 2b) Whatever finished most recently, of any type. Cheap (one small row) and the only
     //     thing standing between a finished practice session and an empty ticker.
-    const stored = await getLatestSessionResult();
+    // A stored row is only worth serving if nothing newer has finished since. Serving it
+    // unconditionally turned the store into a STALENESS FLOOR: it always had an answer, so the
+    // archive tier below never ran, the newer session was never fetched — and because capture
+    // happens from whichever tier answers, never captured either. Italian GP FP3 sat missing
+    // all day behind FP2 for exactly this reason, and the ticker showed a session-old result.
+    // The index read here is small; the streams it guards against are megabytes.
+    const held = await getLatestSessionResult();
+    const latestEnd = await liveArchiveLatestEnd();
+    const stored =
+      held && (latestEnd == null || held.endedAtMs + STALE_TOLERANCE_MS >= latestEnd) ? held : null;
     const fromOpenF1 = stored ? null : await openF1LatestResult();
     // Only OpenF1's answer is worth writing back — `stored` came out of that same table.
     if (fromOpenF1) await capture(fromOpenF1, true);

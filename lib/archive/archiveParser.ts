@@ -1230,6 +1230,26 @@ export async function getF1LiveState(
 /** Most-recent completed session's (Race or Qualifying — no token needed) top finishers/times
  *  from the free feed. Not just races: a session as recent as Qualifying should still show on
  *  the results ticker until the next session (typically the Race) actually goes live. */
+/**
+ * When the most recently FINISHED session ended, from F1's own index — or null if the index is
+ * unreachable. Cheap: the index is a small JSON, nothing like the multi-megabyte streams
+ * getStaticResults goes on to pull.
+ *
+ * Exists so a caller holding a stored snapshot can tell whether it is still the newest session
+ * or has been overtaken. Without that check a snapshot store becomes a staleness floor: it
+ * always has an answer, so the archive is never consulted and a session it missed is never
+ * backfilled.
+ */
+export async function latestEndedSessionEndMs(): Promise<number | null> {
+  try {
+    const now = Date.now();
+    const last = (await flatSessions()).filter((x) => x.endMs <= now).sort((a, b) => b.endMs - a.endMs)[0];
+    return last ? last.endMs : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function getStaticResults(): Promise<{
   session_name: string;
   mode: "race" | "quali" | "practice";
