@@ -3,6 +3,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { WeekendSession } from "@/lib/jolpica";
 import { useLiveStatus, LiveStatus } from "./useLiveStatus";
+import { SCHEDULE_FAST_WINDOW_MS } from "@/lib/sessionWindows";
 
 function fmtLocal(iso: string): string {
   return new Date(iso).toLocaleString(undefined, {
@@ -25,10 +26,6 @@ export default function WeekendSchedule({
   // Seed the clock from the server timestamp so the done/next/live card colours are correct
   // on the very first paint (no light→dark flip). The interval keeps it live afterwards.
   const [now, setNow] = useState(nowMs);
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 30000);
-    return () => clearInterval(id);
-  }, []);
   // True only after client hydration (no setState-in-effect) — gates the local-time text so
   // a server(UTC)→client(local) time difference can't cause a hydration mismatch.
   const mounted = useSyncExternalStore(
@@ -36,7 +33,24 @@ export default function WeekendSchedule({
     () => true,
     () => false,
   );
-  const { live, name } = useLiveStatus(initialLiveStatus);
+  const { live, name, endedAt } = useLiveStatus(initialLiveStatus);
+
+  // Within SCHEDULE_FAST_WINDOW_MS of a session starting, while one is live, or just after one
+  // ended, tick every second so ✓ / NEXT land at the same moment as the hero's chips (which run
+  // a 1 s clock). Otherwise stay at 30 s — this is a boolean, so the interval is only torn down
+  // and rebuilt when the window is actually entered or left, not on every tick.
+  const nextStartMs = sessions
+    .map((x) => Date.parse(x.iso))
+    .filter((t) => Number.isFinite(t) && t > now)
+    .sort((a, b) => a - b)[0];
+  const nearBoundary =
+    live ||
+    (nextStartMs != null && nextStartMs - now <= SCHEDULE_FAST_WINDOW_MS) ||
+    (endedAt != null && now - endedAt <= SCHEDULE_FAST_WINDOW_MS);
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), nearBoundary ? 1000 : 30000);
+    return () => clearInterval(id);
+  }, [nearBoundary]);
 
   // The live session is matched by the feed's name (e.g. "… · Qualifying").
   const liveLabel = live && name ? name.split("·").pop()?.trim() : null;

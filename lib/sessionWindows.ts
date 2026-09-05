@@ -62,6 +62,16 @@ export function postEndLiveMs(type?: string, name?: string): number {
  * Was also written out separately in liveSocket, page.tsx and SessionSchedule — three copies of
  * the same number that nothing kept in agreement.
  */
+/**
+ * How close to a session boundary the weekend schedule switches to a 1-second clock.
+ *
+ * Its done-✓ / NEXT markers are pure clock arithmetic, so their accuracy is capped by how often
+ * `now` updates. At a flat 30 s they lagged the hero's 1-second chips by up to half a minute at
+ * every start and finish. Ticking every second all day would re-render 22 cards 86,400 times to
+ * change something twice, so it only speeds up when a boundary is actually near.
+ */
+export const SCHEDULE_FAST_WINDOW_MS = 5 * 60_000;
+
 export const WEEKEND_FLIP_MS = 2 * 60_000;
 
 /**
