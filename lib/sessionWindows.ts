@@ -72,6 +72,17 @@ export function postEndLiveMs(type?: string, name?: string): number {
  */
 export const SCHEDULE_FAST_WINDOW_MS = 5 * 60_000;
 
+/**
+ * How long after a qualifying segment's assumed duration expires before that assumption is
+ * allowed to declare the segment over.
+ *
+ * A segment does not end when its clock reaches zero — every car already on a flying lap gets
+ * to complete it. F1's own SessionStatus "Finished" marks the real end; this grace only exists
+ * so a feed that has gone quiet still eventually resolves. One lap plus an in-lap covers every
+ * circuit on the calendar (Monza ~80 s, Spa ~105 s).
+ */
+export const QUALI_LAST_LAP_GRACE_MS = 2 * 60_000;
+
 export const WEEKEND_FLIP_MS = 2 * 60_000;
 
 /**

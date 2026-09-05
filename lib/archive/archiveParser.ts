@@ -8,7 +8,7 @@
  * F1 sends incremental deltas, so we deep-merge lines up to a cutoff timestamp to
  * reconstruct state at any instant (which powers both replay and live polling).
  */
-import { postEndLiveMs, PRE_START_LIVE_MS, QUALI_DURATION_MS, SPRINT_QUALI_DURATION_MS } from "../sessionWindows";
+import { PRE_START_LIVE_MS, QUALI_DURATION_MS, QUALI_LAST_LAP_GRACE_MS, SPRINT_QUALI_DURATION_MS, postEndLiveMs } from "../sessionWindows";
 import zlib from "zlib";
 import { F1_LIVE } from "../live/liveConfig";
 
@@ -1153,7 +1153,11 @@ export async function getF1LiveState(
       const until = lastFinished != null ? lastFinished + breakMs - infoUptoMs : null;
       nextQualifyingSegmentInMs = until != null && until > 0 ? until : null;
       qualifyingRemainingMs = 0;
-    } else if (finishedPerFeed || infoUptoMs >= assumedEnd) {
+      // Same rule as the live socket: the clock reaching zero does not end a segment, because
+      // every car already on a flying lap gets to finish it. Only F1's own "Finished" ends one;
+      // the assumed duration is a backstop, allowed to decide only after a lap's grace. Without
+      // this the board read "Q3 ENDED" while Q3 was still being decided on track.
+    } else if (finishedPerFeed || infoUptoMs >= assumedEnd + QUALI_LAST_LAP_GRACE_MS) {
       qualifyingSegmentEnded = true;
       qualifyingRemainingMs = 0;
       if (qualifyingPart < 3) {

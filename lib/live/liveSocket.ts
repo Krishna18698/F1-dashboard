@@ -15,7 +15,7 @@
  * host. On stateless serverless the connection can't persist across invocations anyway, so
  * both paths converge on "reconnect and fetch a fresh window" there.)
  */
-import { PRE_START_LIVE_MS, QUALI_DURATION_MS, SPRINT_QUALI_DURATION_MS, WEEKEND_FLIP_MS } from "../sessionWindows";
+import { PRE_START_LIVE_MS, QUALI_DURATION_MS, QUALI_LAST_LAP_GRACE_MS, SPRINT_QUALI_DURATION_MS, WEEKEND_FLIP_MS } from "../sessionWindows";
 import "server-only";
 import * as signalR from "@microsoft/signalr";
 import WsImpl from "ws";
@@ -1282,8 +1282,19 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
       const assumedEndsAt = segStart + qualiSegmentMs(qualifyingPart, sessionInfo.Name);
       const segEndedAt = finishedPerFeed ? lastFinished! : assumedEndsAt;
 
-      if (!finishedPerFeed && now < assumedEndsAt) {
-        return { remainingMs: assumedEndsAt - now, segmentEnded: false, nextInMs: null as number | null, part: qualifyingPart };
+      // The clock reaching zero is NOT the end of a segment: every car already on a flying lap
+      // gets to finish it, and at Monza that is ~80 s during which the board used to read
+      // "Q3 ENDED" while Q3 was still being decided. F1's own "Finished" is the real signal, so
+      // while the feed is still talking to us that is the only thing allowed to end a segment.
+      // The assumed 12/10/8 stays as a backstop for a feed gone quiet, but only after a lap's
+      // grace — until then the clock simply shows 0:00, which is what a timing screen does.
+      if (!finishedPerFeed && now < assumedEndsAt + QUALI_LAST_LAP_GRACE_MS) {
+        return {
+          remainingMs: Math.max(0, assumedEndsAt - now),
+          segmentEnded: false,
+          nextInMs: null as number | null,
+          part: qualifyingPart,
+        };
       }
       if (qualifyingPart >= QUALI_LAST_PART) return { remainingMs: 0, segmentEnded: true, nextInMs: null as number | null, part: qualifyingPart };
 
