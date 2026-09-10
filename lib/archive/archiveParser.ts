@@ -1074,17 +1074,33 @@ export async function getF1LiveState(
       if (h.status === "Aborted") suspendedAt = h.ts;
     }
     if (suspendedAt > -Infinity) {
-      let newest = -Infinity;
-      let lapOf: number | null = null;
+      // s.rc is chronological and the loop breaks past infoUptoMs, but take both ends from an
+      // explicit collection so the rule does not depend on that.
+      const notices: number[] = [];
       for (const { ts, msg } of s.rc) {
         if (ts > infoUptoMs) break;
         if (ts < suspendedAt) continue;
         if (!/EXTRA FORMATION LAP|STANDING START/i.test(msg.Message ?? "")) continue;
-        if (ts <= newest) continue;
-        newest = ts;
-        lapOf = Number(msg.Lap ?? 0) || null;
+        const lp = Number(msg.Lap ?? 0) || 0;
+        if (lp > 0) notices.push(lp);
       }
-      if (lapOf != null) restartForming = currentLap <= lapOf + 1;
+      // Formation runs to max(firstAnnouncedLap + 1, newestAnnouncedLap).
+      //
+      // The two message types do not mean the same thing, which is why one constant could never
+      // fit both. "STANDING START" is the procedure notice, issued a lap BEFORE the field forms
+      // up; "EXTRA FORMATION LAP" names the lap it applies to and pushes the restart back. So the
+      // first notice sets the floor and any later message can only extend it.
+      //
+      // Checked against both 2026 restarts, and both windows inside them:
+      //   Italy      SS lap 4, EFL lap 5, SS lap 5 -> max(5, 5) = 5; formation 4-5, racing 6
+      //   Zandvoort  SS lap 3, EFL lap 4           -> max(4, 4) = 4; formation 3-4, racing 5
+      // Lap times confirm it: Monza lap 5 took 200 s, lap 6 took 166 s (grid wait, then racing),
+      // against ~85 s for a green lap.
+      //
+      // Both simpler rules were wrong in one direction: `<= newest + 1` held the board in
+      // formation through a whole racing lap, and `<= newest` called the gap between the two
+      // notices racing.
+      if (notices.length) restartForming = currentLap <= Math.max(notices[0] + 1, notices[notices.length - 1]);
     }
   }
 

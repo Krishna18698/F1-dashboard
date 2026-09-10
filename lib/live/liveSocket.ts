@@ -1536,17 +1536,36 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
     for (const h of statusHistory) if (h.status === "Aborted" && h.ts > suspendedAt) suspendedAt = h.ts;
     if (suspendedAt === -Infinity) return false;
 
-    let lap: number | null = null;
-    let newest = -Infinity;
+    // Object.values(raceControl) is keyed by message id, NOT chronological, so both ends have
+    // to come from an explicit sort rather than iteration order.
+    const notices: { ts: number; lap: number }[] = [];
     for (const m of Object.values(raceControl)) {
       if (!/EXTRA FORMATION LAP|STANDING START/i.test(m.Message ?? "")) continue;
       const ts = m.Utc ? Date.parse(m.Utc + "Z") : NaN;
-      if (!Number.isFinite(ts) || ts < suspendedAt || ts <= newest) continue;
-      newest = ts;
-      lap = Number(m.Lap ?? 0) || null;
+      const lap = Number(m.Lap ?? 0) || 0;
+      if (!Number.isFinite(ts) || ts < suspendedAt || lap <= 0) continue;
+      notices.push({ ts, lap });
     }
-    if (lap == null) return false;
-    return Number(lapCount?.CurrentLap ?? 0) <= lap + 1;
+    if (!notices.length) return false;
+    notices.sort((a, b) => a.ts - b.ts);
+    // Formation runs to max(firstAnnouncedLap + 1, newestAnnouncedLap).
+    //
+    // The two message types do not mean the same thing, which is why one constant could never
+    // fit both. "STANDING START" is the procedure notice, issued a lap BEFORE the field forms
+    // up; "EXTRA FORMATION LAP" names the lap it applies to and pushes the restart back. So the
+    // first notice sets the floor and any later message can only extend it.
+    //
+    // Checked against both 2026 restarts, and both windows inside them:
+    //   Italy      SS lap 4, EFL lap 5, SS lap 5 -> max(5, 5) = 5; formation 4-5, racing 6
+    //   Zandvoort  SS lap 3, EFL lap 4           -> max(4, 4) = 4; formation 3-4, racing 5
+    // Lap times confirm it: Monza lap 5 took 200 s, lap 6 took 166 s (grid wait, then racing),
+    // against ~85 s for a green lap.
+    //
+    // Both simpler rules were wrong in one direction: `<= newest + 1` held the board in
+    // formation through a whole racing lap, and `<= newest` called the gap between the two
+    // notices racing.
+    const lastForming = Math.max(notices[0].lap + 1, notices[notices.length - 1].lap);
+    return Number(lapCount?.CurrentLap ?? 0) <= lastForming;
   }
 
   async function getRaceControl(): Promise<{
