@@ -106,6 +106,7 @@ export default function TimingBoard({
   suspended,
   restartAtMs,
   formationLap,
+  totalLaps,
   selectedNum,
   onSelect,
 }: {
@@ -130,6 +131,8 @@ export default function TimingBoard({
   /** Field is circulating but not racing — the pre-race formation lap, or one of the extra
    *  formation laps that follow a red-flag restart. */
   formationLap?: boolean;
+  /** Race distance, so a driver who has completed it can be flagged as finished. */
+  totalLaps?: number | null;
   selectedNum?: number | null;
   onSelect?: (num: number | null) => void;
 }) {
@@ -158,6 +161,12 @@ export default function TimingBoard({
   // room — on a narrow screen they'd crush the driver name, so they collapse away and the
   // per-driver detail row below still carries them.
   const showSectors = !isRace && !!sectors?.size;
+  // A driver has taken the chequered flag once they have completed the race distance. Read per
+  // driver rather than from the session ending, because they cross over ~a minute and the board
+  // should show each one as it happens. Guarded on a real totalLaps: it is 0 until F1 publishes
+  // LapCount, and 0 >= 0 would flag the whole grid as finished before the race had begun.
+  const finished = (num: number) =>
+    isRace && (totalLaps ?? 0) > 0 && (laps.get(num)?.count ?? 0) >= (totalLaps as number);
   // The header row and each driver row are SEPARATE grids, so `auto` columns size themselves
   // independently — the narrow "S1" header ended up a different width from the "30.609"
   // beneath it and the columns visibly failed to line up. Fixed widths make both grids agree.
@@ -289,6 +298,13 @@ export default function TimingBoard({
                     {d?.name_acronym ?? num}
                   </span>
                   <span className="hidden truncate text-xs text-muted sm:inline">{d?.team_name}</span>
+                  {/* Beside the driver, not in the gap column — their finishing gap is still
+                      the useful number there, and this marks who is already home. */}
+                  {finished(num) && (
+                    <span className="shrink-0 text-xs leading-none" title="Finished — chequered flag" aria-label="Finished">
+                      🏁
+                    </span>
+                  )}
                 </div>
 
                 {isRace ? (

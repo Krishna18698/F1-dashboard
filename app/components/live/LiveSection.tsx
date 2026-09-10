@@ -354,6 +354,7 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
           suspended={s.sessionStatus === "Aborted"}
           restartAtMs={s.suspendedRestartMs}
           formationLap={s.formationLap}
+          totalLaps={s.totalLaps}
           selectedNum={selected}
           onSelect={setSelected}
         />
