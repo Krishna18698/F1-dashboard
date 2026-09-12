@@ -87,8 +87,20 @@ export default function TrackMap({
     closed: false,
   });
   useEffect(() => {
-    if (!failed) return;
+    if (!failed || !circuitKey) return;
     const t = traceRef.current;
+    if (!t.closed) {
+      try {
+        const cached = localStorage.getItem(`pitwall:outline:${circuitKey}`);
+        const parsed = cached ? (JSON.parse(cached) as Circuit) : null;
+        if (parsed?.x?.length) {
+          t.closed = true;
+          // Deferred out of the effect body, same idiom as MyTokenCard — this ends in setState.
+          const seed = setTimeout(() => setCircuit(parsed), 0);
+          return () => clearTimeout(seed);
+        }
+      } catch {}
+    }
     const absorb = () => {
       if (t.closed) return;
       for (const f of getFrames()) {
@@ -115,13 +127,23 @@ export default function TrackMap({
       const diag = Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
       const head = t.pts[0];
       const tail = t.pts[t.pts.length - 1];
-      if (t.pts.length > 120 && Math.hypot(tail.x - head.x, tail.y - head.y) < diag * 0.04) t.closed = true;
-      setCircuit({ x: xs, y: ys, rotation: 0, corners: [] });
+      if (!(t.pts.length > 120 && Math.hypot(tail.x - head.x, tail.y - head.y) < diag * 0.04)) return;
+      // Only publish a COMPLETED lap. Showing it grow point by point read as the page being
+      // broken rather than as a map loading, and a half-drawn circuit is worse than the
+      // skeleton it replaces — so accumulate silently and reveal once, finished.
+      t.closed = true;
+      const derived = { x: xs, y: ys, rotation: 0, corners: [] };
+      setCircuit(derived);
+      // Remember it: tracing costs a full lap of watching, and without this every reload and
+      // every later session at the same circuit pays that again.
+      try {
+        localStorage.setItem(`pitwall:outline:${circuitKey}`, JSON.stringify(derived));
+      } catch {}
     };
     absorb();
     const unsub = subscribeFrames(absorb);
     return unsub;
-  }, [failed, inPit]);
+  }, [failed, inPit, circuitKey]);
 
   // The frame buffer lives in framesStore (fed straight from the poll, no React state).
   // We just hold a live reference to it for the animation loop; resetting on unmount so
@@ -404,7 +426,12 @@ export default function TrackMap({
         </span>
         {failed ? (
           <div className="flex aspect-square w-full items-center justify-center rounded-lg carbon-bg px-6 text-center text-sm text-white/40">
-            Track outline unavailable for this circuit — timing &amp; tyres below still update live.
+            {/* With positions coming in we ARE building it, so say that rather than
+                "unavailable" — it resolves itself within a lap. Without them (no token, or
+                a stopped session) nothing is being traced and the old wording still holds. */}
+            {hasFrames
+              ? "Drawing this circuit from the cars \u2014 new tracks aren\u2019t published anywhere yet, so the map appears once a car completes a lap."
+              : "Track outline unavailable for this circuit \u2014 timing & tyres below still update live."}
           </div>
         ) : (
           <div className="relative aspect-square w-full overflow-hidden rounded-lg carbon-bg ring-1 ring-white/10">
