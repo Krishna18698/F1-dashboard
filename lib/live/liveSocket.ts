@@ -239,6 +239,10 @@ export interface F1LiveState {
   telFrames: TelFrame[]; // recent timestamped telemetry window (client plays back at the map's clock)
   qualifyingPart: number | null; // 1=Q1, 2=Q2, 3=Q3 (quali sessions only)
   qualifyingRemainingMs: number | null; // live countdown in the current segment
+  /** Ms left in the session itself (not a qualifying segment), or null when unknown.
+   *  Practice has no lap count and no segments, so without this its board had no clock at
+   *  all — the one thing you actually want to know during a practice hour. */
+  sessionRemainingMs: number | null;
   /** Current segment's clock has run out and the next one hasn't gone green yet. */
   qualifyingSegmentEnded: boolean;
   /** Estimated ms until the NEXT segment starts, during that break. Null on the last
@@ -1425,6 +1429,11 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
       telFrames: telBuffer.slice(-200), // ~45s at ~4Hz
       qualifyingPart: qualiClock.part ?? qualifyingPart,
       qualifyingRemainingMs: qualiClock.remainingMs,
+      sessionRemainingMs: (() => {
+        if (!sessionInfo?.EndDate) return null;
+        const endMs = Date.parse(sessionInfo.EndDate + "Z") - offsetMs(sessionInfo.GmtOffset);
+        return Number.isFinite(endMs) ? Math.max(0, endMs - Date.now()) : null;
+      })(),
       qualifyingSegmentEnded: qualiClock.segmentEnded,
       nextQualifyingSegmentInMs: qualiClock.nextInMs,
       // Two different situations, because the green light is known at different times.

@@ -523,6 +523,9 @@ export interface F1LiveState {
   qualifyingSegmentEnded?: boolean;
   nextQualifyingSegmentInMs?: number | null;
   formationLap: boolean;
+  /** Ms left in the session itself (not a qualifying segment). Practice has neither a lap
+   *  count nor segments, so this is the only clock its board can show. */
+  sessionRemainingMs: number | null;
   durationMs: number;
   segmentEvents?: SegmentEvent[];
   /** Line crossings ahead of the dots — lets the card blank on time. */
@@ -1242,6 +1245,9 @@ export async function getF1LiveState(
     sessionStatus,
     suspendedRestartMs,
     durationMs: s.durationMs,
+    // Against the PLAYBACK clock, not the wall clock — in a replay "time left" means time left
+    // at the instant being shown, which is what the board counts down from.
+    sessionRemainingMs: s.durationMs != null ? Math.max(0, s.durationMs - infoUptoMs) : null,
     segmentEvents,
     lapResets,
   };

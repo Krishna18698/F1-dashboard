@@ -99,6 +99,7 @@ export default function TimingBoard({
   sectors,
   qualifyingPart,
   qualifyingRemainingMs,
+  sessionRemainingMs,
   qualifyingSegmentEnded,
   nextQualifyingSegmentInMs,
   sprintQuali,
@@ -120,6 +121,8 @@ export default function TimingBoard({
   sectors?: Map<number, { value: string; overallFastest: boolean; personalFastest: boolean; segments: number[] }[]>;
   qualifyingPart?: number | null;
   qualifyingRemainingMs?: number | null;
+  /** Ms left in the session as a whole — the only clock practice can show. */
+  sessionRemainingMs?: number | null;
   qualifyingSegmentEnded?: boolean;
   nextQualifyingSegmentInMs?: number | null;
   sprintQuali?: boolean;
@@ -147,6 +150,10 @@ export default function TimingBoard({
   const forming = isRace && !redFlagged && formationLap === true;
   const isQuali = mode === "quali";
   const countdown = useCountdown(qualifyingRemainingMs);
+  // Practice has no lap count and no segments, so it showed no clock at all. Its own session
+  // timer is the thing you actually watch during a practice hour. Quali keeps the segment
+  // countdown above (finer-grained), and a race is measured in laps, not minutes.
+  const practiceLeft = useCountdown(mode === "practice" ? sessionRemainingMs : null);
   const restartIn = useCountdownTo(restartAtMs);
   const nextCountdown = useCountdown(nextQualifyingSegmentInMs);
   const segLabel = sprintQuali ? "SQ" : "Q";
@@ -220,6 +227,11 @@ export default function TimingBoard({
             {segLabel}
             {qualifyingPart}
             {qualifyingSegmentEnded ? " ENDED" : ""}
+          </span>
+        )}
+        {practiceLeft && (
+          <span className="tnum font-timing text-xs font-bold text-red" title="Time remaining in this session">
+            {practiceLeft}
           </span>
         )}
         {/* Running: time left in this segment. */}

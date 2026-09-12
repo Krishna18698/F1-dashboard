@@ -67,6 +67,7 @@ interface ApiResponse {
   telFrames?: { t: number; c: Record<string, [number, number, number, number]> }[];
   qualifyingPart?: number | null;
   qualifyingRemainingMs?: number | null;
+  sessionRemainingMs?: number | null;
   qualifyingSegmentEnded?: boolean;
   nextQualifyingSegmentInMs?: number | null;
   tokenIssue?: "invalid" | "busy";
@@ -182,6 +183,7 @@ function toState(r: ApiResponse): LiveState {
     formationLap: r.formationLap ?? false,
     qualifyingPart: r.qualifyingPart ?? null,
     qualifyingRemainingMs: r.qualifyingRemainingMs ?? null,
+    sessionRemainingMs: r.sessionRemainingMs ?? null,
     qualifyingSegmentEnded: r.qualifyingSegmentEnded ?? false,
     nextQualifyingSegmentInMs: r.nextQualifyingSegmentInMs ?? null,
     tokenIssue: r.tokenIssue ?? null,

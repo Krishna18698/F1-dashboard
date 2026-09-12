@@ -348,6 +348,7 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
           qualifyingPart={s.qualifyingPart}
           sprintQuali={/sprint/i.test(s.session?.session_name ?? "")}
           qualifyingRemainingMs={s.qualifyingRemainingMs}
+          sessionRemainingMs={s.sessionRemainingMs}
           qualifyingSegmentEnded={s.qualifyingSegmentEnded}
           nextQualifyingSegmentInMs={s.nextQualifyingSegmentInMs}
           knockedOut={s.knockedOut}
