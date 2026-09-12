@@ -106,7 +106,7 @@ export default function TrackMap({
     const t = traceRef.current;
     if (!t.closed) {
       try {
-        const cached = localStorage.getItem(`pitwall:outline:${circuitKey}`);
+        const cached = localStorage.getItem(`pitwall:outline:v2:${circuitKey}`);
         const parsed = cached ? (JSON.parse(cached) as Circuit) : null;
         if (parsed?.x?.length) {
           t.closed = true;
@@ -176,7 +176,7 @@ export default function TrackMap({
       // Remember it: tracing costs a full lap of watching, and without this every reload and
       // every later session at the same circuit pays that again.
       try {
-        localStorage.setItem(`pitwall:outline:${circuitKey}`, JSON.stringify(derived));
+        localStorage.setItem(`pitwall:outline:v2:${circuitKey}`, JSON.stringify(derived));
       } catch {}
     };
     absorb();
