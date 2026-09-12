@@ -3,27 +3,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Driver } from "@/lib/timingTypes";
 import { SessionMode } from "./liveTypes";
-import { Bounds, computeBounds, detectCorners, rotate, tracePath } from "@/lib/geo";
+import { Bounds, computeBounds, rotate, tracePath } from "@/lib/geo";
 import { hex } from "@/lib/format";
 import { trackStatusInfo } from "@/lib/trackStatus";
 import { getFrames, resetFrames, setPlaybackT, subscribeFrames, useHasFrames } from "./framesStore";
 
 const SIZE = 1000;
 
-/**
- * Official corner labels for circuits that have to be traced from the cars, in order from the
- * start/finish line. Geometry can find WHERE the corners are; only the organiser decides what
- * they are called, and the lettered ones (5A, 20A) could never be inferred — Madrid numbers 22
- * corners across 24 labelled turns. Read off F1's own published circuit map for the Madring.
- *
- * Only used when the detected corner count matches the list exactly; a mismatch means the
- * detector disagrees with the official layout, and a confidently wrong number is worse than
- * none, so it falls back to plain sequential numbering.
- */
-const CORNER_LABELS: Record<number, string[]> = {
-  153: ["1", "2", "3", "4", "5", "5A", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15",
-        "16", "17", "18", "19", "20", "20A", "21", "22"],
-};
 const DELAY_MS = 20000; // play back this far behind the latest data → smooth, F1-TV-style
 
 interface Circuit {
@@ -173,15 +159,18 @@ export default function TrackMap({
       // Rotate the loop so it begins at the start/finish line before numbering anything.
       const ordered =
         t.startIdx != null ? [...t.pts.slice(t.startIdx), ...t.pts.slice(0, t.startIdx)] : t.pts;
-      const found = detectCorners(ordered);
-      const labels = CORNER_LABELS[circuitKey];
-      const named =
-        labels && labels.length === found.length ? labels : found.map((_, i) => String(i + 1));
       const derived = {
         x: ordered.map((q) => q.x),
         y: ordered.map((q) => q.y),
         rotation: 0,
-        corners: found.map((c, i) => ({ number: i + 1, label: named[i], x: c.x, y: c.y, angle: 0 })),
+        // No corner numbers on a traced circuit, deliberately. Curvature can find WHERE the
+        // track bends, but not which bend is which: on Madrid the detected turns ranged from
+        // 11 to 97 degrees, so the weak ones are kinks on a straight while real corners get
+        // merged. A run that happened to total 24 — Madrid's official label count — did so by
+        // cancelling errors, not by being right, and tuning until it matched would only move
+        // the failure to the next new circuit. A number in the wrong place is worse than no
+        // number, so the outline stands on its own until a source publishes real corner data.
+        corners: [],
       };
       setCircuit(derived);
       // Remember it: tracing costs a full lap of watching, and without this every reload and
