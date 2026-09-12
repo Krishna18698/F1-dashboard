@@ -3,19 +3,36 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Driver } from "@/lib/timingTypes";
 import { SessionMode } from "./liveTypes";
-import { Bounds, computeBounds, rotate, tracePath } from "@/lib/geo";
+import { Bounds, computeBounds, detectCorners, rotate, tracePath } from "@/lib/geo";
 import { hex } from "@/lib/format";
 import { trackStatusInfo } from "@/lib/trackStatus";
 import { getFrames, resetFrames, setPlaybackT, subscribeFrames, useHasFrames } from "./framesStore";
 
 const SIZE = 1000;
+
+/**
+ * Official corner labels for circuits that have to be traced from the cars, in order from the
+ * start/finish line. Geometry can find WHERE the corners are; only the organiser decides what
+ * they are called, and the lettered ones (5A, 20A) could never be inferred — Madrid numbers 22
+ * corners across 24 labelled turns. Read off F1's own published circuit map for the Madring.
+ *
+ * Only used when the detected corner count matches the list exactly; a mismatch means the
+ * detector disagrees with the official layout, and a confidently wrong number is worse than
+ * none, so it falls back to plain sequential numbering.
+ */
+const CORNER_LABELS: Record<number, string[]> = {
+  153: ["1", "2", "3", "4", "5", "5A", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15",
+        "16", "17", "18", "19", "20", "20A", "21", "22"],
+};
 const DELAY_MS = 20000; // play back this far behind the latest data → smooth, F1-TV-style
 
 interface Circuit {
   x: number[];
   y: number[];
   rotation: number;
-  corners: { number: number; x: number; y: number; angle?: number }[];
+  /** `number` is what MultiViewer publishes; `label` carries an organiser's lettered turn
+   *  (Madrid's 5A / 20A), which a bare number cannot express. Render prefers label. */
+  corners: { number: number; label?: string; x: number; y: number; angle?: number }[];
 }
 
 export default function TrackMap({
@@ -23,6 +40,7 @@ export default function TrackMap({
   drivers,
   leaderNum,
   inPit,
+  lapCounts,
   retired,
   name,
   trackStatus,
@@ -36,6 +54,9 @@ export default function TrackMap({
   circuitKey?: number;
   drivers: Map<number, Driver>;
   leaderNum?: number;
+  /** Completed laps per driver — the traced car's counter ticking over marks the start/finish
+   *  line, which is where corner numbering has to begin. */
+  lapCounts?: Map<number, { count: number }>;
   inPit?: Set<number>;
   retired?: Set<number>;
   name?: string;
@@ -80,11 +101,19 @@ export default function TrackMap({
   //
   // Feeding it back through `setCircuit` means bounds, the path and every dot keep using the
   // one code path; a derived circuit differs only in having no corner numbers to label.
-  const traceRef = useRef<{ num: string | null; pts: { x: number; y: number }[]; lastT: number; closed: boolean }>({
-    num: null,
-    pts: [],
-    lastT: -Infinity,
-    closed: false,
+  const traceRef = useRef<{
+    num: string | null;
+    pts: { x: number; y: number }[];
+    lastT: number;
+    closed: boolean;
+    startIdx: number | null;
+    lapSeen: number | null;
+  }>({ num: null, pts: [], lastT: -Infinity, closed: false, startIdx: null, lapSeen: null });
+  // Read inside the frame callback rather than as an effect dependency: lapCounts is a fresh
+  // Map every poll, and depending on it would tear down and rebuild the subscription each time.
+  const lapsRef = useRef(lapCounts);
+  useEffect(() => {
+    lapsRef.current = lapCounts;
   });
   useEffect(() => {
     if (!failed || !circuitKey) return;
@@ -116,6 +145,13 @@ export default function TrackMap({
         if (inPit?.has(Number(t.num))) continue;
         const p = f.c[t.num];
         if (!p) continue;
+        // The traced car's lap counter ticking over IS the start/finish line, to within one
+        // sample. Corner numbering runs from there, so remember where in the trace it fell.
+        const lap = lapsRef.current?.get(Number(t.num))?.count ?? null;
+        if (lap != null) {
+          if (t.lapSeen != null && lap !== t.lapSeen) t.startIdx = t.pts.length;
+          t.lapSeen = lap;
+        }
         t.pts.push({ x: p[0], y: p[1] });
       }
       if (t.pts.length < 30) return;
@@ -124,6 +160,8 @@ export default function TrackMap({
       // fraction of the figure's own size, so it needs no assumption about the feed's units.
       const xs = t.pts.map((q) => q.x);
       const ys = t.pts.map((q) => q.y);
+      void xs;
+      void ys;
       const diag = Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
       const head = t.pts[0];
       const tail = t.pts[t.pts.length - 1];
@@ -132,7 +170,19 @@ export default function TrackMap({
       // broken rather than as a map loading, and a half-drawn circuit is worse than the
       // skeleton it replaces — so accumulate silently and reveal once, finished.
       t.closed = true;
-      const derived = { x: xs, y: ys, rotation: 0, corners: [] };
+      // Rotate the loop so it begins at the start/finish line before numbering anything.
+      const ordered =
+        t.startIdx != null ? [...t.pts.slice(t.startIdx), ...t.pts.slice(0, t.startIdx)] : t.pts;
+      const found = detectCorners(ordered);
+      const labels = CORNER_LABELS[circuitKey];
+      const named =
+        labels && labels.length === found.length ? labels : found.map((_, i) => String(i + 1));
+      const derived = {
+        x: ordered.map((q) => q.x),
+        y: ordered.map((q) => q.y),
+        rotation: 0,
+        corners: found.map((c, i) => ({ number: i + 1, label: named[i], x: c.x, y: c.y, angle: 0 })),
+      };
       setCircuit(derived);
       // Remember it: tracing costs a full lap of watching, and without this every reload and
       // every later session at the same circuit pays that again.
@@ -208,7 +258,8 @@ export default function TrackMap({
       const a = ((c.angle ?? 0) * Math.PI) / 180;
       const dx = Math.cos(a) * cos - Math.sin(a) * sin;
       const dy = Math.cos(a) * sin + Math.sin(a) * cos;
-      return { n: c.number, x: cx + dx * OFF, y: cy - dy * OFF };
+      // Prefer the organiser's label so a lettered turn (5A) shows as written, not as "5".
+      return { n: c.label ?? String(c.number), x: cx + dx * OFF, y: cy - dy * OFF };
     });
   }, [circuit, bounds, rot]);
 
@@ -429,9 +480,7 @@ export default function TrackMap({
             {/* With positions coming in we ARE building it, so say that rather than
                 "unavailable" — it resolves itself within a lap. Without them (no token, or
                 a stopped session) nothing is being traced and the old wording still holds. */}
-            {hasFrames
-              ? "Drawing this circuit from the cars \u2014 new tracks aren\u2019t published anywhere yet, so the map appears once a car completes a lap."
-              : "Track outline unavailable for this circuit \u2014 timing & tyres below still update live."}
+            {hasFrames ? "Mapping this circuit \u2014 ready after a lap." : "No track map for this circuit."}
           </div>
         ) : (
           <div className="relative aspect-square w-full overflow-hidden rounded-lg carbon-bg ring-1 ring-white/10">

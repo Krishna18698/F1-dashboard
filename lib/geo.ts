@@ -52,3 +52,70 @@ export function tracePath(pts: { x: number; y: number }[], b: Bounds, size: numb
     })
     .join(" ");
 }
+
+/**
+ * Corner positions along a closed circuit outline, in order of travel from its first point.
+ *
+ * Used for circuits nobody publishes an outline for, where the track is traced from the cars
+ * themselves and so arrives with no corner metadata at all. A corner is simply where the
+ * track turns hard: resample to even spacing so a fast straight and a slow hairpin are
+ * weighted the same, accumulate the heading change over a short window, and keep the local
+ * peaks. Points must already START at the start/finish line — F1 numbers corners from there.
+ */
+export function detectCorners(
+  pts: { x: number; y: number }[],
+  opts: { minTurnDeg?: number; minGapRatio?: number; samples?: number } = {},
+): { x: number; y: number }[] {
+  const { minTurnDeg = 28, minGapRatio = 0.022, samples = 600 } = opts;
+  if (pts.length < 20) return [];
+
+  // Even spacing: raw samples bunch up where the car is slow, which is exactly at corners,
+  // so unresampled curvature would find more "corners" the slower the section.
+  const seg: number[] = [0];
+  for (let i = 1; i < pts.length; i++) {
+    seg.push(seg[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y));
+  }
+  const total = seg[seg.length - 1];
+  if (!(total > 0)) return [];
+  const even: { x: number; y: number }[] = [];
+  let j = 0;
+  for (let k = 0; k < samples; k++) {
+    const d = (k / samples) * total;
+    while (j < seg.length - 2 && seg[j + 1] < d) j++;
+    const span = seg[j + 1] - seg[j] || 1;
+    const f = (d - seg[j]) / span;
+    even.push({ x: pts[j].x + (pts[j + 1].x - pts[j].x) * f, y: pts[j].y + (pts[j + 1].y - pts[j].y) * f });
+  }
+
+  // Turn accumulated across a window either side of each point, in degrees.
+  const w = Math.max(3, Math.round(samples * 0.012));
+  const at = (i: number) => even[((i % samples) + samples) % samples];
+  const turn: number[] = [];
+  for (let i = 0; i < samples; i++) {
+    const a = at(i - w);
+    const b = at(i);
+    const c = at(i + w);
+    const h1 = Math.atan2(b.y - a.y, b.x - a.x);
+    const h2 = Math.atan2(c.y - b.y, c.x - b.x);
+    let d = ((h2 - h1) * 180) / Math.PI;
+    while (d > 180) d -= 360;
+    while (d < -180) d += 360;
+    turn.push(Math.abs(d));
+  }
+
+  // Local peaks above the threshold, thinned so one long corner is not counted several times.
+  const minGap = Math.max(2, Math.round(samples * minGapRatio));
+  const peaks: number[] = [];
+  for (let i = 0; i < samples; i++) {
+    const v = turn[i];
+    if (v < minTurnDeg) continue;
+    let best = true;
+    for (let k = -minGap; k <= minGap && best; k++) {
+      if (k === 0) continue;
+      const o = turn[((i + k) % samples + samples) % samples];
+      if (o > v || (o === v && k < 0)) best = false;
+    }
+    if (best) peaks.push(i);
+  }
+  return peaks.map((i) => even[i]);
+}

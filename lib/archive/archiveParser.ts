@@ -246,6 +246,10 @@ interface SessionCache {
   /** Every SessionStatus transition with its session-relative timestamp. Qualifying emits a
    *  Started+Finished pair PER SEGMENT, which is what the between-segments state needs. */
   statusHist: { ts: number; status: string }[];
+  /** F1's own session clock. `Remaining` is authoritative and `Extrapolating` says whether it
+   *  is running: it stops dead for a red flag and is adjusted afterwards, which is how a
+   *  60-minute practice can occupy 77 minutes of wall clock. */
+  clockHist: { ts: number; remainingMs: number; running: boolean }[];
   car: { ts: number; raw: string }[]; // CarData.z lines, decoded lazily (window per request)
   posOffset: number | null; // absolute Utc → session-relative ms (shared by Position + CarData)
   frames: PosFrame[];
@@ -271,7 +275,7 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
   // Completed session → static, cache forever. Live → 2s TTL so polls see fresh data.
   if (cached && (!live || Date.now() - cached.loadedAt < 2000)) return cached;
 
-  const [driverTxt, timingTxt, appTxt, posTxt, lapTxt, trackTxt, carTxt, rcTxt, qpTxt, infoTxt] = await Promise.all([
+  const [driverTxt, timingTxt, appTxt, posTxt, lapTxt, trackTxt, carTxt, rcTxt, qpTxt, infoTxt, clockTxt] = await Promise.all([
     fetchText(sessionPath, "DriverList.jsonStream", live).catch(() => ""),
     fetchText(sessionPath, "TimingData.jsonStream", live).catch(() => ""),
     fetchText(sessionPath, "TimingAppData.jsonStream", live).catch(() => ""),
@@ -282,6 +286,7 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
     fetchText(sessionPath, "RaceControlMessages.jsonStream", live).catch(() => ""),
     fetchText(sessionPath, "SessionData.jsonStream", live).catch(() => ""),
     fetchText(sessionPath, "SessionInfo.json", live).catch(() => ""),
+    fetchText(sessionPath, "ExtrapolatedClock.jsonStream", live).catch(() => ""),
   ]);
   let gmtOffset: string | null = null;
   try {
@@ -326,6 +331,22 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
   // SessionStatus:"Started" — F1's own explicit signal for lights-out/race-start, a far more
   // reliable "the race has actually begun" marker than inferring it from position/lap data.
   const qp: { ts: number; part: number }[] = [];
+  const clockHist: { ts: number; remainingMs: number; running: boolean }[] = [];
+  for (const raw of clockTxt.replace(/^\ufeff/, "").split(/\r?\n/)) {
+    if (!raw) continue;
+    try {
+      const ts = tsToMs(raw.slice(0, TS_LEN));
+      const c = JSON.parse(raw.slice(TS_LEN)) as { Remaining?: string; Extrapolating?: boolean };
+      if (!c.Remaining) continue;
+      const [h, m, sec] = c.Remaining.split(":").map(Number);
+      const remainingMs = ((h || 0) * 3600 + (m || 0) * 60 + (sec || 0)) * 1000;
+      // `Extrapolating` is absent on some lines; carry the previous value rather than
+      // assuming, since "missing" is not the same as "stopped".
+      const running = c.Extrapolating ?? clockHist.at(-1)?.running ?? false;
+      clockHist.push({ ts, remainingMs, running });
+    } catch {}
+  }
+
   const statusHist: { ts: number; status: string }[] = [];
   let sessionStartedTs: number | null = null;
   for (const raw of qpTxt.replace(/^﻿/, "").split(/\r?\n/)) {
@@ -418,6 +439,7 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
     gmtOffset,
     sessionStartedTs,
     statusHist,
+    clockHist,
     car,
     posOffset,
     frames,
@@ -1246,8 +1268,24 @@ export async function getF1LiveState(
     suspendedRestartMs,
     durationMs: s.durationMs,
     // Against the PLAYBACK clock, not the wall clock — in a replay "time left" means time left
-    // at the instant being shown, which is what the board counts down from.
-    sessionRemainingMs: s.durationMs != null ? Math.max(0, s.durationMs - infoUptoMs) : null,
+    // at the instant being shown. Measured to F1's own "Finished", NOT to durationMs: that is
+    // the length of the published FEED, which opens well before the green light and keeps
+    // running afterwards, so a 60-minute practice counted down from 72:33.
+    // F1's own session clock, not arithmetic on a scheduled end. It stops for a red flag and
+    // is adjusted afterwards — today's Madrid FP3 ran 10:30-11:47 for a 60-minute session — so
+    // anything derived from StartDate/EndDate, or from the feed's own length, is wrong by
+    // however long the session was stopped.
+    sessionRemainingMs: (() => {
+      let last: { ts: number; remainingMs: number; running: boolean } | null = null;
+      for (const c of s.clockHist) {
+        if (c.ts > infoUptoMs) break;
+        last = c;
+      }
+      if (!last) return null;
+      // Running: the published figure is a snapshot, so age it. Stopped: it is frozen and the
+      // number stands as published.
+      return last.running ? Math.max(0, last.remainingMs - (infoUptoMs - last.ts)) : last.remainingMs;
+    })(),
     segmentEvents,
     lapResets,
   };

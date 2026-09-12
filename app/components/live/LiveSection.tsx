@@ -291,6 +291,7 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
               drivers={s.drivers}
               leaderNum={leaderNum}
               inPit={s.inPit}
+              lapCounts={s.laps}
               retired={s.retired}
               name={s.session?.location}
               trackStatus={s.trackStatus}

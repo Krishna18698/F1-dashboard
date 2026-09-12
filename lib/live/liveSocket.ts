@@ -28,7 +28,7 @@ const g = globalThis as unknown as { WebSocket?: unknown };
 if (typeof g.WebSocket === "undefined") g.WebSocket = WsImpl;
 
 const HUB = "https://livetiming.formula1.com/signalrcore";
-const TOPICS = ["DriverList", "TimingData", "TimingAppData", "Position.z", "SessionInfo", "SessionStatus", "ChampionshipPrediction", "RaceControlMessages", "TrackStatus", "LapCount", "CarData.z", "SessionData"];
+const TOPICS = ["DriverList", "TimingData", "TimingAppData", "Position.z", "SessionInfo", "SessionStatus", "ChampionshipPrediction", "RaceControlMessages", "TrackStatus", "LapCount", "CarData.z", "SessionData", "ExtrapolatedClock"];
 const ENDED = new Set(["finished", "finalised", "ends"]);
 const BUFFER_MS = 45_000; // keep ~45s of position frames (covers a 20s playback delay)
 // Sprint Qualifying (SQ1/SQ2/SQ3) runs shorter segments than a Saturday qualifying — the
@@ -459,6 +459,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
   // clock use real boundaries instead of assumed durations, and lets the inter-segment break
   // be MEASURED from this very session rather than assumed.
   let statusHistory: { ts: number; status: string }[] = [];
+  let sessionClock: { remainingMs: number; running: boolean; atMs: number } | null = null;
   /**
    * Timestamped history of each driver's sector/mini-sector state.
    *
@@ -539,6 +540,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
       segmentStartedTs = null;
       sessionFinishedTs = null;
       statusHistory = [];
+      sessionClock = null;
       sectorHistory = [];
       orderHistory = [];
       valueSetAt = {};
@@ -694,6 +696,20 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
       }
     } else if (topic === "TrackStatus") {
       trackStatus = data as typeof trackStatus;
+    } else if (topic === "ExtrapolatedClock") {
+      // F1's own session clock. `Remaining` is the authority and `Extrapolating` says whether
+      // it is running — it stops dead for a red flag and is adjusted afterwards, which is how
+      // a 60-minute practice can occupy 77 minutes of wall clock (Madrid FP3, 10:30-11:47).
+      const c = data as { Remaining?: string; Extrapolating?: boolean; Utc?: string };
+      if (c.Remaining) {
+        const [h, m, sec] = c.Remaining.split(":").map(Number);
+        sessionClock = {
+          remainingMs: ((h || 0) * 3600 + (m || 0) * 60 + (sec || 0)) * 1000,
+          // Absent on some lines; "missing" is not "stopped", so carry the last value.
+          running: c.Extrapolating ?? sessionClock?.running ?? false,
+          atMs: c.Utc ? Date.parse(c.Utc) : Date.now(),
+        };
+      }
     } else if (topic === "LapCount") {
       lapCount = { ...(lapCount ?? {}), ...(data as { CurrentLap?: number; TotalLaps?: number }) };
     } else if (topic === "SessionData") {
@@ -1429,10 +1445,14 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
       telFrames: telBuffer.slice(-200), // ~45s at ~4Hz
       qualifyingPart: qualiClock.part ?? qualifyingPart,
       qualifyingRemainingMs: qualiClock.remainingMs,
+      // From F1's clock, never from EndDate: a scheduled end cannot know about a red flag, so
+      // it would have run 18 minutes fast through Madrid FP3 and then sat at zero while the
+      // session was still going.
       sessionRemainingMs: (() => {
-        if (!sessionInfo?.EndDate) return null;
-        const endMs = Date.parse(sessionInfo.EndDate + "Z") - offsetMs(sessionInfo.GmtOffset);
-        return Number.isFinite(endMs) ? Math.max(0, endMs - Date.now()) : null;
+        if (!sessionClock) return null;
+        return sessionClock.running
+          ? Math.max(0, sessionClock.remainingMs - (Date.now() - sessionClock.atMs))
+          : sessionClock.remainingMs;
       })(),
       qualifyingSegmentEnded: qualiClock.segmentEnded,
       nextQualifyingSegmentInMs: qualiClock.nextInMs,
