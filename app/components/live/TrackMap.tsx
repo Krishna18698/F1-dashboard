@@ -72,6 +72,57 @@ export default function TrackMap({
     };
   }, [circuitKey]);
 
+  // MultiViewer has no outline for a brand-new circuit — Madrid (key 153) returns 404 for
+  // every year, while Monza returns 200, so the API is fine and the circuit simply is not in
+  // it. Rather than show nothing, trace the track from the cars themselves: their positions
+  // ARE the circuit, and they arrive in exactly the coordinate space the dots are drawn in,
+  // so a derived outline aligns by construction — no rotation, no scaling, nothing to guess.
+  //
+  // Feeding it back through `setCircuit` means bounds, the path and every dot keep using the
+  // one code path; a derived circuit differs only in having no corner numbers to label.
+  const traceRef = useRef<{ num: string | null; pts: { x: number; y: number }[]; lastT: number; closed: boolean }>({
+    num: null,
+    pts: [],
+    lastT: -Infinity,
+    closed: false,
+  });
+  useEffect(() => {
+    if (!failed) return;
+    const t = traceRef.current;
+    const absorb = () => {
+      if (t.closed) return;
+      for (const f of getFrames()) {
+        if (f.t <= t.lastT) continue;
+        t.lastT = f.t;
+        // Lock onto one car and stay with it: two cars take slightly different lines, so
+        // mixing them would zigzag the outline between them.
+        if (t.num == null) {
+          t.num = Object.keys(f.c).find((n) => !inPit?.has(Number(n))) ?? null;
+          if (t.num == null) continue;
+        }
+        // Skip the pit lane — it is not part of the circuit and would hang a spur off it.
+        if (inPit?.has(Number(t.num))) continue;
+        const p = f.c[t.num];
+        if (!p) continue;
+        t.pts.push({ x: p[0], y: p[1] });
+      }
+      if (t.pts.length < 30) return;
+      // Stop at one clean lap: once the car comes back near where tracing began, further laps
+      // would only overlay a slightly different racing line on the same track. Threshold is a
+      // fraction of the figure's own size, so it needs no assumption about the feed's units.
+      const xs = t.pts.map((q) => q.x);
+      const ys = t.pts.map((q) => q.y);
+      const diag = Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+      const head = t.pts[0];
+      const tail = t.pts[t.pts.length - 1];
+      if (t.pts.length > 120 && Math.hypot(tail.x - head.x, tail.y - head.y) < diag * 0.04) t.closed = true;
+      setCircuit({ x: xs, y: ys, rotation: 0, corners: [] });
+    };
+    absorb();
+    const unsub = subscribeFrames(absorb);
+    return unsub;
+  }, [failed, inPit]);
+
   // The frame buffer lives in framesStore (fed straight from the poll, no React state).
   // We just hold a live reference to it for the animation loop; resetting on unmount so
   // the next session starts clean.
