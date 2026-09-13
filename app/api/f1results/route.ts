@@ -82,8 +82,34 @@ async function capture(
 
 export async function GET() {
   try {
+    // The hero must use the independent classification when it is available. F1's live hub
+    // can expose a completed qualifying snapshot from an intermediate segment, so it cannot
+    // outrank OpenF1 for the finished-result ticker.
+    const openF1 = await openF1LatestResult();
+    if (openF1) {
+      await capture(openF1, true);
+      return Response.json({ status: "ok", ...openF1, live: false, complete: true });
+    }
+
     const result = await liveSocketResults();
     if (result) {
+      // A completed qualifying snapshot from the live hub can still contain the last
+      // qualifying segment's intermediate order. Prefer a completed independent
+      // classification before returning or persisting it; otherwise Q1-era rows can be
+      // frozen as the final result in the durable store.
+      if (result.complete && !result.live) {
+        const official = await openF1LatestResult();
+        if (official) {
+          await capture(official, true);
+          return Response.json({ status: "ok", ...official, live: false, complete: true });
+        }
+
+        const archived = await liveArchiveResults();
+        if (archived && archived.endedAtMs >= (result.endedAtMs ?? 0)) {
+          await capture(archived, true);
+          return Response.json({ status: "ok", ...archived });
+        }
+      }
       // Awaited, not fire-and-forget: a serverless function can be frozen the instant it
       // responds, which would drop a detached write.
       await capture(result, result.complete);
