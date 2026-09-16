@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Driver } from "@/lib/timingTypes";
 import { SessionMode } from "./liveTypes";
-import { Bounds, computeBounds, rotate, tracePath } from "@/lib/geo";
+import { Bounds, computeBounds, project, rotate, tracePath } from "@/lib/geo";
 import { hex } from "@/lib/format";
 import { trackStatusInfo } from "@/lib/trackStatus";
 import { getFrames, resetFrames, setPlaybackT, subscribeFrames, useHasFrames } from "./framesStore";
@@ -212,6 +212,23 @@ export default function TrackMap({
   );
   const bounds: Bounds | null = useMemo(() => (outline.length ? computeBounds(outline) : null), [outline]);
   const path = useMemo(() => (bounds ? tracePath(outline, bounds, SIZE) + " Z" : ""), [bounds, outline]);
+  // Start/finish line. Every outline we draw begins AT the timing line: MultiViewer's comes from
+  // a `candidateLap` traced from lap start, and ours are cut at the lap-counter tick — so
+  // point 0 is the line. Drawn perpendicular to the track's direction there, as a short
+  // chequered bar that spans a little wider than the track stroke.
+  const startFinish = useMemo(() => {
+    if (!bounds || outline.length < 8) return null;
+    const a = project(outline[0].x, outline[0].y, bounds, SIZE);
+    const b = project(outline[4].x, outline[4].y, bounds, SIZE);
+    const dx = b.cx - a.cx;
+    const dy = b.cy - a.cy;
+    const len = Math.hypot(dx, dy) || 1;
+    // unit normal to the direction of travel
+    const nx = -dy / len;
+    const ny = dx / len;
+    const half = 13;
+    return { x1: a.cx - nx * half, y1: a.cy - ny * half, x2: a.cx + nx * half, y2: a.cy + ny * half };
+  }, [bounds, outline]);
 
   // Corner numbers, sitting just OUTSIDE the track line: project each corner to screen
   // coords, then push it ~26px along the corner's outward angle (from MultiViewer).
@@ -545,6 +562,14 @@ export default function TrackMap({
         <svg viewBox={`0 0 ${SIZE} ${SIZE}`} className="h-full w-full">
           {path && (
             <path d={path} fill="none" stroke="#f4f4f6" strokeWidth={12} strokeLinejoin="round" strokeLinecap="round" />
+          )}
+          {startFinish && (
+            <g aria-label="Start/finish line">
+              {/* A black base with a dashed white stroke over it reads as a chequered strip at
+                  map scale without needing a pattern fill. */}
+              <line x1={startFinish.x1} y1={startFinish.y1} x2={startFinish.x2} y2={startFinish.y2} stroke="#15151a" strokeWidth={7} strokeLinecap="butt" />
+              <line x1={startFinish.x1} y1={startFinish.y1} x2={startFinish.x2} y2={startFinish.y2} stroke="#ffffff" strokeWidth={7} strokeDasharray="3.5 3.5" strokeLinecap="butt" />
+            </g>
           )}
           {cornerLabels.map((c, i) => (
             // Corner number isn't a safe key on its own — at least one circuit's outline
