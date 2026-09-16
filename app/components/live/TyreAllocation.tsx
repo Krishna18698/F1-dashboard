@@ -79,7 +79,7 @@ export default function TyreAllocation({
                       <span className="h-4 w-1 shrink-0 rounded-full" style={{ backgroundColor: hex(d?.team_colour) }} />
                       <span className="truncate text-sm font-semibold text-white">{d?.name_acronym ?? num}</span>
                     </div>
-                    <div className="flex flex-1 flex-wrap items-center gap-1">
+                    <div className="flex flex-1 flex-wrap items-center gap-1.5">
                       {ORDER.map((c) => {
                         const left = byCompound.get(c) ?? 0;
                         const dark = c === "HARD" || c === "MEDIUM";
@@ -87,7 +87,10 @@ export default function TyreAllocation({
                         return (
                           <span
                             key={c}
-                            className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[0.65rem] font-semibold ring-1 ${empty ? "opacity-35" : ""}`}
+                            // Fixed width + tabular digits: with padding-driven sizing a "2" chip came
+                            // out narrower than an "8" chip and the row looked ragged. Every chip is
+                            // now the same box regardless of the number inside it.
+                            className={`tnum inline-flex w-[2.55rem] shrink-0 items-center justify-center gap-1 rounded-full px-1 py-0.5 text-[0.65rem] font-semibold ring-1 ${empty ? "opacity-35" : ""}`}
                             style={{ backgroundColor: `${color(c)}22`, borderColor: color(c), color: dark ? "#e5e5e8" : "#fff" }}
                             title={`${c}: ${left} new set${left === 1 ? "" : "s"} left this weekend`}
                           >
