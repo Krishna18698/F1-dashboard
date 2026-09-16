@@ -1334,10 +1334,13 @@ export async function getStaticResults(): Promise<{
   const st = await getF1LiveState(session.path, session.type, Number.MAX_SAFE_INTEGER, false);
   if (!st.order.length) return null;
   const byNum = new Map(st.drivers.map((d) => [d.driver_number, d]));
+  // Same rule as the socket: no names, no result. Numbers on the ticker are worse than the
+  // previous session's names.
+  if (st.order.some((n) => !byNum.get(n)?.name_acronym)) return null;
   const top = st.order.map((n) => {
     const r = st.rows[n];
-    const d = byNum.get(n);
-    return { pos: r.position, tla: d?.name_acronym ?? String(n), team_colour: d?.team_colour ?? "", best: r.best, gap: r.gap_to_leader };
+    const d = byNum.get(n)!;
+    return { pos: r.position, tla: d.name_acronym, team_colour: d.team_colour ?? "", best: r.best, gap: r.gap_to_leader };
   });
   // Always a finished session — this picks the most recent one that has already ended.
   return { session_name: session.name, mode: mode(session.type), complete: true, live: false, endedAtMs: session.endMs, top };

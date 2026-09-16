@@ -119,9 +119,13 @@ export async function openF1LatestResult(): Promise<OpenF1Session | null> {
     ),
     list<{ meeting_key: number; meeting_name: string }>(`/meetings?meeting_key=${done.meeting_key}`),
   ]);
-  if (!rows) return null;
+  // Three calls, and a result is only usable if ALL of them answered. Without /drivers every
+  // TLA would be a car number; without /meetings the session would be stored under a bare
+  // "Race", which is also what every other round's race is called — it collided with the
+  // socket's properly named row and left two copies of the Spanish GP result in the store.
+  if (!rows || !drivers || !meetings?.[0]?.meeting_name) return null;
 
-  const byNum = new Map((drivers ?? []).map((d) => [d.driver_number, d]));
+  const byNum = new Map(drivers.map((d) => [d.driver_number, d]));
   const top = rows
     .filter((r) => typeof r.position === "number" && r.position > 0)
     .sort((a, b) => (a.position as number) - (b.position as number))
@@ -130,19 +134,18 @@ export async function openF1LatestResult(): Promise<OpenF1Session | null> {
       const d = byNum.get(r.driver_number);
       return {
         pos,
-        tla: d?.name_acronym ?? String(r.driver_number),
+        tla: d?.name_acronym ?? "",
         team_colour: (d?.team_colour ?? "").replace(/^#/, ""),
         best: scalar(r.duration),
         gap: gapText(pos, r.gap_to_leader),
       };
     });
-  if (!top.length) return null;
+  if (!top.length || top.some((t) => !t.tla)) return null;
 
-  const meeting = meetings?.[0]?.meeting_name;
   return {
-    // Match the app's own "<Grand Prix> · <Session>" formatting; fall back to the bare session
-    // name rather than printing "undefined ·" if the meeting lookup was the one call that failed.
-    session_name: meeting ? `${meeting} · ${done.session_name}` : done.session_name,
+    // Match the app's own "<Grand Prix> · <Session>" formatting exactly — this string is the
+    // store's key, so it has to agree with what the socket writes for the same session.
+    session_name: `${meetings[0].meeting_name} · ${done.session_name}`,
     mode: modeOf(done.session_type),
     top,
     endedAtMs: done.endedAtMs,

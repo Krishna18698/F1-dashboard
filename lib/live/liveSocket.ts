@@ -1660,8 +1660,13 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
     if (!sessionInfo) return null;
     const { nums, mode, rows, order } = classify();
     if (!nums.length) return null;
-    const complete = sessionInfo.ArchiveStatus?.Status === "Complete" || ENDED.has((sessionStatus?.Status ?? "").toLowerCase());
     const runningNow = liveNow();
+    // Complete means the SESSION is over — not a segment. F1 sends SessionStatus "Finished" at
+    // the end of Q1 and Q2 as well as Q3, so reading it directly marked the Q2 standings as the
+    // final result at the Q2->Q3 break. That got captured to the store, and with nobody
+    // watching the end of Q3 it was served as the qualifying result long after it was wrong.
+    // liveNow() already knows a qualifying session is still running between segments.
+    const complete = !runningNow && (sessionInfo.ArchiveStatus?.Status === "Complete" || ENDED.has((sessionStatus?.Status ?? "").toLowerCase()));
     // F1's hub switches to the next session well before it starts, so pre-race this held the
     // RACE with a full grid but no lap times — the hero ticker showed "Race · RESULT" listing
     // positions nobody had earned yet. Neither running nor finished means there is no result
@@ -1674,13 +1679,19 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
       : sessionInfo.StartDate
         ? Date.parse(sessionInfo.StartDate + "Z") - off + 9_000_000 // ~2.5h after start if no EndDate
         : undefined;
+    // A classification is only a result once every car in it has a name. On a fresh
+    // connection — every cold serverless request — TimingData can land before DriverList,
+    // and falling back to the car number put "12", "1", "4" on the hero ticker for a poll
+    // until the names arrived. Step aside instead: the snapshot or archive tier below has
+    // names, and a warm connection answers correctly on the next poll.
+    if (order.some((n) => !drivers[n]?.Tla)) return null;
     return {
       session_name: sessionName(),
       mode,
       complete,
       live: runningNow,
       endedAtMs,
-      top: order.map((n) => ({ pos: rows[n].position, tla: drivers[n]?.Tla ?? String(n), team_colour: drivers[n]?.TeamColour ?? "", best: rows[n].best, gap: rows[n].gap_to_leader })),
+      top: order.map((n) => ({ pos: rows[n].position, tla: drivers[n]!.Tla!, team_colour: drivers[n]?.TeamColour ?? "", best: rows[n].best, gap: rows[n].gap_to_leader })),
     };
   }
 
