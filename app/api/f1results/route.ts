@@ -126,8 +126,13 @@ export async function GET() {
     // The index read here is small; the streams it guards against are megabytes.
     const held = await getLatestSessionResult();
     const latestEnd = await liveArchiveLatestEnd();
+    // Trusted only if it is the newest session AND was captured after that session ended. A row
+    // written mid-session (the Q2 standings at the Q2->Q3 break, with nobody watching Q3) is
+    // provisional: fall through so the archive's final classification replaces it via the
+    // upsert in capture(). Without this the first snapshot of a session was final forever.
+    const settled = held != null && held.capturedAtMs >= held.endedAtMs;
     const stored =
-      held && (latestEnd == null || held.endedAtMs + STALE_TOLERANCE_MS >= latestEnd) ? held : null;
+      held && settled && (latestEnd == null || held.endedAtMs + STALE_TOLERANCE_MS >= latestEnd) ? held : null;
     const fromOpenF1 = stored ? null : await openF1LatestResult();
     // Only OpenF1's answer is worth writing back — `stored` came out of that same table.
     if (fromOpenF1) await capture(fromOpenF1, true);

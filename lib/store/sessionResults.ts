@@ -39,6 +39,9 @@ export interface StoredSession {
   mode: "race" | "quali" | "practice";
   top: StoredSessionRow[];
   endedAtMs: number;
+  /** When the row was written. Earlier than endedAtMs means it was captured MID-session and
+   *  may not be the final classification — the caller must not treat it as settled. */
+  capturedAtMs: number;
 }
 
 const TABLE = "session_result";
@@ -61,6 +64,7 @@ export async function getLatestSessionResult(): Promise<StoredSession | null> {
       mode: string;
       top: StoredSessionRow[];
       ended_at: number;
+      captured_at: number;
     }[];
     const r = rows[0];
     if (!r?.top?.length) return null;
@@ -69,6 +73,7 @@ export async function getLatestSessionResult(): Promise<StoredSession | null> {
       mode: (r.mode as StoredSession["mode"]) ?? "practice",
       top: r.top,
       endedAtMs: Number(r.ended_at),
+      capturedAtMs: Number(r.captured_at),
     };
   } catch {
     return null;
@@ -80,7 +85,7 @@ export async function getLatestSessionResult(): Promise<StoredSession | null> {
  * session overwrites rather than accumulating. Never throws — a failed snapshot must not take
  * the request with it, and the caller already has the socket's own answer in hand.
  */
-export async function saveSessionResult(s: StoredSession): Promise<boolean> {
+export async function saveSessionResult(s: Omit<StoredSession, "capturedAtMs">): Promise<boolean> {
   const c = storeConfig();
   if (!c || !s.top.length || !Number.isFinite(s.endedAtMs)) return false;
   try {
