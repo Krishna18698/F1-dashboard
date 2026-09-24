@@ -548,6 +548,9 @@ export interface F1LiveState {
   /** Ms left in the session itself (not a qualifying segment). Practice has neither a lap
    *  count nor segments, so this is the only clock its board can show. */
   sessionRemainingMs: number | null;
+  /** Whether F1's session clock is counting down right now. False while it is held (a stopped
+   *  session): the client must then show the figure as-is instead of ticking it down itself. */
+  sessionClockRunning: boolean | null;
   durationMs: number;
   segmentEvents?: SegmentEvent[];
   /** Line crossings ahead of the dots — lets the card blank on time. */
@@ -1275,16 +1278,19 @@ export async function getF1LiveState(
     // is adjusted afterwards — today's Madrid FP3 ran 10:30-11:47 for a 60-minute session — so
     // anything derived from StartDate/EndDate, or from the feed's own length, is wrong by
     // however long the session was stopped.
-    sessionRemainingMs: (() => {
+    ...(() => {
       let last: { ts: number; remainingMs: number; running: boolean } | null = null;
       for (const c of s.clockHist) {
         if (c.ts > infoUptoMs) break;
         last = c;
       }
-      if (!last) return null;
+      if (!last) return { sessionRemainingMs: null, sessionClockRunning: null };
       // Running: the published figure is a snapshot, so age it. Stopped: it is frozen and the
       // number stands as published.
-      return last.running ? Math.max(0, last.remainingMs - (infoUptoMs - last.ts)) : last.remainingMs;
+      return {
+        sessionRemainingMs: last.running ? Math.max(0, last.remainingMs - (infoUptoMs - last.ts)) : last.remainingMs,
+        sessionClockRunning: last.running,
+      };
     })(),
     segmentEvents,
     lapResets,

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Driver, IntervalRow, LapSummary } from "@/lib/timingTypes";
 import { SessionMode } from "./liveTypes";
 import { formatDelta, formatGap, formatInterval, formatLap, hex } from "@/lib/format";
+import { useCountdown } from "./useCountdown";
 
 // Six drivers drop out of Q1 and six out of Q2, leaving ten for Q3 — the same in a sprint
 // qualifying. Written as "how many are eliminated" rather than "how many advance": the old
@@ -30,32 +31,7 @@ function dangerZone(order: number[], knockedOut: Set<number> | undefined, part: 
   return new Set(active.slice(-ELIMINATED_PER_SEGMENT));
 }
 
-/** Ticks a "remaining ms as of the last poll" value down locally in real time, resyncing
- *  whenever a fresh value arrives — same pattern as the hero countdown. */
-function useCountdown(remainingMs: number | null | undefined): string | null {
-  const [display, setDisplay] = useState<number | null>(null);
-  const base = useRef<{ ms: number; at: number } | null>(null);
-
-  // Only touch the ref here (refs are exempt from the "no setState during render/effect
-  // body" rule) — the interval below is the sole place that ever calls setDisplay, and it
-  // does so from a timer callback, not synchronously during the effect's own execution.
-  useEffect(() => {
-    base.current = remainingMs != null ? { ms: remainingMs, at: Date.now() } : null;
-  }, [remainingMs]);
-
-  useEffect(() => {
-    const id = setInterval(() => {
-      setDisplay(base.current ? Math.max(0, base.current.ms - (Date.now() - base.current.at)) : null);
-    }, 500);
-    return () => clearInterval(id);
-  }, []);
-
-  if (display == null) return null;
-  const totalSec = Math.floor(display / 1000);
-  return `${Math.floor(totalSec / 60)}:${String(totalSec % 60).padStart(2, "0")}`;
-}
-
-/** Same ticker as above, but counting down to an ABSOLUTE instant rather than a remaining
+/** Same ticker as useCountdown, but counting down to an ABSOLUTE instant rather than a remaining
  *  duration. The clock is read inside the interval callback, never during render — reading it
  *  in the render body is impure and produces unstable output across incidental re-renders.
  *  Red-flag stoppages routinely run past an hour, so this grows an hours field rather than
@@ -98,8 +74,8 @@ export default function TimingBoard({
   retired,
   sectors,
   qualifyingPart,
-  qualifyingRemainingMs,
-  sessionRemainingMs,
+  segmentClock,
+  practiceClock,
   qualifyingSegmentEnded,
   nextQualifyingSegmentInMs,
   sprintQuali,
@@ -120,9 +96,11 @@ export default function TimingBoard({
   retired?: Set<number>;
   sectors?: Map<number, { value: string; overallFastest: boolean; personalFastest: boolean; segments: number[] }[]>;
   qualifyingPart?: number | null;
-  qualifyingRemainingMs?: number | null;
-  /** Ms left in the session as a whole — the only clock practice can show. */
-  sessionRemainingMs?: number | null;
+  /** Time left in the running quali segment, already formatted. Computed once in LiveSection
+   *  and shared with the map's clock chip, so the two can never read differently. */
+  segmentClock?: string | null;
+  /** Time left in a practice session (its only clock), formatted and shared the same way. */
+  practiceClock?: string | null;
   qualifyingSegmentEnded?: boolean;
   nextQualifyingSegmentInMs?: number | null;
   sprintQuali?: boolean;
@@ -149,11 +127,11 @@ export default function TimingBoard({
   // louder state and the two should never stack.
   const forming = isRace && !redFlagged && formationLap === true;
   const isQuali = mode === "quali";
-  const countdown = useCountdown(qualifyingRemainingMs);
+  const countdown = segmentClock ?? null;
   // Practice has no lap count and no segments, so it showed no clock at all. Its own session
   // timer is the thing you actually watch during a practice hour. Quali keeps the segment
   // countdown above (finer-grained), and a race is measured in laps, not minutes.
-  const practiceLeft = useCountdown(mode === "practice" ? sessionRemainingMs : null);
+  const practiceLeft = mode === "practice" ? (practiceClock ?? null) : null;
   const restartIn = useCountdownTo(restartAtMs);
   const nextCountdown = useCountdown(nextQualifyingSegmentInMs);
   const segLabel = sprintQuali ? "SQ" : "Q";

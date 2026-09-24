@@ -6,6 +6,66 @@ An editorial (white & F1-red) Formula 1 dashboard built with **Next.js + TypeScr
 
 ![Next.js](https://img.shields.io/badge/Next.js-16-black) ![TypeScript](https://img.shields.io/badge/TypeScript-5-blue)
 
+![Pit Wall live tracking on desktop and phone — the race leader followed, with speed, gear and throttle](docs/screenshots/featured.jpg)
+
+## Screenshots
+
+Every image below is the real app, rendered by the screenshot harness in
+[`tools/screenshots`](tools/screenshots/README.md) with a fixed clock and recorded data. The
+race-day, qualifying and practice screens are the archived 2026 Madrid sessions played back
+through the live view. Click any image for full size.
+
+### Race day
+<table>
+<tr><td width="50%" valign="top"><a href="docs/screenshots/desktop/race-home.jpg"><img src="docs/screenshots/desktop/race-home.jpg" alt="Race day — the hero and weekend schedule go live"></a><br><sub>Race day — the hero and weekend schedule go live</sub></td><td width="50%" valign="top"><a href="docs/screenshots/desktop/race-live.jpg"><img src="docs/screenshots/desktop/race-live.jpg" alt="Driver Tracker (Madrid, bundled outline with 23 corners) beside the live timing board"></a><br><sub>Driver Tracker (Madrid, bundled outline with 23 corners) beside the live timing board</sub></td></tr>
+<tr><td width="50%" valign="top"><a href="docs/screenshots/desktop/race-driver.jpg"><img src="docs/screenshots/desktop/race-driver.jpg" alt="Driver selected — telemetry card and a heat trail behind the car"></a><br><sub>Driver selected — telemetry card and a heat trail behind the car</sub></td><td width="50%" valign="top"><a href="docs/screenshots/desktop/race-battles.jpg"><img src="docs/screenshots/desktop/race-battles.jpg" alt="On-track Battles — every car within a second of the car ahead"></a><br><sub>On-track Battles — every car within a second of the car ahead</sub></td></tr>
+<tr><td width="50%" valign="top"><a href="docs/screenshots/desktop/race-tyres.jpg"><img src="docs/screenshots/desktop/race-tyres.jpg" alt="Tyre Allocation and the full Tyre Tracker strategy board"></a><br><sub>Tyre Allocation and the full Tyre Tracker strategy board</sub></td><td width="50%" valign="top"><a href="docs/screenshots/desktop/race-control-sheet.jpg"><img src="docs/screenshots/desktop/race-control-sheet.jpg" alt="Race Control — every message, timestamped"></a><br><sub>Race Control — every message, timestamped</sub></td></tr>
+</table>
+
+<table>
+<tr><td width="50%" valign="top"><a href="docs/screenshots/desktop/race-vsc-battles.jpg"><img src="docs/screenshots/desktop/race-vsc-battles.jpg" alt="Battles pause under the Virtual Safety Car"></a><br><sub>Battles pause under the Virtual Safety Car</sub></td><td width="50%" valign="top"><a href="docs/screenshots/desktop/race-lap1-battles.jpg"><img src="docs/screenshots/desktop/race-lap1-battles.jpg" alt="…and wait for lap 2, while the order settles"></a><br><sub>…and wait for lap 2, while the order settles</sub></td></tr>
+</table>
+
+### Qualifying and practice
+<table>
+<tr><td width="50%" valign="top"><a href="docs/screenshots/desktop/quali-live.jpg"><img src="docs/screenshots/desktop/quali-live.jpg" alt="Qualifying — Q3 clock on the map, knocked-out drivers greyed"></a><br><sub>Qualifying — Q3 clock on the map, knocked-out drivers greyed</sub></td><td width="50%" valign="top"><a href="docs/screenshots/desktop/quali-driver.jpg"><img src="docs/screenshots/desktop/quali-driver.jpg" alt="Qualifying — a driver's sectors and telemetry"></a><br><sub>Qualifying — a driver's sectors and telemetry</sub></td></tr>
+<tr><td width="50%" valign="top"><a href="docs/screenshots/desktop/practice-redflag.jpg"><img src="docs/screenshots/desktop/practice-redflag.jpg" alt="Practice red flag — the clock holds on F1's own figure"></a><br><sub>Practice red flag — the clock holds on F1's own figure</sub></td></tr>
+</table>
+
+### Race week
+<table>
+<tr><td width="50%" valign="top"><a href="docs/screenshots/desktop/home.jpg"><img src="docs/screenshots/desktop/home.jpg" alt="Race week — countdown to the next session"></a><br><sub>Race week — countdown to the next session</sub></td><td width="50%" valign="top"><a href="docs/screenshots/desktop/weekend-schedule.jpg"><img src="docs/screenshots/desktop/weekend-schedule.jpg" alt="Weekend schedule in your local time"></a><br><sub>Weekend schedule in your local time</sub></td></tr>
+<tr><td width="50%" valign="top"><a href="docs/screenshots/desktop/calendar.jpg"><img src="docs/screenshots/desktop/calendar.jpg" alt="Season calendar with each round's winner"></a><br><sub>Season calendar with each round's winner</sub></td><td width="50%" valign="top"><a href="docs/screenshots/desktop/standings.jpg"><img src="docs/screenshots/desktop/standings.jpg" alt="Drivers' and Constructors' championships with movement"></a><br><sub>Drivers' and Constructors' championships with movement</sub></td></tr>
+<tr><td width="50%" valign="top"><a href="docs/screenshots/desktop/news.jpg"><img src="docs/screenshots/desktop/news.jpg" alt="Paddock Intel — the latest F1 news"></a><br><sub>Paddock Intel — the latest F1 news</sub></td></tr>
+</table>
+
+### Replay and your own token
+<table>
+<tr><td width="50%" valign="top"><a href="docs/screenshots/desktop/live-idle.jpg"><img src="docs/screenshots/desktop/live-idle.jpg" alt="Nothing on track — what you get, and a way to replay"></a><br><sub>Nothing on track — what you get, and a way to replay</sub></td><td width="50%" valign="top"><a href="docs/screenshots/desktop/replay.jpg"><img src="docs/screenshots/desktop/replay.jpg" alt="Replay of the most recent race, from lights out"></a><br><sub>Replay of the most recent race, from lights out</sub></td></tr>
+<tr><td width="50%" valign="top"><a href="docs/screenshots/desktop/replay-driver.jpg"><img src="docs/screenshots/desktop/replay-driver.jpg" alt="Replay with a driver followed"></a><br><sub>Replay with a driver followed</sub></td><td width="50%" valign="top"><a href="docs/screenshots/desktop/replay-race-control.jpg"><img src="docs/screenshots/desktop/replay-race-control.jpg" alt="Replay with Race Control open"></a><br><sub>Replay with Race Control open</sub></td></tr>
+<tr><td width="50%" valign="top"><a href="docs/screenshots/desktop/token-form-error.jpg"><img src="docs/screenshots/desktop/token-form-error.jpg" alt="Adding your own F1 TV token — validation"></a><br><sub>Adding your own F1 TV token — validation</sub></td></tr>
+</table>
+
+### Loading and failure states
+<table>
+<tr><td width="50%" valign="top"><a href="docs/screenshots/desktop/loading.jpg"><img src="docs/screenshots/desktop/loading.jpg" alt="Loading skeleton"></a><br><sub>Loading skeleton</sub></td><td width="50%" valign="top"><a href="docs/screenshots/desktop/race-tracking-loading.jpg"><img src="docs/screenshots/desktop/race-tracking-loading.jpg" alt="Live section while the feed connects"></a><br><sub>Live section while the feed connects</sub></td></tr>
+<tr><td width="50%" valign="top"><a href="docs/screenshots/desktop/offline.jpg"><img src="docs/screenshots/desktop/offline.jpg" alt="Every data source unreachable — the page still stands"></a><br><sub>Every data source unreachable — the page still stands</sub></td></tr>
+</table>
+
+### On a phone
+<table>
+<tr><td width="20%" valign="top"><a href="docs/screenshots/mobile/home.jpg"><img src="docs/screenshots/mobile/home.jpg" alt="Home"></a><br><sub>Home</sub></td><td width="20%" valign="top"><a href="docs/screenshots/mobile/weekend-schedule.jpg"><img src="docs/screenshots/mobile/weekend-schedule.jpg" alt="Weekend schedule"></a><br><sub>Weekend schedule</sub></td><td width="20%" valign="top"><a href="docs/screenshots/mobile/calendar.jpg"><img src="docs/screenshots/mobile/calendar.jpg" alt="Calendar"></a><br><sub>Calendar</sub></td><td width="20%" valign="top"><a href="docs/screenshots/mobile/standings.jpg"><img src="docs/screenshots/mobile/standings.jpg" alt="Drivers' standings"></a><br><sub>Drivers' standings</sub></td><td width="20%" valign="top"><a href="docs/screenshots/mobile/constructors.jpg"><img src="docs/screenshots/mobile/constructors.jpg" alt="Constructors'"></a><br><sub>Constructors'</sub></td></tr>
+<tr><td width="20%" valign="top"><a href="docs/screenshots/mobile/news.jpg"><img src="docs/screenshots/mobile/news.jpg" alt="Paddock Intel"></a><br><sub>Paddock Intel</sub></td><td width="20%" valign="top"><a href="docs/screenshots/mobile/race-home.jpg"><img src="docs/screenshots/mobile/race-home.jpg" alt="Race day hero"></a><br><sub>Race day hero</sub></td><td width="20%" valign="top"><a href="docs/screenshots/mobile/race-live.jpg"><img src="docs/screenshots/mobile/race-live.jpg" alt="Live tracker"></a><br><sub>Live tracker</sub></td><td width="20%" valign="top"><a href="docs/screenshots/mobile/race-focus.jpg"><img src="docs/screenshots/mobile/race-focus.jpg" alt="Leader followed"></a><br><sub>Leader followed</sub></td><td width="20%" valign="top"><a href="docs/screenshots/mobile/race-driver.jpg"><img src="docs/screenshots/mobile/race-driver.jpg" alt="Telemetry"></a><br><sub>Telemetry</sub></td></tr>
+<tr><td width="20%" valign="top"><a href="docs/screenshots/mobile/race-battles.jpg"><img src="docs/screenshots/mobile/race-battles.jpg" alt="Battles"></a><br><sub>Battles</sub></td><td width="20%" valign="top"><a href="docs/screenshots/mobile/race-vsc-battles.jpg"><img src="docs/screenshots/mobile/race-vsc-battles.jpg" alt="Battles under VSC"></a><br><sub>Battles under VSC</sub></td><td width="20%" valign="top"><a href="docs/screenshots/mobile/race-tyres.jpg"><img src="docs/screenshots/mobile/race-tyres.jpg" alt="Tyre Tracker"></a><br><sub>Tyre Tracker</sub></td><td width="20%" valign="top"><a href="docs/screenshots/mobile/race-control-sheet.jpg"><img src="docs/screenshots/mobile/race-control-sheet.jpg" alt="Race Control"></a><br><sub>Race Control</sub></td><td width="20%" valign="top"><a href="docs/screenshots/mobile/quali-live.jpg"><img src="docs/screenshots/mobile/quali-live.jpg" alt="Qualifying"></a><br><sub>Qualifying</sub></td></tr>
+<tr><td width="20%" valign="top"><a href="docs/screenshots/mobile/quali-driver.jpg"><img src="docs/screenshots/mobile/quali-driver.jpg" alt="Quali driver"></a><br><sub>Quali driver</sub></td><td width="20%" valign="top"><a href="docs/screenshots/mobile/practice-redflag.jpg"><img src="docs/screenshots/mobile/practice-redflag.jpg" alt="Practice red flag"></a><br><sub>Practice red flag</sub></td><td width="20%" valign="top"><a href="docs/screenshots/mobile/live-idle.jpg"><img src="docs/screenshots/mobile/live-idle.jpg" alt="Nothing live"></a><br><sub>Nothing live</sub></td><td width="20%" valign="top"><a href="docs/screenshots/mobile/replay.jpg"><img src="docs/screenshots/mobile/replay.jpg" alt="Replay"></a><br><sub>Replay</sub></td><td width="20%" valign="top"><a href="docs/screenshots/mobile/replay-driver.jpg"><img src="docs/screenshots/mobile/replay-driver.jpg" alt="Replay driver"></a><br><sub>Replay driver</sub></td></tr>
+<tr><td width="20%" valign="top"><a href="docs/screenshots/mobile/replay-race-control.jpg"><img src="docs/screenshots/mobile/replay-race-control.jpg" alt="Replay Race Control"></a><br><sub>Replay Race Control</sub></td><td width="20%" valign="top"><a href="docs/screenshots/mobile/token-form-error.jpg"><img src="docs/screenshots/mobile/token-form-error.jpg" alt="Token form"></a><br><sub>Token form</sub></td><td width="20%" valign="top"><a href="docs/screenshots/mobile/loading.jpg"><img src="docs/screenshots/mobile/loading.jpg" alt="Loading"></a><br><sub>Loading</sub></td><td width="20%" valign="top"><a href="docs/screenshots/mobile/race-tracking-loading.jpg"><img src="docs/screenshots/mobile/race-tracking-loading.jpg" alt="Tracker loading"></a><br><sub>Tracker loading</sub></td><td width="20%" valign="top"><a href="docs/screenshots/mobile/offline.jpg"><img src="docs/screenshots/mobile/offline.jpg" alt="Upstream down"></a><br><sub>Upstream down</sub></td></tr>
+</table>
+
+### Covers
+<table>
+<tr><td width="33%" valign="top"><a href="docs/screenshots/cover-1.jpg"><img src="docs/screenshots/cover-1.jpg" alt="Desktop and phone on race day"></a><br><sub>Desktop and phone on race day</sub></td><td width="33%" valign="top"><a href="docs/screenshots/cover-2.jpg"><img src="docs/screenshots/cover-2.jpg" alt="The Driver Tracker, up close"></a><br><sub>The Driver Tracker, up close</sub></td><td width="33%" valign="top"><a href="docs/screenshots/cover-3.jpg"><img src="docs/screenshots/cover-3.jpg" alt="Pit Wall on the phone"></a><br><sub>Pit Wall on the phone</sub></td></tr>
+</table>
+
 ## Features
 
 ### Live tracking
@@ -18,15 +78,27 @@ An editorial (white & F1-red) Formula 1 dashboard built with **Next.js + TypeScr
   whenever the flag isn't green, easing back to normal on Track Clear.
 - **Click-to-follow + telemetry** — click any driver (on the map or the timing board) to
   highlight them and dim the rest; a telemetry card shows live **speed, gear, throttle and
-  RPM** from the car's own data channel.
+  RPM** from the car's own data channel. The selected car also leaves a short **heat trail**
+  (~8 s of track, orange fading to red) so you can see its line through the corners; it breaks
+  off cleanly at pit exit or a gap in the data instead of drawing across the infield.
 - **Pit lane & DNF handling** — cars vanish from the map while in the pits and reappear on
   exit; retired/crashed drivers get a **DNF** chip and drop off the map instead of sitting
   parked on track.
-- **Corner numbers**, drawn just outside the track line.
+- **Corner numbers**, drawn just outside the track line, kept deliberately quiet so the cars
+  stay the subject.
+- **Session clock on the map** *(practice & qualifying)* — a boxed chip (`Q3 · 4:43`,
+  `TIME LEFT · 23:10`) in the corner the race uses for its lap counter. It is the same ticking
+  value as the timing board's clock, and it holds still whenever F1 holds its own clock (a
+  practice red flag) rather than counting down on its own.
 - **Driver Live Tracker** — a clean running order: position, driver, gap to leader / interval
   (race) or best lap (quali/practice). During qualifying it shows which segment is live
   (Q1/Q2/Q3) with a live-ticking countdown for that segment, and shades the elimination zone
   red for drivers currently on the wrong side of the cut.
+- **On-track Battles** *(race only)* — every car within a second of the car ahead, as a
+  chaser / gap / ahead row with bars that grow as the gap closes. Lapped cars, cars in the pit
+  lane and retirements never count, and it pauses under the Safety Car, VSC, a red flag or the
+  formation lap, and on lap 1, when the whole field is bunched. Built from timing intervals, so
+  it works without a token.
 - **Tyre Tracker** *(race only)* — the full strategy board: gained/lost vs the starting grid
   (▲▼), gap / interval / last lap, a fastest-lap footer, and a per-driver stint bar across the
   race's lap axis with a tyre-compound token (and laps run) at the end of every stint.
@@ -145,6 +217,11 @@ npm install
 npm run dev      # http://localhost:3000
 npm run build && npm start   # production
 ```
+
+Screenshots, covers and the README images come from the harness in
+[`tools/screenshots`](tools/screenshots/README.md): `npm run shots` re-captures every screen from
+recorded data, `npm run frames` rebuilds `docs/screenshots/` and the rest, `npm test` runs the
+end-to-end flows.
 
 ## Deploy
 

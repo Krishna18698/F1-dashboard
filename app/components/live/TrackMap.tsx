@@ -12,6 +12,58 @@ const SIZE = 1000;
 
 const DELAY_MS = 20000; // play back this far behind the latest data → smooth, F1-TV-style
 
+// Heat trail behind the selected car: TRAIL_SEGMENTS pieces, one per TRAIL_STEP_MS of playback,
+// so ~8 s of track. Hot orange at the car, cooling to red and fading out at the tail.
+const TRAIL_SEGMENTS = 16;
+const TRAIL_STEP_MS = 500;
+// Same threshold the dots use to decide a move is a snap (pit exit, reappearance), not motion.
+const TRAIL_JUMP_SQ = 3600;
+const trailStyle = Array.from({ length: TRAIL_SEGMENTS }, (_, k) => {
+  const f = k / (TRAIL_SEGMENTS - 1);
+  const g = Math.round(0x8a + (0x06 - 0x8a) * f);
+  const r = Math.round(0xff + (0xe1 - 0xff) * f);
+  return {
+    stroke: `rgb(${r},${g},0)`,
+    width: 10 - 7 * f,
+    opacity: Math.pow(1 - k / TRAIL_SEGMENTS, 1.5),
+  };
+});
+
+type Frames = { t: number; c: Record<string, [number, number]> }[];
+/** Scratch output for sampleCar, reused so the animation loop never allocates. */
+const sampled: [number, number] = [0, 0];
+/**
+ * One car's position at playback time `t`, with the same Catmull-Rom the dots use, written into
+ * `sampled`. False when `t` is outside the buffer or the car is missing from a bracketing frame.
+ */
+function sampleCar(buf: Frames, num: number, t: number): boolean {
+  if (buf.length < 2 || t < buf[0].t || t > buf[buf.length - 1].t) return false;
+  let lo = 0;
+  let hi = buf.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (buf[mid].t <= t) lo = mid;
+    else hi = mid;
+  }
+  const a = buf[lo];
+  const c = buf[hi];
+  const pa = a.c[num];
+  if (!pa) return false;
+  const pb = c.c[num] ?? pa;
+  const q0 = buf[Math.max(0, lo - 1)].c[num] ?? pa;
+  const q3 = buf[Math.min(hi + 1, buf.length - 1)].c[num] ?? pb;
+  const u = c.t > a.t ? Math.max(0, Math.min(1, (t - a.t) / (c.t - a.t))) : 0;
+  const u2 = u * u;
+  const u3 = u2 * u;
+  const w0 = -0.5 * u3 + u2 - 0.5 * u;
+  const w1 = 1.5 * u3 - 2.5 * u2 + 1;
+  const w2 = -1.5 * u3 + 2 * u2 + 0.5 * u;
+  const w3 = 0.5 * u3 - 0.5 * u2;
+  sampled[0] = w0 * q0[0] + w1 * pa[0] + w2 * pb[0] + w3 * q3[0];
+  sampled[1] = w0 * q0[1] + w1 * pa[1] + w2 * pb[1] + w3 * q3[1];
+  return true;
+}
+
 interface Circuit {
   x: number[];
   y: number[];
@@ -34,6 +86,7 @@ export default function TrackMap({
   suspended,
   mode,
   laps,
+  clock,
   selectedNum,
   onSelect,
 }: {
@@ -53,6 +106,9 @@ export default function TrackMap({
   /** Only a race gets "suspended" — practice and qualifying are stopped, not suspended. */
   mode?: SessionMode;
   laps?: { current: number; total: number };
+  /** Practice / qualifying session clock, already ticking (shared with the timing board). A
+   *  race has none: it is measured in laps, which the LAP chip in the same corner shows. */
+  clock?: { label: string; value: string } | null;
   selectedNum?: number | null;
   onSelect?: (num: number | null) => void;
 }) {
@@ -312,6 +368,10 @@ export default function TrackMap({
   useEffect(() => {
     selRef.current = selectedNum ?? null;
   }, [selectedNum]);
+  const suspendedRef = useRef(false);
+  useEffect(() => {
+    suspendedRef.current = suspended === true;
+  }, [suspended]);
   // Per-car smoothed screen position (EMA) — the raw GPS samples carry speed noise
   // (~28% of consecutive samples imply >60% speed jumps), so rendering them faithfully
   // makes dots surge/slow. Entries allocated once per car, then mutated in place.
@@ -319,6 +379,7 @@ export default function TrackMap({
 
   // Positions are updated IMPERATIVELY (no React re-render per frame).
   const dotsGroupRef = useRef<SVGGElement>(null);
+  const trailRef = useRef<SVGGElement>(null);
   const ptRef = useRef<number | null>(null);
   const lastNow = useRef(0);
 
@@ -420,6 +481,45 @@ export default function TrackMap({
           el.style.visibility = "visible";
           // Click-to-follow: dim everyone except the selected driver.
           el.style.opacity = sel == null || sel === num ? "1" : "0.3";
+        }
+
+        // Heat trail: where the selected car was over the last few seconds of playback. Head
+        // starts at the dot's own smoothed position so the two never separate; each older point
+        // is sampled from the buffer exactly as the dot was. A jump between samples (pit exit,
+        // the car reappearing, a hole in the data) ends the trail there rather than drawing a
+        // chord across the infield.
+        const trail = trailRef.current;
+        if (trail) {
+          const segs = trail.children;
+          let shown = 0;
+          const head = sel != null ? smooth.get(sel) : undefined;
+          const drawable =
+            sel != null && head?.shown === true && !suspendedRef.current && !pits?.has(sel) && !outs?.has(sel) && !!a.c[sel];
+          if (drawable) {
+            let px = head!.x;
+            let py = head!.y;
+            for (let k = 0; k < segs.length; k++) {
+              if (!sampleCar(buf, sel!, pt - (k + 1) * TRAIL_STEP_MS)) break;
+              const rx = sampled[0] * cos - sampled[1] * sin;
+              const ry = sampled[0] * sin + sampled[1] * cos;
+              const qx = offX + (rx - minX) * scale;
+              const qy = SIZE - (offY + (ry - minY) * scale);
+              const dx = qx - px;
+              const dy = qy - py;
+              if (dx * dx + dy * dy >= TRAIL_JUMP_SQ) break;
+              const seg = segs[k] as SVGLineElement;
+              seg.setAttribute("x1", px.toFixed(1));
+              seg.setAttribute("y1", py.toFixed(1));
+              seg.setAttribute("x2", qx.toFixed(1));
+              seg.setAttribute("y2", qy.toFixed(1));
+              seg.style.visibility = "visible";
+              px = qx;
+              py = qy;
+              shown++;
+            }
+          }
+          for (let k = shown; k < segs.length; k++) (segs[k] as SVGLineElement).style.visibility = "hidden";
+          trail.style.visibility = shown > 0 ? "visible" : "hidden";
         }
       }
       raf = requestAnimationFrame(loop);
@@ -559,6 +659,16 @@ export default function TrackMap({
             LAP {laps.current}/{laps.total}
           </span>
         )}
+        {clock && (
+          <span
+            className="tnum absolute right-3 top-3 z-10 flex items-center gap-1.5 rounded-md bg-black/60 px-2.5 py-1 font-mono text-[0.65rem] font-bold tracking-wider text-white/85 ring-1 ring-white/15"
+            aria-label="Session clock"
+            title="Time remaining in this session"
+          >
+            <span className="text-white/50">{clock.label}</span>
+            <span className="text-white">{clock.value}</span>
+          </span>
+        )}
         <svg viewBox={`0 0 ${SIZE} ${SIZE}`} className="h-full w-full">
           {path && (
             <path d={path} fill="none" stroke="#f4f4f6" strokeWidth={12} strokeLinejoin="round" strokeLinecap="round" />
@@ -574,21 +684,36 @@ export default function TrackMap({
           {cornerLabels.map((c, i) => (
             // Corner number isn't a safe key on its own — at least one circuit's outline
             // data has two entries sharing the same number (e.g. a split/sub corner).
+            // Kept deliberately quiet: the track and the cars are the subject, the numbers are
+            // reference. Same size and placement as before; only weight and contrast drop.
             <g key={`${c.n}-${i}`} transform={`translate(${c.x} ${c.y})`}>
-              <circle r={12} fill="#15151a" fillOpacity={0.75} />
+              <circle r={12} fill="#15151a" fillOpacity={0.5} />
               <text
                 textAnchor="middle"
                 dominantBaseline="central"
                 y={0.5}
                 fontSize={20}
-                fontWeight={800}
+                fontWeight={600}
                 fill="#c9c9d1"
+                fillOpacity={0.6}
                 fontFamily="var(--font-geist-mono), monospace"
               >
                 {c.n}
               </text>
             </g>
           ))}
+          <g ref={trailRef} aria-label="Selected car trail" style={{ visibility: "hidden" }} pointerEvents="none">
+            {trailStyle.map((t, k) => (
+              <line
+                key={k}
+                stroke={t.stroke}
+                strokeWidth={t.width}
+                strokeOpacity={t.opacity}
+                strokeLinecap="round"
+                style={{ visibility: "hidden" }}
+              />
+            ))}
+          </g>
           <g ref={dotsGroupRef}>{dots}</g>
         </svg>
       </div>

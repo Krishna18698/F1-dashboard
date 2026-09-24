@@ -1,0 +1,15 @@
+{
+  "name": "pit-wall-screenshots",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "record": "node capture.mjs --record",
+    "shots": "node capture.mjs",
+    "frames": "node compose.mjs",
+    "all": "node capture.mjs && node compose.mjs",
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
+  }
+}

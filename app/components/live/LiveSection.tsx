@@ -7,10 +7,13 @@ import TimingBoard from "./TimingBoard";
 import TyreTracker from "./TyreTracker";
 import TyreAllocation from "./TyreAllocation";
 import SectorDeltas from "./SectorDeltas";
+import Battles from "./Battles";
+import { findBattles } from "./findBattles";
 import TelemetryCard from "./TelemetryCard";
 import MyTokenCard from "./MyTokenCard";
 import RaceControl from "./RaceControl";
 import { useHasFrames } from "./framesStore";
+import { useCountdown } from "./useCountdown";
 import { getStoredVisitorToken } from "@/lib/visitorToken";
 import { F1_LIVE } from "@/lib/live/liveConfig";
 
@@ -93,6 +96,11 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
   // the map/board actually had anything to show, which read as out of order. Called
   // unconditionally (rules of hooks) even though it only matters in the branch below.
   const trackingReady = useHasFrames();
+  // The session clocks, ticked ONCE here and handed to both the timing board and the map's
+  // clock chip — two independent tickers would drift half a second apart and show different
+  // times side by side. Called unconditionally (rules of hooks); null outside their mode.
+  const segmentClock = useCountdown(s.mode === "quali" ? s.qualifyingRemainingMs : null);
+  const practiceClock = useCountdown(s.mode === "practice" ? s.sessionRemainingMs : null, s.sessionClockRunning !== false);
 
   // Whether EITHER a token is available — the owner's (server-known) or a visitor's own
   // (their browser's localStorage) — so the idle state can say "live feed is ready" instead
@@ -299,6 +307,13 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
               suspended={s.sessionStatus === "Aborted"}
               mode={s.mode}
               laps={s.mode === "race" ? { current: s.currentLap ?? 0, total: s.totalLaps ?? 0 } : undefined}
+              clock={
+                s.mode === "quali" && !s.qualifyingSegmentEnded && s.qualifyingPart && segmentClock
+                  ? { label: `${/sprint/i.test(s.session?.session_name ?? "") ? "SQ" : "Q"}${s.qualifyingPart}`, value: segmentClock }
+                  : s.mode === "practice" && practiceClock
+                    ? { label: "TIME LEFT", value: practiceClock }
+                    : null
+              }
               selectedNum={selected}
               onSelect={setSelected}
             />
@@ -348,8 +363,8 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
           sectors={s.sectors}
           qualifyingPart={s.qualifyingPart}
           sprintQuali={/sprint/i.test(s.session?.session_name ?? "")}
-          qualifyingRemainingMs={s.qualifyingRemainingMs}
-          sessionRemainingMs={s.sessionRemainingMs}
+          segmentClock={segmentClock}
+          practiceClock={practiceClock}
           qualifyingSegmentEnded={s.qualifyingSegmentEnded}
           nextQualifyingSegmentInMs={s.nextQualifyingSegmentInMs}
           knockedOut={s.knockedOut}
@@ -363,6 +378,23 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
           {/* Quali only for now: sector-by-sector deficits are the story of a qualifying lap.
               Race gets the full-width Tyre Tracker below instead. Driven purely by sector
               times, so it behaves the same with or without a token. */}
+          {/* Race counterpart of the sector deltas: who is within a second of whom. */}
+          {s.mode === "race" && (
+            <Battles
+              drivers={s.drivers}
+              result={findBattles({
+                order: s.order,
+                positions: s.positions,
+                intervals: s.intervals,
+                inPit: s.inPit,
+                retired: s.retired,
+                currentLap: s.currentLap,
+                trackStatus: s.trackStatus,
+                sessionStatus: s.sessionStatus,
+                formationLap: s.formationLap,
+              })}
+            />
+          )}
           {s.mode === "quali" && (
             <div>
               <SectorDeltas

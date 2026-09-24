@@ -24,6 +24,7 @@ export interface LiveState {
   status: LiveStatus;
   mode: SessionMode;
   sessionRemainingMs?: number | null;
+  sessionClockRunning?: boolean | null; // false while F1 holds the session clock (e.g. a red flag)
   replay?: boolean; // true when showing a past session (nothing live right now)
   source?: "token" | "free" | "visitor" | "free-live"; // which feed is powering this — token = owner's, visitor = their own, free = public static fallback, free-live = F1's live hub with no token (real-time timing, no map)
   mapAvailable?: boolean; // false when the feed can't supply car positions at all (anonymous hub connection — F1 gates Position.z behind a token)

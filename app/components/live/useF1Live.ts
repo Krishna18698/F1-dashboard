@@ -68,6 +68,7 @@ interface ApiResponse {
   qualifyingPart?: number | null;
   qualifyingRemainingMs?: number | null;
   sessionRemainingMs?: number | null;
+  sessionClockRunning?: boolean | null;
   qualifyingSegmentEnded?: boolean;
   nextQualifyingSegmentInMs?: number | null;
   tokenIssue?: "invalid" | "busy";
@@ -184,6 +185,7 @@ function toState(r: ApiResponse): LiveState {
     qualifyingPart: r.qualifyingPart ?? null,
     qualifyingRemainingMs: r.qualifyingRemainingMs ?? null,
     sessionRemainingMs: r.sessionRemainingMs ?? null,
+    sessionClockRunning: r.sessionClockRunning ?? null,
     qualifyingSegmentEnded: r.qualifyingSegmentEnded ?? false,
     nextQualifyingSegmentInMs: r.nextQualifyingSegmentInMs ?? null,
     tokenIssue: r.tokenIssue ?? null,

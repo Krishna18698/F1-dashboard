@@ -50,3 +50,6 @@ next-env.d.ts
 
 # Personal reference doc — not part of the project, never commit
 how-to-explain-the-f1-dashboard.docx
+
+# Screenshot harness output (tools/screenshots) — portfolio images, not part of the app
+/project/

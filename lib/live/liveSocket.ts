@@ -243,6 +243,8 @@ export interface F1LiveState {
    *  Practice has no lap count and no segments, so without this its board had no clock at
    *  all — the one thing you actually want to know during a practice hour. */
   sessionRemainingMs: number | null;
+  /** Whether F1's session clock is counting down right now; false while it is held. */
+  sessionClockRunning: boolean | null;
   /** Current segment's clock has run out and the next one hasn't gone green yet. */
   qualifyingSegmentEnded: boolean;
   /** Estimated ms until the NEXT segment starts, during that break. Null on the last
@@ -1454,6 +1456,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
           ? Math.max(0, sessionClock.remainingMs - (Date.now() - sessionClock.atMs))
           : sessionClock.remainingMs;
       })(),
+      sessionClockRunning: sessionClock ? sessionClock.running : null,
       qualifyingSegmentEnded: qualiClock.segmentEnded,
       nextQualifyingSegmentInMs: qualiClock.nextInMs,
       // Two different situations, because the green light is known at different times.
