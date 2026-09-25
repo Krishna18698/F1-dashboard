@@ -5,6 +5,8 @@ import { Driver } from "@/lib/timingTypes";
 import { hex } from "@/lib/format";
 import { getPlaybackT, getTel } from "./framesStore";
 
+type SectorList = { value: string; overallFastest: boolean; personalFastest: boolean; segments: number[] }[];
+
 /** Mini-sector status codes — see the note in TimingBoard; 2052 (purple) is still
  *  unconfirmed against live data. Tuned for the dark card background. */
 /** F1's colour semantics, on the dark card: purple = fastest anyone, green = personal best. */
@@ -35,15 +37,18 @@ export default function TelemetryCard({
   onClose,
   sectors,
   lapResets,
+  sectorEvents,
   showTelemetry = true,
 }: {
   num: number;
   driver?: Driver;
   onClose: () => void;
-  sectors?: { value: string; overallFastest: boolean; personalFastest: boolean; segments: number[] }[];
+  sectors?: SectorList;
   /** Line crossings that F1 has already published but the car dots haven't reached. Used to
    *  blank the sectors at the instant the car crosses, rather than on the next 3s poll. */
   lapResets?: { t: number; n: number }[];
+  /** Upcoming changes to these sectors, on the map's clock (live feed only). */
+  sectorEvents?: { t: number; n: number; s: SectorList }[];
   /** CarData is token-gated; without it the live readout is empty, but the SECTORS below
    *  still work (TimingData is ungated) — so the card renders without the telemetry strip
    *  rather than not rendering at all. */
@@ -83,28 +88,40 @@ export default function TelemetryCard({
     return () => clearInterval(id);
   }, [num]);
 
-  // The sectors in `sectors` were computed at the playback instant of the LAST poll. If the
-  // car crosses the line between polls, the card would keep last lap's times for up to 3s.
-  // The reset is already in the fetched-ahead window, so blank as soon as the clock reaches
-  // it — the poll then confirms it a moment later with the real (empty) state.
-  const [clearedAt, setClearedAt] = useState<number | null>(null);
+  // `sectors` describes the playback instant of the LAST poll, and polls are 3 s apart. What
+  // happens in between is already known and shipped ahead, stamped on the map's clock: sector
+  // changes (a time landing, the lap clearing — `sectorEvents`, live feed) and line crossings
+  // (`lapResets`, both feeds). Apply whichever is latest once the dot's clock reaches it, so the
+  // card changes as the car on the map finishes a sector or crosses the line, not up to a poll
+  // later. A fresh poll supersedes all of it.
+  type Due = { kind: "clear"; t: number } | { kind: "sectors"; t: number; s: SectorList };
+  const [due, setDue] = useState<Due | null>(null);
   useEffect(() => {
     // Deferred, not called in the effect body — same rule the rest of this file follows:
     // setState belongs in a timer callback, never synchronously during an effect.
-    const reset = setTimeout(() => setClearedAt(null), 0); // a fresh poll supersedes a local blank
-    const mine = (lapResets ?? []).filter((r) => r.n === num).sort((a, b) => a.t - b.t);
+    const reset = setTimeout(() => setDue(null), 0);
+    const timeline: Due[] = [
+      ...(lapResets ?? []).filter((r) => r.n === num).map((r) => ({ kind: "clear" as const, t: r.t })),
+      ...(sectorEvents ?? []).filter((e) => e.n === num).map((e) => ({ kind: "sectors" as const, t: e.t, s: e.s })),
+    ].sort((a, b) => a.t - b.t);
     const id = setInterval(() => {
-      if (!mine.length) return;
+      if (!timeline.length) return;
       const pt = getPlaybackT();
       if (!pt) return;
-      const due = mine.filter((r) => r.t <= pt).pop();
-      if (due) setClearedAt(due.t);
+      let latest: Due | null = null;
+      for (const d of timeline) {
+        if (d.t <= pt) latest = d;
+        else break;
+      }
+      if (latest) setDue((cur) => (cur?.t === latest.t && cur.kind === latest.kind ? cur : latest));
     }, 100);
     return () => {
       clearTimeout(reset);
       clearInterval(id);
     };
-  }, [lapResets, num, sectors]);
+  }, [lapResets, sectorEvents, num, sectors]);
+  const clearedAt = due?.kind === "clear" ? due.t : null;
+  const shownSectors = due?.kind === "sectors" ? due.s : sectors;
 
   const color = hex(driver?.team_colour);
   const throttle = Math.max(0, Math.min(100, v?.throttle ?? 0));
@@ -164,13 +181,13 @@ export default function TelemetryCard({
 
       {/* Sectors — same card, under the telemetry strip, so the followed driver is one
           self-contained panel instead of a readout here and a sector table across the page. */}
-      {!!sectors?.length && (
+      {!!shownSectors?.length && (
         <div className={showTelemetry ? "mt-3 border-t border-white/10 pt-3" : ""}>
           <div className="grid grid-cols-3 gap-3">
             {/* Always three slots. A delta can carry only the sector that changed (seen live:
                 21 drivers with all three, one with just S1), and rendering the raw array made
                 that driver's card collapse to a single lonely column. */}
-            {[0, 1, 2].map((i) => sectors[i] ?? { value: "", overallFastest: false, personalFastest: false, segments: [] }).map((sec, i) => {
+            {[0, 1, 2].map((i) => shownSectors[i] ?? { value: "", overallFastest: false, personalFastest: false, segments: [] }).map((sec, i) => {
               // F1 does NOT clear a sector's Value when a driver crosses the line — last
               // lap's time sits there until the sector is run again, and it's only rewritten
               // once the sector COMPLETES. So "has any mini-sector lit" is the wrong test:

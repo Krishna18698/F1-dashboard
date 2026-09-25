@@ -31,6 +31,7 @@ export interface LiveState {
   sessionEnded?: boolean; // session is over but still F1's current one — board shows a FINAL classification
   segmentEvents?: { t: number; n: number; s: number; i: number; c: number }[]; // mini-sectors published but not yet reached by the car dots
   lapResets?: { t: number; n: number }[]; // line crossings ahead of the dots, so the card can blank on time
+  sectorEvents?: { t: number; n: number; s: { value: string; overallFastest: boolean; personalFastest: boolean; segments: number[] }[] }[]; // sector times landing / clearing ahead of the dots
   circuitKey?: number;
   session?: Session;
   clockISO?: string;

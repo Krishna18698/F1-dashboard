@@ -266,6 +266,8 @@ export interface F1LiveState {
   /** Line crossings ahead of the dots, so the card can blank on time rather than on the
    *  next poll. */
   lapResets?: { t: number; n: number }[];
+  /** Upcoming sector-display changes (a time landing, the lap clearing) on the map's clock. */
+  sectorEvents?: { t: number; n: number; s: SectorTime[] }[];
 }
 export interface SessionResult {
   session_name: string;
@@ -473,9 +475,9 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
    * "sectors and driver tracker aren't in sync" symptom. Keeping a short history lets the
    * socket answer for the same instant the dots are showing.
    */
-  let sectorHistory: { t: number; byDriver: Record<string, SectorTime[]> }[] = [];
+  let sectorLog: Record<string, { t: number; s: SectorTime[] }[]> = {};
   /** Rolling snapshots of the RUNNING ORDER only, so it can be served at the map's playback
-   *  clock. Deliberately excludes sectors (which stay live) and tyre stints. */
+   *  clock. Sectors have their own per-driver log (sectorLog); tyre stints stay live. */
   let orderHistory: {
     t: number;
     order: number[];
@@ -543,7 +545,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
       sessionFinishedTs = null;
       statusHistory = [];
       sessionClock = null;
-      sectorHistory = [];
+      sectorLog = {};
       orderHistory = [];
       valueSetAt = {};
       bestSectorOf = {};
@@ -602,10 +604,80 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
     } catch {}
   }
 
-  function applyFeed(topic: string, data: unknown) {
+  /** A driver's three sectors as the card and board show them, from the merged timing state. */
+  function sectorsOf(n: string): SectorTime[] {
+    const t = timing[n] as { Sectors?: unknown } | undefined;
+    return asList<{
+      Value?: string;
+      PreviousValue?: string;
+      OverallFastest?: boolean;
+      PersonalFastest?: boolean;
+      Segments?: unknown;
+    }>(t?.Sectors, 3).map((sec, si) => {
+      // Only the CURRENT lap's time — no PreviousValue fallback and no carry-forward of
+      // the last completed reading. Both were added to stop the card blanking mid-lap,
+      // but they also kept last lap's times on screen after a driver had started a new
+      // one. The bar should empty at the line and refill sector by sector.
+      return {
+        // Blank unless this time was written AFTER the last line crossing — otherwise
+        // the ~90ms gap before F1 writes the new time shows last lap's value, and a poll
+        // landing in it displays that for a full poll cycle.
+        value: (valueSetAt[n]?.[si] ?? 0) >= (lapResetAt[n] ?? 0) ? sec?.Value || "" : "",
+        overallFastest: Boolean(sec?.OverallFastest),
+        personalFastest: Boolean(sec?.PersonalFastest),
+        // Segments always reflect the CURRENT lap in progress — that's the point of the
+        // mini-sector bars — so they're never carried over.
+        // Read straight from the accumulated state. deepMerge already folds each sparse
+        // delta into the stored Sectors[].Segments, so this is complete WITHOUT keeping a
+        // second memory of our own — and crucially it resets when F1 resets it at the
+        // start of a new lap. An earlier attempt to stop the bars flashing by merging
+        // into a remembered set carried the PREVIOUS lap's mini-sectors into the new one,
+        // so a driver who had just started a lap appeared almost through sector 1.
+        segments: asList<{ Status?: number }>(sec?.Segments).map((g) => Number(g?.Status ?? 0)),
+      };
+    });
+  }
+
+  /** Upcoming changes to what a driver's sectors SHOW (a time appearing, or the lap clearing),
+   *  after `asOfMs` — so the card can apply each at the instant the dot gets there instead of
+   *  waiting for the next 3 s poll. Mini-sector-only changes are left out; the card shows one
+   *  bar per sector, so they change nothing on screen and would only bloat the payload. */
+  function sectorEventsAfter(asOfMs: number): { t: number; n: number; s: SectorTime[] }[] {
+    const out: { t: number; n: number; s: SectorTime[] }[] = [];
+    for (const [n, log] of Object.entries(sectorLog)) {
+      let prev = "";
+      for (const h of log) {
+        const key = h.s.map((x) => x.value).join("|");
+        if (h.t > asOfMs && key !== prev) out.push({ t: h.t, n: +n, s: h.s });
+        prev = key;
+      }
+    }
+    return out;
+  }
+
+  /** The sectors as they stood at `asOfMs` on the map's clock — so a time appears as the car on
+   *  the map finishes the sector, and the lap clears as it crosses the line, not ~20 s early. */
+  function sectorsAt(n: string, asOfMs: number): SectorTime[] | null {
+    const log = sectorLog[n];
+    if (!log?.length) return null;
+    let pick = log[0];
+    for (const h of log) {
+      if (h.t <= asOfMs) pick = h;
+      else break;
+    }
+    return pick.s;
+  }
+
+  function applyFeed(topic: string, data: unknown, stamp?: string) {
     if (!data) return;
     if (topic === "TimingData") {
-      const now = Date.now();
+      // Placed on the MAP's clock — F1's own UTC, which the GPS samples the dots play back and
+      // the client's `asOf` are both on — using the timestamp F1 puts on the message itself.
+      // Wall time put the "new lap" reset ~6.5 s after the dot crossed the line (Baku quali
+      // 2026, 29 crossings); the newest GPS sample at arrival still landed S3 ~0.5 s early.
+      // Only a message without a stamp (none seen) falls back to that approximation.
+      const stamped = stamp ? Date.parse(stamp) : NaN;
+      const now = Number.isFinite(stamped) ? stamped : (frameBuffer.at(-1)?.t ?? Date.now());
       for (const [n, u] of Object.entries((data as { Lines?: Record<string, Dict> }).Lines ?? {})) {
         // Note WHEN each sector time was written and when the mini-sectors were blanked,
         // BEFORE merging — afterwards the update is indistinguishable from earlier state.
@@ -650,7 +722,20 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
             lapResets.push({ t: now, n: +n });
           }
         }
+        // Log the sectors as they were BEFORE and after this update, so they can be served at
+        // any instant in the window rather than always as of now (see sectorsAt).
+        const touchesSectors = !!(u as { Sectors?: unknown }).Sectors;
+        const log = (sectorLog[n] ??= []);
+        if (touchesSectors && !log.length) log.push({ t: now - 1, s: sectorsOf(n) });
         deepMerge((timing[n] ??= {}), u);
+        if (touchesSectors) {
+          log.push({ t: now, s: sectorsOf(n) });
+          // Keep the window, plus the last entry before it as the state at its start.
+          const keepFrom = now - BUFFER_MS;
+          let first = 0;
+          while (first < log.length - 1 && log[first + 1].t < keepFrom) first++;
+          if (first > 0) log.splice(0, first);
+        }
       }
       const cutoff = now - BUFFER_MS;
       if (segmentEvents.length > 400) segmentEvents = segmentEvents.filter((e) => e.t >= cutoff);
@@ -831,9 +916,11 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
         // the dev console. Our own one-liner below records it instead.
         .configureLogging(signalR.LogLevel.None)
         .build();
-      c.on("feed", (topic: string, data: unknown) => {
+      // Every message carries F1's own UTC timestamp as a third argument — the same clock as the
+      // GPS samples the map plays back, so it is what timing events are placed on (see applyFeed).
+      c.on("feed", (topic: string, data: unknown, stamp?: string) => {
         try {
-          applyFeed(topic, data);
+          applyFeed(topic, data, stamp);
         } catch {}
       });
       c.onreconnected(async () => {
@@ -1181,35 +1268,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
         // Per-sector timings straight from TimingData — ungated, so these work without a
         // token too. `Value` empties out while a sector is being run and `PreviousValue`
         // holds the last completed one, so fall back to it rather than flashing blank.
-        sectors: asList<{
-          Value?: string;
-          PreviousValue?: string;
-          OverallFastest?: boolean;
-          PersonalFastest?: boolean;
-          Segments?: unknown;
-        }>(t.Sectors, 3).map((sec, si) => {
-          // Only the CURRENT lap's time — no PreviousValue fallback and no carry-forward of
-          // the last completed reading. Both were added to stop the card blanking mid-lap,
-          // but they also kept last lap's times on screen after a driver had started a new
-          // one. The bar should empty at the line and refill sector by sector.
-          return {
-            // Blank unless this time was written AFTER the last line crossing — otherwise
-            // the ~90ms gap before F1 writes the new time shows last lap's value, and a poll
-            // landing in it displays that for a full poll cycle.
-            value: (valueSetAt[n]?.[si] ?? 0) >= (lapResetAt[n] ?? 0) ? sec?.Value || "" : "",
-            overallFastest: Boolean(sec?.OverallFastest),
-            personalFastest: Boolean(sec?.PersonalFastest),
-            // Segments always reflect the CURRENT lap in progress — that's the point of the
-            // mini-sector bars — so they're never carried over.
-            // Read straight from the accumulated state. deepMerge already folds each sparse
-            // delta into the stored Sectors[].Segments, so this is complete WITHOUT keeping a
-            // second memory of our own — and crucially it resets when F1 resets it at the
-            // start of a new lap. An earlier attempt to stop the bars flashing by merging
-            // into a remembered set carried the PREVIOUS lap's mini-sectors into the new one,
-            // so a driver who had just started a lap appeared almost through sector 1.
-            segments: asList<{ Status?: number }>(sec?.Segments).map((g) => Number(g?.Status ?? 0)),
-          };
-        }),
+        sectors: sectorsOf(n),
         bestSectors: bestSectorOf[n] ?? [null, null, null],
         speeds: Object.fromEntries(
           Object.entries(t.Speeds ?? {}).map(([k, v]) => [
@@ -1340,25 +1399,17 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
       return { remainingMs: 0, segmentEnded: true, nextInMs: untilNext > 0 ? untilNext : null, part: qualifyingPart };
     })();
 
-    // Record this instant's sectors, then serve whichever snapshot matches the client's
-    // playback clock. Without an `asOf` (any non-map consumer) the newest is used, so this
-    // is a no-op for them.
-    {
-      const snapshot: Record<string, SectorTime[]> = {};
-      for (const n of nums) snapshot[n] = rows[+n].sectors;
-      const now = Date.now();
-      if (!sectorHistory.length || now - sectorHistory[sectorHistory.length - 1].t > 200) {
-        sectorHistory.push({ t: now, byDriver: snapshot });
-        const cutoff = now - BUFFER_MS;
-        if (sectorHistory.length > 20 && sectorHistory[0].t < cutoff) {
-          sectorHistory = sectorHistory.filter((h) => h.t >= cutoff);
-        }
+    // Sectors at the map's playback instant (`asOf`), like the running order below. They used to
+    // be served live on purpose — an earlier rewind keyed them by wall time, which overshot and
+    // made them trail the car. On live Baku quali 2026 that left every time ~20 s AHEAD of the
+    // dot: S3 appeared around Turn 20 and was cleared moments later by F1's new-lap reset, long
+    // before the car on the map reached the line. Keyed by the map's own clock, a sector now
+    // lands as its car finishes it on screen. Without `asOf` (no map) they stay live.
+    if (asOfMs) {
+      for (const n of nums) {
+        const at = sectorsAt(n, asOfMs);
+        if (at) rows[+n].sectors = at;
       }
-      // NOTE: history is recorded but deliberately NOT rewound to `asOfMs`. Mini-sectors are
-      // the one field that should land the instant F1 reports them — delaying them to the
-      // map's playback clock made them visibly trail the car on track. The buffer is kept so
-      // this can be revisited without re-plumbing anything.
-      void asOfMs;
     }
 
     // --- Running order, rewound to the map's playback clock ----------------------------
@@ -1493,6 +1544,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
       // already been folded into the rows above.
       segmentEvents: asOfMs ? segmentEvents.filter((e) => e.t > asOfMs) : [],
       lapResets: asOfMs ? lapResets.filter((e) => e.t > asOfMs) : [],
+      sectorEvents: asOfMs ? sectorEventsAfter(asOfMs) : [],
     };
   }
 

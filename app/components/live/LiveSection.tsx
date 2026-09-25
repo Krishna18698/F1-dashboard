@@ -332,6 +332,7 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
               onClose={() => setSelected(null)}
               sectors={s.mode === "quali" ? s.sectors?.get(selected) : undefined}
               lapResets={s.lapResets}
+              sectorEvents={s.mode === "quali" ? s.sectorEvents : undefined}
             />
           )}
           {/* Absorbs the column's spare height, and gives it back when the telemetry card
