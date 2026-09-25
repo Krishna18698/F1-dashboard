@@ -611,7 +611,15 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
         // BEFORE merging — afterwards the update is indistinguishable from earlier state.
         const secs = (u as { Sectors?: unknown }).Sectors;
         if (secs && typeof secs === "object") {
-          let zeros = 0;
+          // Compared against what we already hold, not read on its own: F1 re-sends a car's
+          // whole unchanged sector snapshot every ~5 s (measured live, Baku quali 2026: ANT's
+          // identical half-lap snapshot 22 times in two minutes, HAM's while parked in the
+          // garage). Counting zeros per message took every re-send for a line crossing and
+          // blanked the followed driver's sectors each time. Only a mini-sector going from
+          // reached to 0 is a reset; an unchanged one is not news and is not an event either.
+          const prevSecs = (timing[n] as { Sectors?: Record<string, { Segments?: Record<string, { Status?: number }> }> } | undefined)
+            ?.Sectors;
+          let cleared = 0;
           for (const [sk, sv] of Object.entries(secs as Record<string, { Value?: string; Segments?: unknown }>)) {
             const si = Number(sk);
             if (!Number.isNaN(si) && sv?.Value) {
@@ -628,13 +636,16 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
                 const gi = Number(gk);
                 const code = Number(gv?.Status ?? NaN);
                 if (Number.isNaN(gi) || Number.isNaN(code)) continue;
-                if (code === 0) zeros++;
+                const prev = Number(prevSecs?.[sk]?.Segments?.[gk]?.Status ?? 0);
+                if (code === prev) continue;
+                if (code === 0) cleared++;
                 segmentEvents.push({ t: now, n: +n, s: si, i: gi, c: code });
               }
             }
           }
-          // One update blanking a dozen-plus mini-sectors is the line crossing.
-          if (zeros >= 12) {
+          // One update CLEARING a dozen-plus reached mini-sectors is the line crossing (or F1
+          // resetting everyone for a new qualifying segment).
+          if (cleared >= 12) {
             lapResetAt[n] = now;
             lapResets.push({ t: now, n: +n });
           }

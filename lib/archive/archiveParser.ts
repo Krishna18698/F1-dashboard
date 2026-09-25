@@ -597,6 +597,44 @@ function stintFirstSeenTimes(app: Delta[], uptoMs: number): Record<string, Recor
   return seen;
 }
 
+/** Mini-sector status per driver → sector → segment, as merged so far. */
+type SegState = Record<string, Record<string, Record<string, number>>>;
+
+/**
+ * Applies one TimingData `Sectors` delta to `state` and returns how many mini-sectors it CLEARED
+ * (reached → 0) — the line-crossing signal. F1 re-sends a car's whole unchanged snapshot every
+ * few seconds, so counting zeros in the message rather than changes read every re-send as a
+ * new lap and blanked the followed driver's sectors (seen live, Baku quali 2026). `onChange`
+ * sees only real changes, for the same reason.
+ */
+function applySegments(
+  state: SegState,
+  numStr: string,
+  secs: unknown,
+  onChange?: (si: number, gi: number, code: number) => void,
+): number {
+  if (!secs || typeof secs !== "object") return 0;
+  let cleared = 0;
+  const car = (state[numStr] ??= {});
+  for (const [sk, sv] of Object.entries(secs as Record<string, { Segments?: unknown }>)) {
+    const segs = sv?.Segments;
+    const si = Number(sk);
+    if (Number.isNaN(si) || !segs || typeof segs !== "object") continue;
+    const sector = (car[sk] ??= {});
+    for (const [gk, gv] of Object.entries(segs as Record<string, { Status?: number }>)) {
+      const gi = Number(gk);
+      const code = Number(gv?.Status ?? NaN);
+      if (Number.isNaN(gi) || Number.isNaN(code)) continue;
+      const prev = sector[gk] ?? 0;
+      if (code === prev) continue;
+      sector[gk] = code;
+      if (code === 0) cleared++;
+      onChange?.(si, gi, code);
+    }
+  }
+  return cleared;
+}
+
 function mode(type: string): F1LiveState["mode"] {
   const t = type.toLowerCase();
   if (t.includes("qual")) return "quali";
@@ -799,12 +837,14 @@ export async function getF1LiveState(
   const valueSetAt: Record<string, number[]> = {};
   const lapResetAt: Record<string, number> = {};
   const bestSectorOf: Record<string, (number | null)[]> = {};
+  // Merged mini-sector state — carried on into the look-ahead window further down, so that one
+  // too counts only real changes.
+  const segState: SegState = {};
   for (const dlt of s.timing) {
     if (dlt.ts > infoUptoMs) break;
     for (const [numStr, upd] of Object.entries(dlt.lines)) {
       const secs = (upd as { Sectors?: unknown }).Sectors;
       if (!secs || typeof secs !== "object") continue;
-      let zeros = 0;
       for (const [sk, sv] of Object.entries(secs as Record<string, { Value?: string; Segments?: unknown }>)) {
         const si = Number(sk);
         if (!Number.isNaN(si) && sv?.Value) {
@@ -815,14 +855,8 @@ export async function getF1LiveState(
             if (cur == null || secs < cur) bestSectorOf[numStr][si] = secs;
           }
         }
-        const segs = sv?.Segments;
-        if (segs && typeof segs === "object") {
-          for (const gv of Object.values(segs as Record<string, { Status?: number }>)) {
-            if (Number(gv?.Status ?? -1) === 0) zeros++;
-          }
-        }
       }
-      if (zeros >= 12) lapResetAt[numStr] = dlt.ts;
+      if (applySegments(segState, numStr, secs) >= 12) lapResetAt[numStr] = dlt.ts;
     }
   }
   const appState = mergeUpto(s.app, infoUptoMs);
@@ -960,40 +994,11 @@ export async function getF1LiveState(
       if (dlt.ts > uptoMs) break;
       for (const [numStr, upd] of Object.entries(dlt.lines)) {
         const secs = (upd as { Sectors?: unknown }).Sectors;
-        if (!secs || typeof secs !== "object") continue;
-        for (const [sk, sv] of Object.entries(secs as Record<string, unknown>)) {
-          const si = Number(sk);
-          const segs = (sv as { Segments?: unknown })?.Segments;
-          if (Number.isNaN(si) || !segs || typeof segs !== "object") continue;
-          for (const [gk, gv] of Object.entries(segs as Record<string, { Status?: number }>)) {
-            const gi = Number(gk);
-            const code = Number(gv?.Status ?? NaN);
-            if (!Number.isNaN(gi) && !Number.isNaN(code)) {
-              segmentEvents.push({ t: dlt.ts, n: +numStr, s: si, i: gi, c: code });
-            }
-            // (blank count tallied below to spot a lap reset)
-          }
-        }
-      }
-    }
-    // A delta that blanks a dozen or more mini-sectors for one driver is the line crossing.
-    const blanked: Record<number, number> = {};
-    for (const e of segmentEvents) if (e.c === 0) blanked[e.n] = (blanked[e.n] ?? 0) + 1;
-    for (const dlt of s.timing) {
-      if (dlt.ts <= infoUptoMs) continue;
-      if (dlt.ts > uptoMs) break;
-      for (const [numStr, upd] of Object.entries(dlt.lines)) {
-        const secs = (upd as { Sectors?: unknown }).Sectors;
-        if (!secs || typeof secs !== "object") continue;
-        let zeros = 0;
-        for (const sv of Object.values(secs as Record<string, { Segments?: unknown }>)) {
-          const segs = sv?.Segments;
-          if (!segs || typeof segs !== "object") continue;
-          for (const gv of Object.values(segs as Record<string, { Status?: number }>)) {
-            if (Number(gv?.Status ?? -1) === 0) zeros++;
-          }
-        }
-        if (zeros >= 12) lapResets.push({ t: dlt.ts, n: +numStr });
+        const cleared = applySegments(segState, numStr, secs, (si, gi, code) =>
+          segmentEvents.push({ t: dlt.ts, n: +numStr, s: si, i: gi, c: code }),
+        );
+        // A delta clearing a dozen or more reached mini-sectors is the line crossing.
+        if (cleared >= 12) lapResets.push({ t: dlt.ts, n: +numStr });
       }
     }
   }
