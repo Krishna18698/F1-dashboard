@@ -20,6 +20,9 @@ export default function Battles({ result, drivers }: { result: BattlesResult; dr
   const tla = (n: number) => drivers.get(n)?.name_acronym ?? String(n);
   const colour = (n: number) => hex(drivers.get(n)?.team_colour);
   const count = result.state === "ok" ? result.pairs.length : 0;
+  // Every battle on track, not just the ones listed: the panel shows the top few by position,
+  // and counting only those read "4 within 1s" at Baku while 11 cars were (lap 3, 2026).
+  const total = result.state === "ok" ? result.total : 0;
 
   return (
     <div aria-label="Battles">
@@ -29,7 +32,7 @@ export default function Battles({ result, drivers }: { result: BattlesResult; dr
         </span>
         {result.state === "ok" && (
           <span className="rounded-sm bg-ink px-1.5 py-0.5 text-[0.6rem] font-bold tracking-wider text-white">
-            {count} WITHIN {BATTLE_GAP_S}S
+            {total} WITHIN {BATTLE_GAP_S}S
           </span>
         )}
       </div>
@@ -77,6 +80,11 @@ export default function Battles({ result, drivers }: { result: BattlesResult; dr
                 </li>
               );
             })}
+            {total > count && (
+              <li className="pt-0.5 text-center text-[0.6rem] tracking-wider text-white/40">
+                +{total - count} more within a second
+              </li>
+            )}
           </ol>
         )}
       </div>

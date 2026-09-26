@@ -12,7 +12,8 @@ export interface Battle {
 }
 
 export type BattlesResult =
-  | { state: "ok"; pairs: Battle[] }
+  /** `pairs` is the top MAX_BATTLES by position; `total` counts every battle on track. */
+  | { state: "ok"; pairs: Battle[]; total: number }
   /** Racing is neutralised — gaps shrink because the field is queued, not fighting. */
   | { state: "neutralised"; reason: "sc" | "vsc" | "red" | "formation" }
   /** Lap 1: the order is still settling and every gap is under a second. */
@@ -75,5 +76,5 @@ export function findBattles({
     if (!racing(ahead) || !racing(behind)) continue;
     pairs.push({ ahead, behind, gap });
   }
-  return { state: "ok", pairs: pairs.slice(0, MAX_BATTLES) };
+  return { state: "ok", pairs: pairs.slice(0, MAX_BATTLES), total: pairs.length };
 }
