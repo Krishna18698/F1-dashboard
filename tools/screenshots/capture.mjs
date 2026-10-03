@@ -140,6 +140,7 @@ const STATES = {
   "race-vsc": [{ id: "race-vsc-battles", go: async (p) => (await openTracking(p), await scrollToText(p, /On-track/i, 120)) }],
   "race-start": [{ id: "race-lap1-battles", only: "desktop", go: async (p) => (await openTracking(p), await scrollToText(p, /On-track/i, 120)) }],
   "practice-redflag": [{ id: "practice-redflag", go: async (p) => (await openTracking(p), await scrollToHeading(p, "Live Tracking")) }],
+  sepang: [{ id: "sepang-map", go: async (p) => (await openTracking(p), await selectDriver(p, 0), await scrollToHeading(p, "Live Tracking")), elements: true }],
   offline: [{ id: "offline", go: openHome, full: true }],
 };
 

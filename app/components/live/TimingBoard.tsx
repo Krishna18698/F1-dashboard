@@ -5,6 +5,7 @@ import { Driver, IntervalRow, LapSummary } from "@/lib/timingTypes";
 import { SessionMode } from "./liveTypes";
 import { formatDelta, formatGap, formatInterval, formatLap, hex } from "@/lib/format";
 import { useCountdown } from "./useCountdown";
+import TyreBadge from "./TyreBadge";
 
 // Six drivers drop out of Q1 and six out of Q2, leaving ten for Q3 — the same in a sprint
 // qualifying. Written as "how many are eliminated" rather than "how many advance": the old
@@ -72,6 +73,7 @@ export default function TimingBoard({
   intervals,
   laps,
   retired,
+  inPit,
   sectors,
   qualifyingPart,
   segmentClock,
@@ -94,6 +96,8 @@ export default function TimingBoard({
   intervals: Map<number, IntervalRow>;
   laps: Map<number, LapSummary>;
   retired?: Set<number>;
+  /** Drivers in the pit lane right now — marked with a "P" in practice and qualifying. */
+  inPit?: Set<number>;
   sectors?: Map<number, { value: string; overallFastest: boolean; personalFastest: boolean; segments: number[] }[]>;
   qualifyingPart?: number | null;
   /** Time left in the running quali segment, already formatted. Computed once in LiveSection
@@ -158,8 +162,8 @@ export default function TimingBoard({
   const cols = isRace
     ? "grid-cols-[2rem_1fr_auto]"
     : showSectors
-      ? "grid-cols-[2rem_1fr_4.5rem_3.5rem] sm:grid-cols-[2rem_1fr_repeat(3,4.25rem)_5rem_4rem]"
-      : "grid-cols-[2rem_1fr_4.5rem_3.5rem]";
+      ? "grid-cols-[2rem_1fr_4.5rem_1.5rem_3.5rem] sm:grid-cols-[2rem_1fr_repeat(3,4.25rem)_5rem_1.75rem_4rem]"
+      : "grid-cols-[2rem_1fr_4.5rem_1.5rem_3.5rem]";
 
   // Stretch to the bento row rather than sizing to content (the old `self-start`). At wider
   // viewports the track map grows taller than the board's natural height, so a content-sized
@@ -246,6 +250,7 @@ export default function TimingBoard({
                 </>
               )}
               <span className="text-right">Best</span>
+              <span className="text-center" title="Tyre the best lap was set on">Tyre</span>
               <span className="text-right">Gap</span>
             </>
           )}
@@ -290,6 +295,18 @@ export default function TimingBoard({
                   <span className="hidden truncate text-xs text-muted sm:inline">{d?.team_name}</span>
                   {/* Beside the driver, not in the gap column — their finishing gap is still
                       the useful number there, and this marks who is already home. */}
+                  {/* In the pit lane, as F1 TV marks it in practice and qualifying — where cars
+                      spend much of the session in the garage, so who is actually out matters.
+                      Not for an eliminated driver: their session is over anyway. */}
+                  {!isRace && !isKnockedOut && inPit?.has(num) && (
+                    <span
+                      className="shrink-0 rounded-sm border border-line-strong px-1 text-[0.6rem] font-bold leading-4 text-ink-soft"
+                      title="In the pit lane"
+                      aria-label="In the pit lane"
+                    >
+                      P
+                    </span>
+                  )}
                   {finished(num) && (
                     <span className="shrink-0 text-xs leading-none" title="Finished — chequered flag" aria-label="Finished">
                       🏁
@@ -322,7 +339,7 @@ export default function TimingBoard({
                     </div>
                   )
                 ) : isKnockedOut ? (
-                  <div className={`text-right ${showSectors ? "col-span-2 sm:col-span-5" : "col-span-2"}`}>
+                  <div className={`text-right ${showSectors ? "col-span-3 sm:col-span-6" : "col-span-3"}`}>
                     <span className="rounded-sm bg-ink px-1.5 py-0.5 text-[0.6rem] font-bold tracking-wider text-white">
                       OUT
                     </span>
@@ -344,6 +361,12 @@ export default function TimingBoard({
                       })}
                     <span className={`tnum text-right font-mono text-xs font-bold ${isP1 ? "text-red" : ""}`}>
                       {formatLap(lap?.best)}
+                    </span>
+                    {/* Tyre the best lap was SET on, not the one fitted now. */}
+                    <span className="flex justify-center">
+                      {lap?.best != null && lap.bestCompound && (
+                        <TyreBadge compound={lap.bestCompound} title={`Best lap set on ${lap.bestCompound.toLowerCase()} tyres`} />
+                      )}
                     </span>
                     <span className="tnum text-right font-mono text-[0.7rem] text-muted">
                       {isP1 ? "—" : formatDelta(lap?.best, fastest) || "—"}

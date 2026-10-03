@@ -82,6 +82,12 @@ export const SCENARIOS = {
     ownerToken: true,
     replay: { sessionPath: `${MADRID}/2026-09-12_Practice_3/`, sessionType: "Practice", circuitKey: 153, location: "Madrid", name: "Spanish Grand Prix · Practice 3", anchorAtMs: hms(1, 0, 30) },
   },
+  // Sepang (circuit key 12, bundled outline) — 2026 FP3 mid-session, to check corners and the line.
+  sepang: {
+    now: "2026-10-03T05:15:00Z",
+    ownerToken: true,
+    replay: { sessionPath: "2026/2026-10-04_Bahrain_Grand_Prix/2026-10-03_Practice_3/", sessionType: "Practice", circuitKey: 12, location: "Kuala Lumpur", name: "Bahrain Grand Prix · Practice 3", anchorAtMs: hms(1, 0, 0) },
+  },
   // Every upstream unreachable — what a visitor sees if Jolpica, F1 and the news feeds are down.
   offline: { now: "2026-09-23T14:30:00Z", fixtures: "none" },
 };

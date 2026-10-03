@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import madrid from "@/data/circuits/153.json";
+import sepang from "@/data/circuits/12.json";
 
 /**
  * Outlines we hold ourselves, for circuits nobody else publishes. Checked BEFORE MultiViewer.
@@ -12,9 +13,16 @@ import madrid from "@/data/circuits/153.json";
  *
  * No corner numbers yet: those need the official sequence matched to specific bends, which
  * is a one-off manual job — see data/circuits/153.json.
+ *
+ * Sepang (12, "Kuala Lumpur" in F1's feed — the 2026 Bahrain GP relocation) has not been raced
+ * since 2017, so MultiViewer has nothing either. Traced the same way from 2026 FP3: car #12's
+ * fastest lap (1:36.302), cut at its lap tick and at tick − lap time with positions interpolated
+ * to those instants, closing to 0.6 m. 5,495 m traced against 5,543 m official. The 15 official
+ * turns are matched in order to the lap's turning points, each label on the outside of its bend.
  */
 const BUNDLED: Record<string, { x: number[]; y: number[]; rotation: number; corners: MvCorner[] }> = {
   "153": madrid as { x: number[]; y: number[]; rotation: number; corners: MvCorner[] },
+  "12": sepang as { x: number[]; y: number[]; rotation: number; corners: MvCorner[] },
 };
 
 export const revalidate = 86400; // circuit layouts don't change — cache a day

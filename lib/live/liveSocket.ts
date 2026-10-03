@@ -18,6 +18,7 @@
 import { PRE_START_LIVE_MS, QUALI_DURATION_MS, QUALI_LAST_LAP_GRACE_MS, SPRINT_QUALI_DURATION_MS, WEEKEND_FLIP_MS } from "../sessionWindows";
 import "server-only";
 import * as signalR from "@microsoft/signalr";
+import { compoundOfLap } from "../bestLapTyre";
 import WsImpl from "ws";
 import zlib from "zlib";
 import { DRY_COMPOUNDS, flatSessions, parseLapTime, weekendTyresLeftForMeeting, WEEKEND_ALLOCATION } from "../archive/archiveParser";
@@ -204,6 +205,8 @@ export interface F1LiveRow {
   compound: string;
   tyre_laps: number;
   in_pit: boolean;
+  /** Compound the best lap was set on (SOFT, MEDIUM, …), or null before one is set. */
+  best_compound: string | null;
   retired: boolean; // crashed / DNF (feed Retired or Stopped)
   knocked_out: boolean; // eliminated in a prior quali segment (feed KnockedOut)
   grid: number; // starting grid position (0 = unknown) — for gained/lost indicator
@@ -1260,6 +1263,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
         compound: stint.compound,
         tyre_laps: stint.laps,
         in_pit: Boolean(t.InPit),
+        best_compound: best != null ? compoundOfLap(allStints(n), Number(t.BestLapTime?.Lap ?? 0)) : null,
         retired: Boolean(t.Retired || t.Stopped),
         knocked_out: Boolean(t.KnockedOut),
         grid: Number((app[n] as { GridPos?: string | number })?.GridPos ?? 0),

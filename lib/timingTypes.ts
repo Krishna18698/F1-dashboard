@@ -66,4 +66,6 @@ export interface LapSummary {
   bestS2: number | null;
   bestS3: number | null;
   count: number;
+  /** Compound the best lap was set on (SOFT, MEDIUM, …), when the feed knows it. */
+  bestCompound?: string | null;
 }

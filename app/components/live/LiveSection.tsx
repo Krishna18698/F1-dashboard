@@ -361,6 +361,7 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
           intervals={s.intervals}
           laps={s.laps}
           retired={s.retired}
+          inPit={s.inPit}
           sectors={s.sectors}
           qualifyingPart={s.qualifyingPart}
           sprintQuali={/sprint/i.test(s.session?.session_name ?? "")}
