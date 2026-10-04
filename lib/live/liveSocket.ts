@@ -1568,9 +1568,12 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
         ((sessionStartedTs != null
           ? Date.now() < sessionStartedTs
           : Number(lapCount?.CurrentLap ?? 0) >= 1 &&
-            (anonymous ||
-              (formationSeenAt ??= fieldMoving() && (startSuspendedAt() == null || trackStatus?.Status !== "5") ? Date.now() : null) !=
-                null)) ||
+            // Without positions a suspension can't be told apart from the next formation lap, so it
+            // holds until the race starts rather than claiming both at once.
+            ((anonymous && startSuspendedAt() == null) ||
+              (!anonymous &&
+                (formationSeenAt ??= fieldMoving() && (startSuspendedAt() == null || trackStatus?.Status !== "5") ? Date.now() : null) !=
+                  null))) ||
           restartFormationLap()),
       // Past the scheduled start, race not started, field not yet out on the formation lap.
       startDelayed:

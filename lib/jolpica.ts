@@ -121,11 +121,19 @@ export function currentlyLiveWeekendSession(race: Race): WeekendSession | null {
  * merely opens a socket that reports nothing, while too NARROW makes a live session look dead.
  * Callers should also fail OPEN when the schedule itself is unavailable.
  */
+/** How long after its SCHEDULED start a race or sprint may still be running. The assumed length
+ *  is fine for deciding what the schedule shows, but as the window for connecting to the live feed
+ *  it cut a running race off: Sepang 2026 started 1h33m late after rain and a suspended start, the
+ *  window closed at 09:05 UTC on lap 27 of 55, and once its connection dropped the site refused to
+ *  reconnect — "no live session" for the rest of the race. Long enough for any delay or red flag. */
+const RACE_FEED_TAIL_MS = 6 * 3600_000;
+
 export function withinFeedWindow(race: Race, beforeMs: number, afterMs: number, now = Date.now()): boolean {
   return weekendSessions(race).some((s) => {
     const start = Date.parse(s.iso);
     if (!Number.isFinite(start)) return false;
-    const duration = SESSION_DURATION_MS[s.short] ?? 60 * 60_000;
+    const assumed = SESSION_DURATION_MS[s.short] ?? 60 * 60_000;
+    const duration = s.short === "Race" || s.short === "Sprint" ? Math.max(assumed, RACE_FEED_TAIL_MS) : assumed;
     return now >= start - beforeMs && now <= start + duration + afterMs;
   });
 }

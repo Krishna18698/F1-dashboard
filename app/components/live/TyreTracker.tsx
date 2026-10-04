@@ -2,6 +2,7 @@
 
 import { Driver, IntervalRow, LapSummary } from "@/lib/timingTypes";
 import { formatGap, formatInterval, formatLap, hex } from "@/lib/format";
+import { shownStints, type Stint } from "./tyreStints";
 
 // Tyre compound → colour (F1 sidewall colours).
 const COLOR: Record<string, string> = {
@@ -16,7 +17,6 @@ function color(c: string) {
   return COLOR[c] ?? COLOR.UNKNOWN;
 }
 
-type Stint = { compound: string; laps: number; age: number };
 interface Fastest {
   driver_number: number;
   tla: string;
@@ -84,7 +84,8 @@ export default function TyreTracker({
   fastestLap?: Fastest | null;
 }) {
   const sumOf = (list: Stint[]) => list.reduce((a, s) => a + s.laps, 0);
-  const maxRun = Math.max(1, ...order.map((n) => sumOf(stints.get(n) ?? [])));
+  const shown = new Map(order.map((n) => [n, shownStints(stints.get(n) ?? [])]));
+  const maxRun = Math.max(1, ...order.map((n) => sumOf(shown.get(n) ?? [])));
   const scaleMax = Math.max(totalLaps, maxRun, 1);
   const pct = (laps: number) => (laps / scaleMax) * 100;
 
@@ -127,7 +128,7 @@ export default function TyreTracker({
               const isP1 = pos === 1;
               const isFastest = num === fastestLap?.driver_number;
               const isOut = retired?.has(num);
-              const list = stints.get(num) ?? [];
+              const list = shown.get(num) ?? [];
               let cum = 0;
               const segs = list.map((st) => {
                 const start = cum;
@@ -163,7 +164,11 @@ export default function TyreTracker({
                         <div
                           key={k}
                           className="absolute top-0 h-full"
-                          style={{ left: `${pct(s.start)}%`, width: `${pct(s.laps)}%`, backgroundColor: color(s.compound) }}
+                          style={{
+                            left: `${pct(s.start)}%`,
+                            width: `${pct(s.laps)}%`,
+                            backgroundColor: color(s.compound),
+                          }}
                         />
                       ))}
                     </div>
