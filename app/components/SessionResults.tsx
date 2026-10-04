@@ -29,7 +29,10 @@ const showable = (d: Res | null): d is Res & { top: Row[] } =>
   (d.complete === false || (!!d.endedAtMs && Date.now() <= d.endedAtMs + RESULT_TTL));
 
 function Item({ d, isRace }: { d: Row; isRace: boolean }) {
-  const value = isRace ? d.gap || "—" : formatLap(d.best);
+  // F1 fills the LEADER's gap with the lap number ("LAP 1") — not a gap. The leader shows
+  // "Leader", as the timing board does.
+  const gap = /^LAP\b/i.test(d.gap ?? "") ? (d.pos === 1 ? "Leader" : "") : d.gap;
+  const value = isRace ? gap || "—" : formatLap(d.best);
   return (
     <span className="mx-4 inline-flex shrink-0 items-center gap-2">
       <span className="tnum font-mono text-xs font-bold text-white/40">P{d.pos}</span>

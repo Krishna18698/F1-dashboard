@@ -256,6 +256,8 @@ export interface F1LiveState {
   formationLap: boolean; // race hasn't gone green yet (SessionData StatusSeries "Started")
   /** Past the race's scheduled start, but it hasn't started and the field isn't moving yet. */
   startDelayed?: boolean;
+  /** Race Control suspended the starting procedure (red flag before lights out). */
+  startSuspended?: boolean;
   /**
    * Whether car POSITIONS can be served at all. True on any token-backed connection; false
    * on an anonymous one — F1 gates Position.z/CarData.z behind a token while serving the
@@ -1547,13 +1549,28 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
       // cars at 0 km/h while the site said "Formation lap"). With car positions, it now also takes
       // the field actually driving off. Without them (anonymous connection) there is no way to
       // tell, so the old rule stands.
+      // A suspended start cancels the formation lap; the next one is latched afresh once the field
+      // drives off again with the red flag gone (driving into the pit lane under red is not it).
+      ...(() => {
+        const sus = sessionStartedTs == null ? startSuspendedAt() : null;
+        if (sus != null && formationSeenAt != null && formationSeenAt < sus) formationSeenAt = null;
+        return {};
+      })(),
+      startSuspended:
+        !ended &&
+        mode === "race" &&
+        sessionStartedTs == null &&
+        startSuspendedAt() != null &&
+        formationSeenAt == null,
       formationLap:
         !ended &&
         mode === "race" &&
         ((sessionStartedTs != null
           ? Date.now() < sessionStartedTs
           : Number(lapCount?.CurrentLap ?? 0) >= 1 &&
-            (anonymous || (formationSeenAt ??= fieldMoving() ? Date.now() : null) != null)) ||
+            (anonymous ||
+              (formationSeenAt ??= fieldMoving() && (startSuspendedAt() == null || trackStatus?.Status !== "5") ? Date.now() : null) !=
+                null)) ||
           restartFormationLap()),
       // Past the scheduled start, race not started, field not yet out on the formation lap.
       startDelayed:
@@ -1562,6 +1579,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
         !anonymous &&
         sessionStartedTs == null &&
         formationSeenAt == null &&
+        startSuspendedAt() == null &&
         (scheduledStartMs() ?? Infinity) < Date.now(),
       mapAvailable: !anonymous,
       sessionEnded: ended,
@@ -1614,7 +1632,8 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
     let bestSent = -Infinity;
     let target: number | null = null;
     for (const m of Object.values(raceControl)) {
-      const hit = /RESUME(?:D)? AT (\d{1,2}):(\d{2})/i.exec(m.Message ?? "");
+      // "RACE WILL RESUME AT 14:30", and before a suspended start "FORMATION LAP WILL START AT".
+      const hit = /(?:RESUME(?:D)?|START(?:S)?) AT (\d{1,2}):(\d{2})/i.exec(m.Message ?? "");
       if (!hit || !m.Utc) continue;
       const sent = Date.parse(m.Utc + "Z");
       if (!Number.isFinite(sent) || sent <= bestSent) continue;
@@ -1624,7 +1643,9 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
         Date.UTC(localDay.getUTCFullYear(), localDay.getUTCMonth(), localDay.getUTCDate(), +hit[1], +hit[2]) - off;
       bestSent = sent;
     }
-    return target;
+    // Only a time still ahead: an announcement already overtaken (Sepang 2026: "FORMATION LAP
+    // WILL START AT 15:40", then the start was suspended at 15:45) read "RESUMES IN 0:00".
+    return target != null && target > Date.now() ? target : null;
   }
 
   /**
@@ -1665,6 +1686,18 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
       if ((Math.hypot(x - p[0], y - p[1]) / 10 / dt) * 3.6 > 30) moving++;
     }
     return cars >= 10 && moving * 2 >= cars;
+  }
+
+  /** Latest Race Control message suspending or aborting the START (before lights out), epoch ms.
+   *  Sepang 2026: "STARTING PROCEDURE SUSPENDED" mid-formation lap, with a red flag. */
+  function startSuspendedAt(): number | null {
+    let at: number | null = null;
+    for (const m of Object.values(raceControl)) {
+      if (!/STARTING PROCEDURE SUSPENDED|START(?:ING PROCEDURE)? ABORTED/i.test(m.Message ?? "") || !m.Utc) continue;
+      const t = Date.parse(m.Utc + "Z");
+      if (Number.isFinite(t) && (at == null || t > at)) at = t;
+    }
+    return at;
   }
 
   /** The race's scheduled start, epoch ms, or null if F1 hasn't published it. */

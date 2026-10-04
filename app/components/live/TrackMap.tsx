@@ -84,6 +84,7 @@ export default function TrackMap({
   trackStatus,
   formationLap,
   startDelayed,
+  startSuspended,
   suspended,
   mode,
   laps,
@@ -104,6 +105,8 @@ export default function TrackMap({
   formationLap?: boolean;
   /** Past the scheduled start with the field still on the grid. */
   startDelayed?: boolean;
+  /** The red flag is a suspended START, before lights out. */
+  startSuspended?: boolean;
   /** Session is red-flagged (SessionStatus "Aborted") — outranks every other tint. */
   suspended?: boolean;
   /** Only a race gets "suspended" — practice and qualifying are stopped, not suspended. */
@@ -618,7 +621,7 @@ export default function TrackMap({
   // stops the session without suspending a classification, and calling FP1 a suspended race
   // reads as a bug — so name the flag itself outside the race.
   const tint = suspended
-    ? { color: "#e10600", label: mode === "race" ? "Race Suspended" : "Red Flag", dark: false }
+    ? { color: "#e10600", label: startSuspended ? "Start Suspended" : mode === "race" ? "Race Suspended" : "Red Flag", dark: false }
     : formationLap
       ? { color: "#f5c518", label: "Formation Lap", dark: true }
       : startDelayed
@@ -656,7 +659,7 @@ export default function TrackMap({
             {name}
           </span>
         )}
-        {laps && laps.total > 0 && !formationLap && !startDelayed && (
+        {laps && laps.total > 0 && !formationLap && !startDelayed && !startSuspended && (
           <span
             className="tnum absolute right-3 top-3 z-10 rounded-full bg-black/60 px-2.5 py-1 font-mono text-[0.65rem] font-bold tracking-wider text-white/85"
             title="Progress through the race — lap X of Y"

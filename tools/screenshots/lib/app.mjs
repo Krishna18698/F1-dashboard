@@ -72,7 +72,9 @@ export function prepareWorkspace(scenario) {
   // Backdate the whole copy. Next's watcher counts a file written within its timestamp
   // tolerance of startup as changed, and a "changed" next.config.ts restarts the server partway
   // through the first captures.
-  const past = new Date(Date.now() - 10 * 60_000);
+  // Before the scenario's FAKE clock too: the server runs on that clock (lib/preload.cjs), so files
+  // stamped with today's date look like they were edited in its future and restart it repeatedly.
+  const past = new Date(Math.min(Date.now(), Date.parse(scenario.now)) - 10 * 60_000);
   const touch = (p) => {
     fs.utimesSync(p, past, past);
     if (fs.statSync(p).isDirectory()) for (const f of fs.readdirSync(p)) if (f !== "node_modules" && f !== ".next") touch(path.join(p, f));

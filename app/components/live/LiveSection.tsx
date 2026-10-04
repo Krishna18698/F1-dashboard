@@ -305,7 +305,8 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
               trackStatus={s.trackStatus}
               formationLap={s.formationLap}
               startDelayed={s.startDelayed}
-              suspended={s.sessionStatus === "Aborted"}
+              startSuspended={s.startSuspended}
+              suspended={s.sessionStatus === "Aborted" || s.startSuspended}
               mode={s.mode}
               laps={s.mode === "race" ? { current: s.currentLap ?? 0, total: s.totalLaps ?? 0 } : undefined}
               clock={
@@ -371,7 +372,7 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
           qualifyingSegmentEnded={s.qualifyingSegmentEnded}
           nextQualifyingSegmentInMs={s.nextQualifyingSegmentInMs}
           knockedOut={s.knockedOut}
-          suspended={s.sessionStatus === "Aborted"}
+          suspended={s.sessionStatus === "Aborted" || s.startSuspended}
           restartAtMs={s.suspendedRestartMs}
           formationLap={s.formationLap}
           startDelayed={s.startDelayed}
