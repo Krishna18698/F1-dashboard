@@ -280,6 +280,15 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
                     RED FLAG
                   </span>
                 )}
+                {/* No map to tint without a token, so the Safety Car / VSC gets a badge here. */}
+                {s.mode === "race" && s.sessionStatus !== "Aborted" && !s.formationLap && ["4", "6", "7"].includes(s.trackStatus ?? "") && (
+                  <span
+                    className="absolute left-3 top-3 rounded-full px-2.5 py-1 text-[0.65rem] font-bold tracking-wider text-black"
+                    style={{ backgroundColor: s.trackStatus === "7" ? "#f5c518" : "#ff8000" }}
+                  >
+                    {s.trackStatus === "4" ? "SAFETY CAR" : s.trackStatus === "6" ? "VIRTUAL SAFETY CAR" : "VSC ENDING"}
+                  </span>
+                )}
                 {s.mode === "race" && s.sessionStatus !== "Aborted" && s.formationLap && (
                   <span className="absolute right-3 top-3 rounded-full bg-yellow-400/85 px-2.5 py-1 text-[0.65rem] font-bold tracking-wider text-black">
                     FORMATION LAP
@@ -376,6 +385,7 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
           restartAtMs={s.suspendedRestartMs}
           formationLap={s.formationLap}
           startDelayed={s.startDelayed}
+          trackStatus={s.trackStatus}
           totalLaps={s.totalLaps}
           selectedNum={selected}
           onSelect={setSelected}
@@ -428,6 +438,14 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
             laps={s.laps}
             retired={s.retired}
             stints={s.tyreStints ?? new Map()}
+            sectors={s.sectors}
+            neutralised={
+              s.sessionStatus === "Aborted" ||
+              ["4", "5", "6", "7"].includes(s.trackStatus ?? "") ||
+              !!s.formationLap ||
+              !!s.startDelayed ||
+              !!s.startSuspended
+            }
             totalLaps={s.totalLaps}
             fastestLap={s.fastestLap}
           />

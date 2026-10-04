@@ -69,6 +69,12 @@ export const SCENARIOS = {
     ownerToken: true,
     replay: { sessionPath: `${MADRID}/2026-09-13_Race/`, sessionType: "Race", circuitKey: 153, location: "Madrid", name: "Spanish Grand Prix · Race", anchorAtMs: hms(1, 21, 50) },
   },
+  // The same VSC as a visitor without a token sees it: no map, so the board carries the badge.
+  "race-vsc-tokenless": {
+    now: "2026-09-13T14:20:00Z",
+    tokenless: true,
+    replay: { sessionPath: `${MADRID}/2026-09-13_Race/`, sessionType: "Race", circuitKey: 153, location: "Madrid", name: "Spanish Grand Prix · Race", anchorAtMs: hms(1, 21, 50) },
+  },
   // Lap 1 (lap 2 begins 00:59:55) → Battles waits for the order to settle.
   "race-start": {
     now: "2026-09-13T13:02:00Z",

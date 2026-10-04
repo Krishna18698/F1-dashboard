@@ -275,6 +275,7 @@ export interface F1LiveState {
   lapResets?: { t: number; n: number }[];
   /** Upcoming sector-display changes (a time landing, the lap clearing) on the map's clock. */
   sectorEvents?: { t: number; n: number; s: SectorTime[] }[];
+  sectorsSynced?: boolean;
 }
 export interface SessionResult {
   session_name: string;
@@ -688,8 +689,12 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
       // Wall time put the "new lap" reset ~6.5 s after the dot crossed the line (Baku quali
       // 2026, 29 crossings); the newest GPS sample at arrival still landed S3 ~0.5 s early.
       // Only a message without a stamp (none seen) falls back to that approximation.
+      // No stamp means the subscribe SNAPSHOT: state from before we connected, so it is placed
+      // at the start of time. Stamped "now" it sat ~20 s ahead of the map, and every driver's
+      // sectors were served from before it — all blank — until the map caught up (seen after a
+      // reconnect during the Sepang 2026 race).
       const stamped = stamp ? Date.parse(stamp) : NaN;
-      const now = Number.isFinite(stamped) ? stamped : (frameBuffer.at(-1)?.t ?? Date.now());
+      const now = Number.isFinite(stamped) ? stamped : 0;
       for (const [n, u] of Object.entries((data as { Lines?: Record<string, Dict> }).Lines ?? {})) {
         // Note WHEN each sector time was written and when the mini-sectors were blanked,
         // BEFORE merging — afterwards the update is indistinguishable from earlier state.
@@ -738,7 +743,8 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
         // any instant in the window rather than always as of now (see sectorsAt).
         const touchesSectors = !!(u as { Sectors?: unknown }).Sectors;
         const log = (sectorLog[n] ??= []);
-        if (touchesSectors && !log.length) log.push({ t: now - 1, s: sectorsOf(n) });
+        // The state before this update, as the window's starting point — only if there was one.
+        if (touchesSectors && !log.length && timing[n]) log.push({ t: now - 1, s: sectorsOf(n) });
         deepMerge((timing[n] ??= {}), u);
         if (touchesSectors) {
           log.push({ t: now, s: sectorsOf(n) });
@@ -1591,6 +1597,9 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
       segmentEvents: asOfMs ? segmentEvents.filter((e) => e.t > asOfMs) : [],
       lapResets: asOfMs ? lapResets.filter((e) => e.t > asOfMs) : [],
       sectorEvents: asOfMs ? sectorEventsAfter(asOfMs) : [],
+      // False when the sectors are live rather than at the map's instant (no `asOf` yet): the
+      // page then waits for synced ones instead of showing these and jumping back 20 s later.
+      sectorsSynced: asOfMs != null,
     };
   }
 

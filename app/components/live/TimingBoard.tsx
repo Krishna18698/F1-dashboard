@@ -23,6 +23,13 @@ function sectorColour(s?: { overallFastest: boolean; personalFastest: boolean })
   return "text-ink-soft";
 }
 
+/** TrackStatus codes that neutralise a race, as chips (same colours as the map's tint). */
+const NEUTRALISED: Record<string, { label: string; bg: string; fg: string }> = {
+  "4": { label: "SAFETY CAR", bg: "#ff8000", fg: "#15151a" },
+  "6": { label: "VIRTUAL SAFETY CAR", bg: "#ff8000", fg: "#15151a" },
+  "7": { label: "VSC ENDING", bg: "#f5c518", fg: "#15151a" },
+};
+
 /** Bottom N of the still-active (not yet eliminated) field, in current ranked order. */
 function dangerZone(order: number[], knockedOut: Set<number> | undefined, part: number | null | undefined): Set<number> {
   // Nothing to shade in the final segment — everyone left is racing for pole, not survival.
@@ -86,6 +93,7 @@ export default function TimingBoard({
   restartAtMs,
   formationLap,
   startDelayed,
+  trackStatus,
   totalLaps,
   selectedNum,
   onSelect,
@@ -119,6 +127,9 @@ export default function TimingBoard({
   formationLap?: boolean;
   /** Past the scheduled start, field still on the grid. */
   startDelayed?: boolean;
+  /** F1 TrackStatus code — the Safety Car / VSC chip. On the board rather than only the map, so
+   *  visitors without a token (who get no map) see it too. */
+  trackStatus?: string | null;
   /** Race distance, so a driver who has completed it can be flagged as finished. */
   totalLaps?: number | null;
   selectedNum?: number | null;
@@ -197,6 +208,16 @@ export default function TimingBoard({
           <span className="flex items-center gap-1.5 rounded-sm bg-amber-400 px-1.5 py-0.5 text-[0.6rem] font-bold tracking-wider text-ink">
             <span className="live-dot h-1.5 w-1.5 rounded-full bg-ink/70" />
             START DELAYED
+          </span>
+        )}
+        {/* Safety Car / VSC. A red flag, formation lap or delayed start is the louder state. */}
+        {isRace && !redFlagged && !forming && !startDelayed && NEUTRALISED[trackStatus ?? ""] && (
+          <span
+            className="flex items-center gap-1.5 rounded-sm px-1.5 py-0.5 text-[0.6rem] font-bold tracking-wider"
+            style={{ backgroundColor: NEUTRALISED[trackStatus!].bg, color: NEUTRALISED[trackStatus!].fg }}
+          >
+            <span className="live-dot h-1.5 w-1.5 rounded-full bg-current opacity-70" />
+            {NEUTRALISED[trackStatus!].label}
           </span>
         )}
         {forming && (

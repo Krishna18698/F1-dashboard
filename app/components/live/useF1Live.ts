@@ -48,6 +48,7 @@ interface ApiResponse {
   replay?: boolean;
   source?: "token" | "free" | "visitor" | "free-live";
   mapAvailable?: boolean;
+  sectorsSynced?: boolean;
   sessionEnded?: boolean;
   segmentEvents?: { t: number; n: number; s: number; i: number; c: number }[];
   lapResets?: { t: number; n: number }[];
@@ -136,7 +137,9 @@ function toState(r: ApiResponse): LiveState {
         : [{ compound: row.compound, laps: row.tyre_laps ?? 0, age: row.tyre_laps ?? 0, isNew: false, segment: null }],
     );
     if (row.weekendTyresLeft) weekendTyresLeft.set(num, row.weekendTyresLeft);
-    if (row.sectors) sectors.set(num, row.sectors);
+    // Live sectors arrive before the map's clock is known; with a map coming they'd show ~20 s
+    // ahead and then jump back, so wait for the synced ones.
+    if (row.sectors && !(r.sectorsSynced === false && r.mapAvailable !== false)) sectors.set(num, row.sectors);
     if (row.bestSectors) bestSectors.set(num, row.bestSectors);
     if (row.speeds) speeds.set(num, row.speeds);
     if (row.in_pit) inPit.add(num);

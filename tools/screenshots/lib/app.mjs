@@ -41,7 +41,7 @@ export function prepareWorkspace(scenario) {
     name: ${JSON.stringify(r.name)},
     anchorFrac: ${r.anchorFrac ?? 0},${r.anchorAtMs != null ? `\n    anchorAtMs: ${r.anchorAtMs},` : ""}
     restartedAtMs: ${Date.parse(scenario.now)},
-    maskTokenGated: false,
+    maskTokenGated: ${scenario.tokenless ? "true" : "false"},
   },`;
     const next = lc.replace(/replay: \{[\s\S]*?maskTokenGated: false,\n  \},/, block);
     if (next === lc) throw new Error("liveConfig.ts replay block changed shape — update lib/app.mjs");

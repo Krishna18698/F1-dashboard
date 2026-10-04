@@ -37,6 +37,13 @@ export const F1_LIVE = {
   replayExcludePaths: ["Hungarian_Grand_Prix"] as string[],
 
   /**
+   * Tyre Tracker view. "auto" shows tyre stints, but switches to F1 TV-style mini-sectors when
+   * F1's tyre data is incomplete for 2+ cars on track — drawing it anyway would mean guessing
+   * where the missing laps belong. "stints" / "minisectors" force one view.
+   */
+  tyreTracker: "auto" as "auto" | "stints" | "minisectors",
+
+  /**
    * TEST replay: when enabled, the live panel replays this past session against a
    * real-time virtual clock — so you can verify the map/board/tyres/ticker work
    * before a genuine session. Set enabled:false for normal live behaviour.
