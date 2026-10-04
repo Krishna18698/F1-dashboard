@@ -254,6 +254,8 @@ export interface F1LiveState {
    *  segment, or once the estimate has elapsed and we're just waiting on F1. */
   nextQualifyingSegmentInMs: number | null;
   formationLap: boolean; // race hasn't gone green yet (SessionData StatusSeries "Started")
+  /** Past the race's scheduled start, but it hasn't started and the field isn't moving yet. */
+  startDelayed?: boolean;
   /**
    * Whether car POSITIONS can be served at all. True on any token-backed connection; false
    * on an anonymous one — F1 gates Position.z/CarData.z behind a token while serving the
@@ -451,6 +453,10 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
   // SessionData's StatusSeries carries SessionStatus:"Started" — F1's own explicit race-start
   // signal (same one the free-feed replay path anchors formation-lap detection to).
   let sessionStartedTs: number | null = null;
+  /** When the field was first seen moving as a pack before the green light — the formation lap
+   *  has begun. Latched until the race starts, so the pause on the grid before lights out does
+   *  not flip it back. */
+  let formationSeenAt: number | null = null;
   // The LATEST SessionStatus:"Started", as opposed to the first. A qualifying session emits
   // one per segment (measured at Zandvoort SQ: Started 14:30:00 → Finished 14:42:00 for SQ1,
   // then another pair for SQ2), so this is what marks the current segment actually going
@@ -544,6 +550,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
       qualifyingPartHistory = [];
       stintFirstSeenAt = {};
       sessionStartedTs = null;
+      formationSeenAt = null;
       segmentStartedTs = null;
       sessionFinishedTs = null;
       statusHistory = [];
@@ -1535,13 +1542,27 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
       // while SessionStatus is still Inactive. Measured during the Zandvoort Sprint at
       // 10:01:52Z — LapCount {CurrentLap:1,TotalLaps:24}, SessionStatus "Inactive", and no
       // "Started" anywhere in StatusSeries.
+      // F1 publishes CurrentLap 1 BEFORE the formation lap begins, so that alone also covered the
+      // cars sitting on the grid through a delayed start (Sepang 2026: rain, start delayed, all 22
+      // cars at 0 km/h while the site said "Formation lap"). With car positions, it now also takes
+      // the field actually driving off. Without them (anonymous connection) there is no way to
+      // tell, so the old rule stands.
       formationLap:
         !ended &&
         mode === "race" &&
         ((sessionStartedTs != null
           ? Date.now() < sessionStartedTs
-          : Number(lapCount?.CurrentLap ?? 0) >= 1) ||
+          : Number(lapCount?.CurrentLap ?? 0) >= 1 &&
+            (anonymous || (formationSeenAt ??= fieldMoving() ? Date.now() : null) != null)) ||
           restartFormationLap()),
+      // Past the scheduled start, race not started, field not yet out on the formation lap.
+      startDelayed:
+        !ended &&
+        mode === "race" &&
+        !anonymous &&
+        sessionStartedTs == null &&
+        formationSeenAt == null &&
+        (scheduledStartMs() ?? Infinity) < Date.now(),
       mapAvailable: !anonymous,
       sessionEnded: ended,
       // Only what's still ahead of the dots is useful to the client; anything older has
@@ -1623,6 +1644,36 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
    * announcement lands on lap n, the formation lap is n+1, and the field starts at the end of
    * it. That clears one lap late in the worst case rather than dropping the indicator early.
    */
+  /** At least half the cars on the map moving above 30 km/h over the newest ~1.5 s of GPS —
+   *  the whole field driving off together, which only happens on the formation lap (or racing).
+   *  Reconnaissance laps are a few cars at a time and never reach half. */
+  function fieldMoving(): boolean {
+    const b = frameBuffer.at(-1);
+    if (!b) return false;
+    let k = frameBuffer.length - 1;
+    while (k > 0 && b.t - frameBuffer[k].t < 1500) k--;
+    const a = frameBuffer[k];
+    const dt = (b.t - a.t) / 1000;
+    if (!a || dt < 0.5) return false;
+    let cars = 0;
+    let moving = 0;
+    for (const [n, [x, y]] of Object.entries(b.c)) {
+      const p = a.c[n];
+      if (!p) continue;
+      cars++;
+      // Position units are decimetres.
+      if ((Math.hypot(x - p[0], y - p[1]) / 10 / dt) * 3.6 > 30) moving++;
+    }
+    return cars >= 10 && moving * 2 >= cars;
+  }
+
+  /** The race's scheduled start, epoch ms, or null if F1 hasn't published it. */
+  function scheduledStartMs(): number | null {
+    if (!sessionInfo?.StartDate) return null;
+    const ms = Date.parse(sessionInfo.StartDate + "Z") - offsetMs(sessionInfo.GmtOffset);
+    return Number.isFinite(ms) ? ms : null;
+  }
+
   function restartFormationLap(): boolean {
     if ((sessionStatus?.Status ?? "") !== "Started") return false;
 

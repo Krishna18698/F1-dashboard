@@ -304,6 +304,7 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
               name={s.session?.location}
               trackStatus={s.trackStatus}
               formationLap={s.formationLap}
+              startDelayed={s.startDelayed}
               suspended={s.sessionStatus === "Aborted"}
               mode={s.mode}
               laps={s.mode === "race" ? { current: s.currentLap ?? 0, total: s.totalLaps ?? 0 } : undefined}
@@ -373,6 +374,7 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
           suspended={s.sessionStatus === "Aborted"}
           restartAtMs={s.suspendedRestartMs}
           formationLap={s.formationLap}
+          startDelayed={s.startDelayed}
           totalLaps={s.totalLaps}
           selectedNum={selected}
           onSelect={setSelected}
@@ -393,7 +395,8 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
                 currentLap: s.currentLap,
                 trackStatus: s.trackStatus,
                 sessionStatus: s.sessionStatus,
-                formationLap: s.formationLap,
+                // A delayed start reads the same as the formation lap here: not racing yet.
+                formationLap: s.formationLap || s.startDelayed,
               })}
             />
           )}

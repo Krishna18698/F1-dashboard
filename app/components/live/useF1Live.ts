@@ -66,6 +66,7 @@ interface ApiResponse {
   sessionStatus?: string | null;
   suspendedRestartMs?: number | null;
   formationLap?: boolean;
+  startDelayed?: boolean;
   telFrames?: { t: number; c: Record<string, [number, number, number, number]> }[];
   qualifyingPart?: number | null;
   qualifyingRemainingMs?: number | null;
@@ -185,6 +186,7 @@ function toState(r: ApiResponse): LiveState {
     sessionStatus: r.sessionStatus ?? null,
     suspendedRestartMs: r.suspendedRestartMs ?? null,
     formationLap: r.formationLap ?? false,
+    startDelayed: r.startDelayed ?? false,
     qualifyingPart: r.qualifyingPart ?? null,
     qualifyingRemainingMs: r.qualifyingRemainingMs ?? null,
     sessionRemainingMs: r.sessionRemainingMs ?? null,

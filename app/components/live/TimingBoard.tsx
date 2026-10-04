@@ -85,6 +85,7 @@ export default function TimingBoard({
   suspended,
   restartAtMs,
   formationLap,
+  startDelayed,
   totalLaps,
   selectedNum,
   onSelect,
@@ -116,6 +117,8 @@ export default function TimingBoard({
   /** Field is circulating but not racing — the pre-race formation lap, or one of the extra
    *  formation laps that follow a red-flag restart. */
   formationLap?: boolean;
+  /** Past the scheduled start, field still on the grid. */
+  startDelayed?: boolean;
   /** Race distance, so a driver who has completed it can be flagged as finished. */
   totalLaps?: number | null;
   selectedNum?: number | null;
@@ -188,6 +191,12 @@ export default function TimingBoard({
         {redFlagged && restartIn && (
           <span className="text-[0.6rem] font-bold tracking-wider text-muted">
             RESUMES IN <span className="tnum font-timing text-xs text-red">{restartIn}</span>
+          </span>
+        )}
+        {isRace && !redFlagged && !forming && startDelayed && (
+          <span className="flex items-center gap-1.5 rounded-sm bg-amber-400 px-1.5 py-0.5 text-[0.6rem] font-bold tracking-wider text-ink">
+            <span className="live-dot h-1.5 w-1.5 rounded-full bg-ink/70" />
+            START DELAYED
           </span>
         )}
         {forming && (
