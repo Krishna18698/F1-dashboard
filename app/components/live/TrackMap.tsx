@@ -677,7 +677,12 @@ export default function TrackMap({
             <span className="text-white">{clock.value}</span>
           </span>
         )}
-        <svg viewBox={`0 0 ${SIZE} ${SIZE}`} className="h-full w-full">
+        <svg
+          viewBox={`0 0 ${SIZE} ${SIZE}`}
+          className="h-full w-full"
+          role="img"
+          aria-label={`Live track map${name ? ` of ${name}` : ""}, showing each car's position on the circuit`}
+        >
           {path && (
             <path d={path} fill="none" stroke="#f4f4f6" strokeWidth={12} strokeLinejoin="round" strokeLinecap="round" />
           )}
