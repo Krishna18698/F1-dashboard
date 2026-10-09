@@ -127,13 +127,17 @@ export function currentlyLiveWeekendSession(race: Race): WeekendSession | null {
  *  window closed at 09:05 UTC on lap 27 of 55, and once its connection dropped the site refused to
  *  reconnect — "no live session" for the rest of the race. Long enough for any delay or red flag. */
 const RACE_FEED_TAIL_MS = 6 * 3600_000;
+/** Same, for practice and qualifying — a red flag stretches them too (Madrid FP3 2026: 77 min for
+ *  60; Singapore SQ 2026 ran past its scheduled end, closing this window before SQ3). */
+const SESSION_FEED_TAIL_MS = 3 * 3600_000;
 
 export function withinFeedWindow(race: Race, beforeMs: number, afterMs: number, now = Date.now()): boolean {
   return weekendSessions(race).some((s) => {
     const start = Date.parse(s.iso);
     if (!Number.isFinite(start)) return false;
     const assumed = SESSION_DURATION_MS[s.short] ?? 60 * 60_000;
-    const duration = s.short === "Race" || s.short === "Sprint" ? Math.max(assumed, RACE_FEED_TAIL_MS) : assumed;
+    const duration =
+      s.short === "Race" || s.short === "Sprint" ? Math.max(assumed, RACE_FEED_TAIL_MS) : Math.max(assumed, SESSION_FEED_TAIL_MS);
     return now >= start - beforeMs && now <= start + duration + afterMs;
   });
 }

@@ -1162,6 +1162,15 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
     // through the gaps BETWEEN segments. Without that guard it also fired before the session
     // had begun — the hub publishes the next Qualifying's SessionInfo well ahead of time, so
     // the whole app reported a not-yet-started quali as live from the moment it appeared.
+    // A "Finished" before the LAST segment is always a break, whatever the schedule says (an
+    // abandoned session gets "Finalised"/"Ends" instead, and still ends here): Singapore
+    // SQ 2026 was stopped and ran past its scheduled end (13:14), so the "Finished" closing SQ2
+    // at 13:21 read as the end of the session and the whole site went idle before SQ3.
+    if (isMultiSegment && sessionStartedTs != null && (qualifyingPart ?? 0) > 0 && (qualifyingPart ?? 0) < QUALI_LAST_PART && status === "finished") {
+      endedAt = null;
+      sawLive = true;
+      return true;
+    }
     if (isMultiSegment && sessionInfo.EndDate && sessionStartedTs != null) {
       const endMs = Date.parse(sessionInfo.EndDate + "Z") - offsetMs(sessionInfo.GmtOffset);
       if (Number.isFinite(endMs) && Date.now() < endMs) {
