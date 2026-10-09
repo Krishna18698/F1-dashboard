@@ -882,6 +882,10 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
     if (snap.DriverList) applyFeed("DriverList", snap.DriverList);
     if (snap.TimingData) applyFeed("TimingData", snap.TimingData);
     if (snap.TimingAppData) applyFeed("TimingAppData", snap.TimingAppData);
+    // The session clock is only re-sent when it starts or stops, so a connection opened mid-
+    // session (every serverless request in production) had no clock at all until one of those:
+    // practice showed no timer to anyone without a long-lived connection (Singapore FP1 2026).
+    if (snap.ExtrapolatedClock) applyFeed("ExtrapolatedClock", snap.ExtrapolatedClock);
     if (snap["Position.z"]) pushFrames(snap["Position.z"] as string);
     if (snap["CarData.z"]) applyCarData(snap["CarData.z"] as string);
   }
