@@ -1406,7 +1406,20 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
       // while the feed is still talking to us that is the only thing allowed to end a segment.
       // The assumed 12/10/8 stays as a backstop for a feed gone quiet, but only after a lap's
       // grace — until then the clock simply shows 0:00, which is what a timing screen does.
-      if (!finishedPerFeed && now < assumedEndsAt + QUALI_LAST_LAP_GRACE_MS) {
+      // F1's own segment clock, when it has sent one. It stops for a red flag and resumes where
+      // it was; the assumed 12/10/8 cannot. Singapore SQ1 2026 was stopped: counting the assumed
+      // 12 min the board read "SQ1 ENDED" at 12:44 while F1's clock still had 5:32 to run, then
+      // restarted at 12:00 when the session resumed.
+      if (!finishedPerFeed && sessionClock) {
+        const left = sessionClock.running
+          ? Math.max(0, sessionClock.remainingMs - (now - sessionClock.atMs))
+          : sessionClock.remainingMs;
+        // Run out and stopped, and F1 still hasn't said "Finished": the last-lap grace, then the
+        // backstop below takes over.
+        const ranOut = left === 0 && !sessionClock.running && now > sessionClock.atMs + QUALI_LAST_LAP_GRACE_MS;
+        if (!ranOut) return { remainingMs: left, segmentEnded: false, nextInMs: null as number | null, part: qualifyingPart };
+      }
+      if (!finishedPerFeed && !sessionClock && now < assumedEndsAt + QUALI_LAST_LAP_GRACE_MS) {
         return {
           remainingMs: Math.max(0, assumedEndsAt - now),
           segmentEnded: false,

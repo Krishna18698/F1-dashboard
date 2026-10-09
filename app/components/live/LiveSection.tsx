@@ -99,7 +99,8 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
   // The session clocks, ticked ONCE here and handed to both the timing board and the map's
   // clock chip — two independent tickers would drift half a second apart and show different
   // times side by side. Called unconditionally (rules of hooks); null outside their mode.
-  const segmentClock = useCountdown(s.mode === "quali" ? s.qualifyingRemainingMs : null);
+  // Held while F1's clock is stopped (a red flag), for qualifying as for practice.
+  const segmentClock = useCountdown(s.mode === "quali" ? s.qualifyingRemainingMs : null, s.sessionClockRunning !== false);
   const practiceClock = useCountdown(s.mode === "practice" ? s.sessionRemainingMs : null, s.sessionClockRunning !== false);
 
   // Whether EITHER a token is available — the owner's (server-known) or a visitor's own

@@ -1210,6 +1210,24 @@ export async function getF1LiveState(
       // every car already on a flying lap gets to finish it. Only F1's own "Finished" ends one;
       // the assumed duration is a backstop, allowed to decide only after a lap's grace. Without
       // this the board read "Q3 ENDED" while Q3 was still being decided on track.
+    } else if (
+      !finishedPerFeed &&
+      (() => {
+        // F1's own segment clock at this instant, when it has one — it stops for a red flag and
+        // resumes where it was, which the assumed 12/10/8 cannot (same rule as the live socket).
+        let c: { ts: number; remainingMs: number; running: boolean } | null = null;
+        for (const h of s.clockHist) {
+          if (h.ts > infoUptoMs) break;
+          c = h;
+        }
+        if (!c || c.ts < segStart) return false;
+        const left = c.running ? Math.max(0, c.remainingMs - (infoUptoMs - c.ts)) : c.remainingMs;
+        if (left === 0 && !c.running && infoUptoMs > c.ts + QUALI_LAST_LAP_GRACE_MS) return false;
+        qualifyingRemainingMs = left;
+        return true;
+      })()
+    ) {
+      // Running, timed by F1's clock (set above).
     } else if (finishedPerFeed || infoUptoMs >= assumedEnd + QUALI_LAST_LAP_GRACE_MS) {
       qualifyingSegmentEnded = true;
       qualifyingRemainingMs = 0;
