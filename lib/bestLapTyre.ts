@@ -17,3 +17,24 @@ export function compoundOfLap(stints: { compound: string; laps: number }[], lap:
   // it was set on the tyre the car is on now.
   return stints[stints.length - 1].compound;
 }
+
+/**
+ * A qualifying driver's best from an EARLIER segment, from F1's per-segment `BestLapTimes`.
+ * F1 empties `BestLapTime` for everyone still running when a segment ends (Singapore SQ 2026:
+ * VER's 1:34.257 gone the moment SQ1 finished, still listed in BestLapTimes[0]), so between
+ * segments — and until each driver sets a new time — the board would otherwise be blank.
+ */
+export function previousSegmentBest(bestLapTimes: unknown): { value: string; lap: number } | null {
+  const list = Array.isArray(bestLapTimes)
+    ? bestLapTimes
+    : bestLapTimes && typeof bestLapTimes === "object"
+      ? Object.keys(bestLapTimes as object)
+          .sort((a, b) => Number(a) - Number(b))
+          .map((k) => (bestLapTimes as Record<string, unknown>)[k])
+      : [];
+  for (let i = list.length - 1; i >= 0; i--) {
+    const e = list[i] as { Value?: string; Lap?: number } | undefined;
+    if (e?.Value) return { value: e.Value, lap: Number(e.Lap ?? 0) };
+  }
+  return null;
+}

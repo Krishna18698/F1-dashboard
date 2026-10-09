@@ -19,6 +19,8 @@ interface ApiRow {
   tyre_laps: number;
   in_pit: boolean;
   best_compound?: string | null;
+  prev_best?: number | null;
+  prev_best_compound?: string | null;
   retired?: boolean;
   knocked_out?: boolean;
   grid?: number;
@@ -157,7 +159,7 @@ function toState(r: ApiResponse): LiveState {
       compound: row.compound,
       tyre_age_at_start: 0,
     });
-    laps.set(num, { best: row.best, last: row.last, count: row.laps, bestS1: null, bestS2: null, bestS3: null, bestCompound: row.best_compound ?? null });
+    laps.set(num, { best: row.best, last: row.last, count: row.laps, bestS1: null, bestS2: null, bestS3: null, bestCompound: row.best_compound ?? null, prevBest: row.prev_best ?? null, prevBestCompound: row.prev_best_compound ?? null });
   }
 
   return {

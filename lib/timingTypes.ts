@@ -68,4 +68,7 @@ export interface LapSummary {
   count: number;
   /** Compound the best lap was set on (SOFT, MEDIUM, …), when the feed knows it. */
   bestCompound?: string | null;
+  /** Qualifying: an earlier segment's best, shown greyed while this segment has none yet. */
+  prevBest?: number | null;
+  prevBestCompound?: string | null;
 }

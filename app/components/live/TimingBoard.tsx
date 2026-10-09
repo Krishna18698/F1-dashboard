@@ -395,14 +395,26 @@ export default function TimingBoard({
                           </span>
                         );
                       })}
-                    <span className={`tnum text-right font-mono text-xs font-bold ${isP1 ? "text-red" : ""}`}>
-                      {formatLap(lap?.best)}
-                    </span>
+                    {/* An earlier segment's time, greyed, while this segment has none yet: F1 empties
+                        everyone's best when a segment ends. */}
+                    {lap?.best == null && lap?.prevBest != null ? (
+                      <span className="tnum text-right font-mono text-xs text-muted" title="Best from the previous segment">
+                        {formatLap(lap.prevBest)}
+                      </span>
+                    ) : (
+                      <span className={`tnum text-right font-mono text-xs font-bold ${isP1 ? "text-red" : ""}`}>
+                        {formatLap(lap?.best)}
+                      </span>
+                    )}
                     {/* Tyre the best lap was SET on, not the one fitted now. */}
                     <span className="flex justify-center">
-                      {lap?.best != null && lap.bestCompound && (
+                      {lap?.best != null && lap.bestCompound ? (
                         <TyreBadge compound={lap.bestCompound} title={`Best lap set on ${lap.bestCompound.toLowerCase()} tyres`} />
-                      )}
+                      ) : lap?.best == null && lap?.prevBest != null && lap.prevBestCompound ? (
+                        <span className="opacity-50">
+                          <TyreBadge compound={lap.prevBestCompound} title={`Previous segment's best, on ${lap.prevBestCompound.toLowerCase()} tyres`} />
+                        </span>
+                      ) : null}
                     </span>
                     <span className="tnum text-right font-mono text-[0.7rem] text-muted">
                       {isP1 ? "—" : formatDelta(lap?.best, fastest) || "—"}

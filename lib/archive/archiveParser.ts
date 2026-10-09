@@ -8,7 +8,7 @@
  * F1 sends incremental deltas, so we deep-merge lines up to a cutoff timestamp to
  * reconstruct state at any instant (which powers both replay and live polling).
  */
-import { compoundOfLap } from "../bestLapTyre";
+import { compoundOfLap, previousSegmentBest } from "../bestLapTyre";
 import { PRE_START_LIVE_MS, QUALI_DURATION_MS, QUALI_LAST_LAP_GRACE_MS, SPRINT_QUALI_DURATION_MS, postEndLiveMs } from "../sessionWindows";
 import zlib from "zlib";
 import { F1_LIVE } from "../live/liveConfig";
@@ -495,6 +495,8 @@ export interface F1LiveRow {
   in_pit: boolean;
   /** Compound the best lap was set on, or null before one is set. */
   best_compound: string | null;
+  prev_best?: number | null;
+  prev_best_compound?: string | null;
   retired: boolean;
   knocked_out: boolean;
   grid: number;
@@ -923,6 +925,13 @@ export async function getF1LiveState(
       tyre_laps: Number(cur?.TotalLaps ?? 0),
       in_pit: Boolean(t.InPit),
       best_compound: best != null ? compoundOfLap(stintsRawList, Number(bt?.Lap ?? 0)) : null,
+      ...(() => {
+        const prev = mode(sessionType) === "quali" && best == null ? previousSegmentBest(t.BestLapTimes) : null;
+        return {
+          prev_best: prev ? parseLapTime(prev.value) : null,
+          prev_best_compound: prev ? compoundOfLap(stintsRawList, prev.lap) : null,
+        };
+      })(),
       retired: Boolean(t.Retired || t.Stopped),
       knocked_out: Boolean(t.KnockedOut),
       grid: Number((appState[numStr]?.GridPos as string | number) ?? 0),
