@@ -228,6 +228,18 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
   // Session finished, but still F1's current one — the board is a FINAL classification.
   // Never in replay (that's a past session by definition and already labelled as such).
   const ended = !s.replay && s.sessionEnded === true;
+  // "FP1" from "Singapore Grand Prix · Practice 1" — the tag beside a practice session's clock,
+  // as "Q1" / "SQ1" is beside qualifying's.
+  const practiceTag = /Practice (\d)/i.exec(s.session?.session_name ?? "")?.[1];
+  const practiceLabel = practiceTag ? `FP${practiceTag}` : "TIME LEFT";
+  // One clock chip, shown on the map and — without a token, where there is no map — on the box
+  // that stands in for it.
+  const sessionClock =
+    s.mode === "quali" && !s.qualifyingSegmentEnded && s.qualifyingPart && segmentClock
+      ? { label: `${/sprint/i.test(s.session?.session_name ?? "") ? "SQ" : "Q"}${s.qualifyingPart}`, value: segmentClock }
+      : s.mode === "practice" && practiceClock
+        ? { label: practiceLabel, value: practiceClock }
+        : null;
 
   return (
     <section>
@@ -264,6 +276,16 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
                     CarData.z are), so the race lap counter is available here too — it just
                     used to be rendered exclusively inside TrackMap, which this placeholder
                     replaces. Same placement/styling as the map's own badge. */}
+                {sessionClock && (
+                  <span
+                    className="tnum absolute right-3 top-3 flex items-center gap-1.5 rounded-md bg-black/60 px-2.5 py-1 font-mono text-[0.65rem] font-bold tracking-wider text-white/85 ring-1 ring-white/15"
+                    aria-label="Session clock"
+                    title="Time remaining in this session"
+                  >
+                    <span className="text-white/50">{sessionClock.label}</span>
+                    <span className="text-white">{sessionClock.value}</span>
+                  </span>
+                )}
                 {s.mode === "race" && (s.totalLaps ?? 0) > 0 && !s.formationLap && s.sessionStatus !== "Aborted" && (
                   <span
                     className="tnum absolute right-3 top-3 rounded-full bg-black/60 px-2.5 py-1 font-mono text-[0.65rem] font-bold tracking-wider text-white/85"
@@ -318,13 +340,7 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
               suspended={s.sessionStatus === "Aborted" || s.startSuspended}
               mode={s.mode}
               laps={s.mode === "race" ? { current: s.currentLap ?? 0, total: s.totalLaps ?? 0 } : undefined}
-              clock={
-                s.mode === "quali" && !s.qualifyingSegmentEnded && s.qualifyingPart && segmentClock
-                  ? { label: `${/sprint/i.test(s.session?.session_name ?? "") ? "SQ" : "Q"}${s.qualifyingPart}`, value: segmentClock }
-                  : s.mode === "practice" && practiceClock
-                    ? { label: "TIME LEFT", value: practiceClock }
-                    : null
-              }
+              clock={sessionClock}
               selectedNum={selected}
               onSelect={setSelected}
             />
@@ -378,6 +394,7 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
           sprintQuali={/sprint/i.test(s.session?.session_name ?? "")}
           segmentClock={segmentClock}
           practiceClock={practiceClock}
+          practiceLabel={practiceTag ? practiceLabel : null}
           qualifyingSegmentEnded={s.qualifyingSegmentEnded}
           nextQualifyingSegmentInMs={s.nextQualifyingSegmentInMs}
           knockedOut={s.knockedOut}

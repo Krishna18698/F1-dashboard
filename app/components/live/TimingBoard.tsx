@@ -85,6 +85,7 @@ export default function TimingBoard({
   qualifyingPart,
   segmentClock,
   practiceClock,
+  practiceLabel,
   qualifyingSegmentEnded,
   nextQualifyingSegmentInMs,
   sprintQuali,
@@ -114,6 +115,8 @@ export default function TimingBoard({
   segmentClock?: string | null;
   /** Time left in a practice session (its only clock), formatted and shared the same way. */
   practiceClock?: string | null;
+  /** "FP1" / "FP2" / "FP3" — the tag beside the practice clock, like "Q1" beside qualifying's. */
+  practiceLabel?: string | null;
   qualifyingSegmentEnded?: boolean;
   nextQualifyingSegmentInMs?: number | null;
   sprintQuali?: boolean;
@@ -240,6 +243,9 @@ export default function TimingBoard({
             {qualifyingPart}
             {qualifyingSegmentEnded ? " ENDED" : ""}
           </span>
+        )}
+        {practiceLeft && practiceLabel && (
+          <span className="rounded-sm bg-ink px-1.5 py-0.5 text-[0.6rem] font-bold tracking-wider text-white">{practiceLabel}</span>
         )}
         {practiceLeft && (
           <span className="tnum font-timing text-xs font-bold text-red" title="Time remaining in this session">

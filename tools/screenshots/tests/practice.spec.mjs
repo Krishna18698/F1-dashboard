@@ -16,7 +16,7 @@ test("practice red flag: clock chip holds F1's frozen figure and matches the boa
   const a = await read();
   await page.waitForTimeout(4000);
   const b = await read();
-  expect(a.chip).toBe("TIME LEFT 15:38");
+  expect(a.chip).toBe("FP3 15:38");
   expect(a.board).toBe("15:38");
   expect(b).toEqual(a); // held, not ticking down
 });

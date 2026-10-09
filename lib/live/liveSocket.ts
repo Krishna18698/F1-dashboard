@@ -22,7 +22,7 @@ import { compoundOfLap } from "../bestLapTyre";
 import WsImpl from "ws";
 import zlib from "zlib";
 import { DRY_COMPOUNDS, flatSessions, parseLapTime, weekendTyresLeftForMeeting, WEEKEND_ALLOCATION } from "../archive/archiveParser";
-import { looksLikeJwt } from "../tokenExpiry";
+import { decodeTokenExpiry, looksLikeJwt } from "../tokenExpiry";
 import { getNextRace, withinFeedWindow } from "../jolpica";
 
 const g = globalThis as unknown as { WebSocket?: unknown };
@@ -952,7 +952,10 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
       });
       await c.start();
       conn = c;
-      anonymous = !token;
+      // An EXPIRED token connects fine but F1 then withholds car positions exactly as for no token
+      // at all, so treat it as none: the page shows the "needs a token" box (with its clock and
+      // flag badges) instead of a map stuck on "Loading drivers…" (Singapore FP1 2026).
+      anonymous = !token || decodeTokenExpiry(token).expired;
       applySnapshot((await c.invoke("Subscribe", TOPICS)) as Record<string, unknown>);
       lastRefresh = Date.now();
     })();
