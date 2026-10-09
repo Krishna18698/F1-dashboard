@@ -1194,7 +1194,9 @@ export async function getF1LiveState(
       const next = s.statusHist.slice(i + 1).find((h) => h.status === "Started");
       if (!next) continue;
       const obs = next.ts - s.statusHist[i].ts;
-      if (obs > 60_000 && obs < 30 * 60_000) found = obs;
+      // Same bound as the live socket: a break stretched by a stoppage (19 min at Singapore SQ
+      // 2026) is not a guide to the next one.
+      if (obs > 60_000 && obs < 10 * 60_000) found = obs;
     }
     return found;
   })();

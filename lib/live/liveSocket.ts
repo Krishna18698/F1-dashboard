@@ -47,6 +47,8 @@ function qualiSegmentMs(part: number, sessionName?: string): number {
 // segment clock takes over, so an inaccurate estimate self-corrects rather than persisting.
 const QUALI_BREAK_MS = 7 * 60_000;
 const QUALI_LAST_PART = 3;
+/** Longest break between qualifying segments worth learning from; anything longer was stretched. */
+const MAX_LEARNED_BREAK_MS = 10 * 60_000;
 // Grace after a CONFIRMED end — F1's own "Finished"/ArchiveStatus, not a schedule guess. That
 // is why it is far tighter than POST_END_LIVE_MS in sessionWindows.ts: there is nothing to absorb
 // here, the session is known to be over. The two are different quantities, not a disagreement.
@@ -1038,7 +1040,9 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
       const next = statusHistory.slice(i + 1).find((h) => h.status === "Started");
       if (!next) continue;
       const observed = next.ts - statusHistory[i].ts;
-      if (observed > 60_000 && observed < 30 * 60_000) found = observed; // sanity-bounded
+      // Normal breaks run ~7 min. One stretched by a stoppage is not a guide to the next: Singapore
+      // SQ 2026's SQ1->SQ2 took 19 min, and learning it put "SQ3 IN" at ~15 min for a 7 min break.
+      if (observed > 60_000 && observed < MAX_LEARNED_BREAK_MS) found = observed;
     }
     return found;
   }
