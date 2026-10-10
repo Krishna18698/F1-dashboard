@@ -29,7 +29,7 @@ const g = globalThis as unknown as { WebSocket?: unknown };
 if (typeof g.WebSocket === "undefined") g.WebSocket = WsImpl;
 
 const HUB = "https://livetiming.formula1.com/signalrcore";
-const TOPICS = ["DriverList", "TimingData", "TimingAppData", "Position.z", "SessionInfo", "SessionStatus", "ChampionshipPrediction", "RaceControlMessages", "TrackStatus", "LapCount", "CarData.z", "SessionData", "ExtrapolatedClock"];
+const TOPICS = ["DriverList", "TimingData", "TimingAppData", "TimingStats", "Position.z", "SessionInfo", "SessionStatus", "ChampionshipPrediction", "RaceControlMessages", "TrackStatus", "LapCount", "CarData.z", "SessionData", "ExtrapolatedClock"];
 const ENDED = new Set(["finished", "finalised", "ends"]);
 /** How long a snapshot refresh may take before the connection is presumed dead. */
 const REFRESH_TIMEOUT_MS = 4000;
@@ -444,6 +444,9 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
 
   let timing: Record<string, Dict> = {};
   let app: Record<string, Dict> = {};
+  /** F1's TimingStats per driver — its own session-best sectors (BestSectors), which survive a
+   *  fresh connection where bestSectorOf only knows the laps this process happened to see. */
+  let stats: Record<string, Dict> = {};
   let drivers: Record<string, RawDriver> = {};
   let sessionInfo: SessionInfo | null = null;
   let sessionStatus: { Status?: string } | null = null;
@@ -556,6 +559,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
     if (sessionInfo?.Key && info?.Key && info.Key !== sessionInfo.Key) {
       timing = {};
       app = {};
+      stats = {};
       drivers = {};
       frameBuffer = [];
       sessionStatus = null;
@@ -629,6 +633,17 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
       const cutoff = (telBuffer.at(-1)?.t ?? 0) - BUFFER_MS;
       if (telBuffer.length > 40 && telBuffer[0].t < cutoff) telBuffer = telBuffer.filter((f) => f.t >= cutoff);
     } catch {}
+  }
+
+  /**
+   * A driver's best S1/S2/S3 this session, in seconds — F1's own (TimingStats.BestSectors).
+   * What we tallied ourselves only covers laps this connection saw: after a dev reload or on a
+   * fresh serverless instance it was the in-laps, and "Where the lap is lost" put the pole-sitter
+   * 4.7 s off in S1 (Singapore 2026 Q3). Ours is only the fallback when F1 sends none.
+   */
+  function bestSectorsOf(n: string): (number | null)[] {
+    const official = asList<{ Value?: string }>(stats[n]?.BestSectors, 3).map((b) => (b?.Value ? parseLapTime(b.Value) : null));
+    return official.some((v) => v != null) ? official : (bestSectorOf[n] ?? [null, null, null]);
   }
 
   /** A driver's three sectors as the card and board show them, from the merged timing state. */
@@ -794,6 +809,10 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
       const cutoff = now - BUFFER_MS;
       if (segmentEvents.length > 400) segmentEvents = segmentEvents.filter((e) => e.t >= cutoff);
       if (lapResets.length > 40) lapResets = lapResets.filter((e) => e.t >= cutoff);
+    } else if (topic === "TimingStats") {
+      for (const [n, u] of Object.entries((data as { Lines?: Record<string, Dict> }).Lines ?? {})) {
+        deepMerge((stats[n] ??= {}), u);
+      }
     } else if (topic === "TimingAppData") {
       for (const [n, u] of Object.entries((data as { Lines?: Record<string, Dict> }).Lines ?? {})) {
         const cur = (app[n] ??= {});
@@ -918,6 +937,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
     if (snap.DriverList) applyFeed("DriverList", snap.DriverList);
     if (snap.TimingData) applyFeed("TimingData", snap.TimingData);
     if (snap.TimingAppData) applyFeed("TimingAppData", snap.TimingAppData);
+    if (snap.TimingStats) applyFeed("TimingStats", snap.TimingStats);
     // The session clock is only re-sent when it starts or stops, so a connection opened mid-
     // session (every serverless request in production) had no clock at all until one of those:
     // practice showed no timer to anyone without a long-lived connection (Singapore FP1 2026).
@@ -1371,7 +1391,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
         // token too. `Value` empties out while a sector is being run and `PreviousValue`
         // holds the last completed one, so fall back to it rather than flashing blank.
         sectors: sectorsOf(n),
-        bestSectors: bestSectorOf[n] ?? [null, null, null],
+        bestSectors: bestSectorsOf(n),
         speeds: Object.fromEntries(
           Object.entries(t.Speeds ?? {}).map(([k, v]) => [
             k,
