@@ -630,13 +630,26 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
   /** A driver's three sectors as the card and board show them, from the merged timing state. */
   function sectorsOf(n: string): SectorTime[] {
     const t = timing[n] as { Sectors?: unknown } | undefined;
-    return asList<{
+    const secs = asList<{
       Value?: string;
       PreviousValue?: string;
       OverallFastest?: boolean;
       PersonalFastest?: boolean;
       Segments?: unknown;
-    }>(t?.Sectors, 3).map((sec, si) => {
+    }>(t?.Sectors, 3);
+    const segs = secs.map((sec) => asList<{ Status?: number }>(sec?.Segments).map((g) => Number(g?.Status ?? 0)));
+    return secs.map((sec, si) => {
+      const segments = segs[si];
+      // No line crossing seen yet — a fresh connection, i.e. most serverless requests. F1 keeps
+      // last lap's times until each sector is completed again, so there's no write time to
+      // compare; the mini-sectors say instead: on a new lap they're zeroed until reached. Done
+      // this lap = its last mini-sector reached, or the car already into a later sector. Not
+      // "every mini-sector": F1 skips some (PIA's S1 in Singapore 2026 Q2 never got 2 and 3).
+      // Without this a cold start showed HAM's previous lap for 3 s (same session).
+      const current =
+        lapResetAt[n] == null
+          ? (segments.at(-1) ?? 1) !== 0 || segs.slice(si + 1).some((l) => l.some((c) => c !== 0))
+          : (valueSetAt[n]?.[si] ?? 0) >= lapResetAt[n];
       // Only the CURRENT lap's time — no PreviousValue fallback and no carry-forward of
       // the last completed reading. Both were added to stop the card blanking mid-lap,
       // but they also kept last lap's times on screen after a driver had started a new
@@ -645,7 +658,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
         // Blank unless this time was written AFTER the last line crossing — otherwise
         // the ~90ms gap before F1 writes the new time shows last lap's value, and a poll
         // landing in it displays that for a full poll cycle.
-        value: (valueSetAt[n]?.[si] ?? 0) >= (lapResetAt[n] ?? 0) ? sec?.Value || "" : "",
+        value: current ? sec?.Value || "" : "",
         overallFastest: Boolean(sec?.OverallFastest),
         personalFastest: Boolean(sec?.PersonalFastest),
         // Segments always reflect the CURRENT lap in progress — that's the point of the
@@ -656,7 +669,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
         // start of a new lap. An earlier attempt to stop the bars flashing by merging
         // into a remembered set carried the PREVIOUS lap's mini-sectors into the new one,
         // so a driver who had just started a lap appeared almost through sector 1.
-        segments: asList<{ Status?: number }>(sec?.Segments).map((g) => Number(g?.Status ?? 0)),
+        segments,
       };
     });
   }
