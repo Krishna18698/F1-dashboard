@@ -175,6 +175,24 @@ export async function flatSessions(): Promise<FlatSession[]> {
   return flat;
 }
 
+/**
+ * Start time (epoch ms) of every session of the LATEST meeting in F1's own index, by session name
+ * ("Qualifying", "Sprint"…). F1 updates these when it reschedules a session; Jolpica's schedule
+ * does not change once published. Includes sessions with no feed published yet.
+ */
+export async function officialSessionStarts(): Promise<Record<string, number>> {
+  const res = await fetch(`${F1_LIVE.base}/${new Date().getUTCFullYear()}/Index.json`, { headers: UA, cache: "no-store" });
+  if (!res.ok) return {};
+  const idx = JSON.parse((await res.text()).replace(/^\uFEFF/, "")) as { Meetings: IdxMeeting[] };
+  const m = idx.Meetings.at(-1);
+  const out: Record<string, number> = {};
+  for (const s of m?.Sessions ?? []) {
+    const ms = Date.parse(s.StartDate + "Z") - offsetMs(s.GmtOffset);
+    if (Number.isFinite(ms)) out[s.Name] = ms;
+  }
+  return out;
+}
+
 /** A session on track right now that also has a published feed path. */
 export async function resolveLiveSession(): Promise<ResolvedSession | null> {
   if (F1_LIVE.mode === "replay") return null;

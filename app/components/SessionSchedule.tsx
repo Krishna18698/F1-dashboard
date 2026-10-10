@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { WeekendSession } from "@/lib/jolpica";
 import { WEEKEND_FLIP_MS } from "@/lib/sessionWindows";
+import { withOfficialStarts } from "@/lib/sessionStarts";
 import { useLiveStatus, LiveStatus } from "./useLiveStatus";
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -23,7 +24,7 @@ function delta(ms: number) {
  * Below it, the weekend session chips: completed ✓, next in red, live only when live.
  */
 export default function SessionSchedule({
-  sessions,
+  sessions: scheduled,
   initialLiveStatus,
   nowMs,
 }: {
@@ -44,7 +45,9 @@ export default function SessionSchedule({
       clearInterval(id);
     };
   }, []);
-  const { live, name, type, endedAt } = useLiveStatus(initialLiveStatus);
+  const { live, name, type, endedAt, starts } = useLiveStatus(initialLiveStatus);
+  // F1's own start times where it has them — a delayed session counts down to its new time.
+  const sessions = withOfficialStarts(scheduled, starts);
   const router = useRouter();
 
   const ready = now !== null;

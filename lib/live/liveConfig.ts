@@ -44,6 +44,16 @@ export const F1_LIVE = {
   tyreTracker: "auto" as "auto" | "stints" | "minisectors",
 
   /**
+   * Start times the FIA has announced before F1's feed publishes them. Each entry applies only
+   * while the session is still scheduled at `was`, so a stale one does nothing next weekend.
+   * F1's own data (index or a Race Control announcement) wins once it carries the time.
+   */
+  startOverrides: [
+    // Singapore 2026: qualifying put back 30 min after the rain-delayed Sprint (21:00 → 21:30 local).
+    { session: "Qualifying", was: "2026-10-10T13:00:00Z", start: "2026-10-10T13:30:00Z" },
+  ] as { session: string; was: string; start: string }[],
+
+  /**
    * TEST replay: when enabled, the live panel replays this past session against a
    * real-time virtual clock — so you can verify the map/board/tyres/ticker work
    * before a genuine session. Set enabled:false for normal live behaviour.

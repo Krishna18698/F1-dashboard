@@ -24,6 +24,7 @@ import zlib from "zlib";
 import { DRY_COMPOUNDS, flatSessions, parseLapTime, weekendTyresLeftForMeeting, WEEKEND_ALLOCATION } from "../archive/archiveParser";
 import { decodeTokenExpiry, looksLikeJwt } from "../tokenExpiry";
 import { getNextRace, withinFeedWindow } from "../jolpica";
+import { F1_LIVE } from "./liveConfig";
 
 const g = globalThis as unknown as { WebSocket?: unknown };
 if (typeof g.WebSocket === "undefined") g.WebSocket = WsImpl;
@@ -1195,9 +1196,18 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
       return false;
     }
     endedAt = null; // still running (or resumed after a red flag)
+    // Not started, and Race Control has put the start back: not live until shortly before it.
+    // The hero and schedule then count down to the announced time instead of showing "live".
+    if (sessionStartedTs == null) {
+      const announced = restartAtMs();
+      if (announced != null && Date.now() < announced - PRE_START_LIVE_MS) return false;
+    }
     let live: boolean;
     if (sessionInfo.StartDate) {
-      const startMs = Date.parse(sessionInfo.StartDate + "Z") - offsetMs(sessionInfo.GmtOffset);
+      let startMs = Date.parse(sessionInfo.StartDate + "Z") - offsetMs(sessionInfo.GmtOffset);
+      // A delay the FIA has announced but F1's feed still shows at the old time (liveConfig).
+      const override = F1_LIVE.startOverrides.find((o) => o.session === sessionInfo?.Name && Date.parse(o.was) === startMs);
+      if (override && sessionStartedTs == null) startMs = Date.parse(override.start);
       live = Number.isFinite(startMs) && Date.now() >= startMs - PRE_START_LIVE_MS;
     } else {
       live = status === "started" || status === "aborted";
@@ -1630,10 +1640,11 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
                   null))) ||
           restartFormationLap()),
       // Past the scheduled start, race not started, field not yet out on the formation lap.
+      // Any session: past its scheduled start, not started. Races additionally need the field to
+      // still be on the grid (no formation lap yet, start not suspended).
       startDelayed:
         !ended &&
-        mode === "race" &&
-        !anonymous &&
+        (mode !== "race" || !anonymous) &&
         sessionStartedTs == null &&
         formationSeenAt == null &&
         startSuspendedAt() == null &&
@@ -1848,17 +1859,21 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
     type?: string;
     endedAt?: number; // epoch ms the current session ended (drives the hero flip)
     round?: number; // meeting/round number of the current session
+    /** A start time Race Control has announced for this session, before it has started. */
+    announcedStart?: { label: string; ms: number };
   }> {
     if (!(await ensureConnection())) return { live: false };
     await refreshIfStale();
     if (!sessionInfo) return { live: false };
     const live = liveNow(); // also maintains endedAt
+    const announced = sessionStartedTs == null ? restartAtMs() : null;
     return {
       live,
       name: sessionName(),
       type: sessionInfo.Type,
       endedAt: endedAt ?? undefined,
       round: sessionInfo.Meeting?.Number,
+      ...(announced != null && sessionInfo.Name ? { announcedStart: { label: sessionInfo.Name, ms: announced } } : {}),
     };
   }
 

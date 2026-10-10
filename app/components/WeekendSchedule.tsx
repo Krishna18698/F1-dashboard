@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { WeekendSession } from "@/lib/jolpica";
+import { withOfficialStarts } from "@/lib/sessionStarts";
 import { useLiveStatus, LiveStatus } from "./useLiveStatus";
 import { SCHEDULE_FAST_WINDOW_MS } from "@/lib/sessionWindows";
 
@@ -15,7 +16,7 @@ function fmtLocal(iso: string): string {
 
 /** Full weekend schedule in the viewer's local time: done ✓, live 🔴, or upcoming. */
 export default function WeekendSchedule({
-  sessions,
+  sessions: scheduled,
   nowMs,
   initialLiveStatus,
 }: {
@@ -33,7 +34,9 @@ export default function WeekendSchedule({
     () => true,
     () => false,
   );
-  const { live, name, endedAt } = useLiveStatus(initialLiveStatus);
+  const { live, name, endedAt, starts } = useLiveStatus(initialLiveStatus);
+  // F1's own start times where it has them — a delayed session counts down to its new time.
+  const sessions = withOfficialStarts(scheduled, starts);
 
   // Within SCHEDULE_FAST_WINDOW_MS of a session starting, while one is live, or just after one
   // ended, tick every second so ✓ / NEXT land at the same moment as the hero's chips (which run

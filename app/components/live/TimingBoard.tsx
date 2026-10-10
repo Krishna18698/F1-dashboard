@@ -213,7 +213,7 @@ export default function TimingBoard({
             {restartLabel ?? "RESUMES IN"} <span className="tnum font-timing text-xs text-red">{restartIn}</span>
           </span>
         )}
-        {isRace && !redFlagged && !forming && startDelayed && (
+        {!redFlagged && !forming && startDelayed && (
           <span className="flex items-center gap-1.5 rounded-sm bg-amber-400 px-1.5 py-0.5 text-[0.6rem] font-bold tracking-wider text-ink">
             <span className="live-dot h-1.5 w-1.5 rounded-full bg-ink/70" />
             START DELAYED
@@ -232,7 +232,7 @@ export default function TimingBoard({
         {/* A delayed or suspended start with a time announced by Race Control ("FORMATION LAP WILL
             START AT 17:30"): count down to it. A suspended start already shows it beside the red
             flag chip above, so only the delayed case needs its own. */}
-        {isRace && !redFlagged && startDelayed && !startSuspended && restartIn && (
+        {!redFlagged && startDelayed && !startSuspended && restartIn && (
           <span className="text-[0.6rem] font-bold tracking-wider text-muted">
             {restartLabel ?? "STARTS IN"} <span className="tnum font-timing text-xs text-red">{restartIn}</span>
           </span>
