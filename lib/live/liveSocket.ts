@@ -31,6 +31,8 @@ if (typeof g.WebSocket === "undefined") g.WebSocket = WsImpl;
 const HUB = "https://livetiming.formula1.com/signalrcore";
 const TOPICS = ["DriverList", "TimingData", "TimingAppData", "Position.z", "SessionInfo", "SessionStatus", "ChampionshipPrediction", "RaceControlMessages", "TrackStatus", "LapCount", "CarData.z", "SessionData", "ExtrapolatedClock"];
 const ENDED = new Set(["finished", "finalised", "ends"]);
+/** How long a snapshot refresh may take before the connection is presumed dead. */
+const REFRESH_TIMEOUT_MS = 4000;
 const BUFFER_MS = 45_000; // keep ~45s of position frames (covers a 20s playback delay)
 // Sprint Qualifying (SQ1/SQ2/SQ3) runs shorter segments than a Saturday qualifying — the
 // whole session is ~44 min end-to-end where a normal quali is ~60. Both arrive with
@@ -427,6 +429,8 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
   let conn: signalR.HubConnection | null = null;
   let starting: Promise<void> | null = null;
   let lastRefresh = 0;
+  /** The visitor token this connection was opened with (undefined: the site's own). */
+  let connToken: string | undefined;
   // True once connected WITHOUT any token (see ensureConnection). Everything the map needs
   // is missing in that mode, so callers must be able to tell "no cars to show" apart from
   // "not allowed to see the cars".
@@ -946,6 +950,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
    * were already complete on the hub).
    */
   async function ensureConnection(tokenOverride?: string): Promise<boolean> {
+    connToken = tokenOverride;
     const token = tokenOverride ?? process.env.F1_TV_TOKEN?.trim();
     if (!token && !opts.allowAnonymous) return false;
     if (conn && conn.state === signalR.HubConnectionState.Connected) return true;
@@ -1011,9 +1016,22 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
   async function refreshIfStale() {
     if (conn?.state === signalR.HubConnectionState.Connected && Date.now() - lastRefresh > 4000) {
       lastRefresh = Date.now();
+      const c = conn;
       try {
-        applySnapshot((await conn.invoke("Subscribe", TOPICS)) as Record<string, unknown>);
-      } catch {}
+        const snap = await Promise.race([
+          c.invoke("Subscribe", TOPICS),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("refresh timed out")), REFRESH_TIMEOUT_MS)),
+        ]);
+        applySnapshot(snap as Record<string, unknown>);
+      } catch {
+        // A serverless instance frozen between requests wakes with a socket that still says
+        // Connected but is dead, and everything it missed is gone with it. Answering from that
+        // state served a lap that was already over: HAM's previous lap for 15 s after he had
+        // crossed the line (Singapore 2026 Q3). Open a fresh connection; its snapshot is current.
+        if (conn === c) conn = null;
+        c.stop().catch(() => {});
+        await ensureConnection(connToken);
+      }
     }
   }
 
