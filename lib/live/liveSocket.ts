@@ -527,6 +527,8 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
    *  describe the current lap, so the "where is the lap being lost" comparison needs this. */
   let bestSectorOf: Record<string, (number | null)[]> = {};
   let lapResetAt: Record<string, number> = {};
+  /** Newest F1 stamp on a TimingData message — where an unstamped snapshot is placed. */
+  let lastTimingStamp: number | null = null;
   /** Mini-sector transitions and line crossings, timestamped, for the window the car dots
    *  haven't rendered yet (the map plays ~20s behind). Lets the client light a segment and
    *  blank the card at the moment the dot arrives instead of on the next poll. */
@@ -571,6 +573,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
       valueSetAt = {};
       bestSectorOf = {};
       lapResetAt = {};
+      lastTimingStamp = null;
       segmentEvents = [];
       lapResets = [];
       raceLapsCompleteAt = null;
@@ -702,7 +705,11 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
       // sectors were served from before it — all blank — until the map caught up (seen after a
       // reconnect during the Sepang 2026 race).
       const stamped = stamp ? Date.parse(stamp) : NaN;
-      const now = Number.isFinite(stamped) ? stamped : 0;
+      const live = Number.isFinite(stamped);
+      if (live) lastTimingStamp = Math.max(lastTimingStamp ?? 0, stamped);
+      // A snapshot after live messages (refreshIfStale re-subscribes every 4 s, and every
+      // reconnect) describes the state as of the newest message we have, not the start of time.
+      const now = live ? stamped : (lastTimingStamp ?? 0);
       for (const [n, u] of Object.entries((data as { Lines?: Record<string, Dict> }).Lines ?? {})) {
         // Note WHEN each sector time was written and when the mini-sectors were blanked,
         // BEFORE merging — afterwards the update is indistinguishable from earlier state.
@@ -714,13 +721,18 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
           // garage). Counting zeros per message took every re-send for a line crossing and
           // blanked the followed driver's sectors each time. Only a mini-sector going from
           // reached to 0 is a reset; an unchanged one is not news and is not an event either.
-          const prevSecs = (timing[n] as { Sectors?: Record<string, { Segments?: Record<string, { Status?: number }> }> } | undefined)
-            ?.Sectors;
+          const prevSecs = (
+            timing[n] as { Sectors?: Record<string, { Value?: string; Segments?: Record<string, { Status?: number }> }> } | undefined
+          )?.Sectors;
           let cleared = 0;
           for (const [sk, sv] of Object.entries(secs as Record<string, { Value?: string; Segments?: unknown }>)) {
             const si = Number(sk);
             if (!Number.isNaN(si) && sv?.Value) {
-              (valueSetAt[n] ??= [])[si] = now;
+              // A snapshot repeats every time we already hold. Re-stamping those as new made
+              // them look older than the last line crossing (stamped 0) and blanked each one
+              // within 4 s of landing — Singapore 2026 Q2, HAM's S2 vanished mid-S3. Only a
+              // time the snapshot actually changes is news.
+              if (live || prevSecs?.[sk]?.Value !== sv.Value) (valueSetAt[n] ??= [])[si] = now;
               const secs = parseLapTime(sv.Value);
               if (secs != null) {
                 const cur = (bestSectorOf[n] ??= [null, null, null])[si];
