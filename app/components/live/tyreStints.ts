@@ -1,4 +1,4 @@
-export type Stint = { compound: string; laps: number; age: number };
+export type Stint = { compound: string; laps: number; age: number; isNew?: boolean };
 
 /**
  * F1's stints as the Tyre Tracker draws them: F1's own list, minus noise — nothing is added or
@@ -9,6 +9,8 @@ export type Stint = { compound: string; laps: number; age: number };
  *  - Zero-lap sets never ran a lap and are dropped (a fresh one at the END is a real new set).
  *  - The leading run of ≤1-lap sets merges into the last of them — the tyre the car started on —
  *    keeping their lap count.
+ *
+ * Consecutive entries that are provably the same set (see below) are joined.
  *
  * Where F1's stints then fall short of the laps run, they are drawn as F1 sent them: the Tracker
  * reports the data as incomplete rather than guessing where the missing laps belong.
@@ -22,5 +24,16 @@ export function shownStints(list: Stint[]): Stint[] {
     const laps = out.slice(0, run).reduce((a, s) => a + s.laps, 0);
     out = [{ ...out[run - 1], laps, age: laps }, ...out.slice(run)];
   }
-  return out;
+  // F1 opens a NEW stint entry for the same set of tyres after a stoppage (Singapore Sprint 2026:
+  // every car's one set of Inters split into four entries, ages 2 → 3 → 4 → 6, all but the
+  // first marked used). An entry that is the same compound, not new, and whose age carries on
+  // exactly from the previous one is that same set, so it is drawn as one.
+  const merged: Stint[] = [];
+  for (const st of out) {
+    const prev = merged[merged.length - 1];
+    if (prev && st.compound === prev.compound && st.isNew === false && st.age === prev.age + st.laps) {
+      merged[merged.length - 1] = { ...prev, laps: prev.laps + st.laps, age: st.age };
+    } else merged.push(st);
+  }
+  return merged;
 }
