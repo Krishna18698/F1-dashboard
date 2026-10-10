@@ -24,7 +24,6 @@ import zlib from "zlib";
 import { DRY_COMPOUNDS, flatSessions, parseLapTime, weekendTyresLeftForMeeting, WEEKEND_ALLOCATION } from "../archive/archiveParser";
 import { decodeTokenExpiry, looksLikeJwt } from "../tokenExpiry";
 import { getNextRace, withinFeedWindow } from "../jolpica";
-import { F1_LIVE } from "./liveConfig";
 
 const g = globalThis as unknown as { WebSocket?: unknown };
 if (typeof g.WebSocket === "undefined") g.WebSocket = WsImpl;
@@ -1216,10 +1215,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
     }
     let live: boolean;
     if (sessionInfo.StartDate) {
-      let startMs = Date.parse(sessionInfo.StartDate + "Z") - offsetMs(sessionInfo.GmtOffset);
-      // A delay the FIA has announced but F1's feed still shows at the old time (liveConfig).
-      const override = F1_LIVE.startOverrides.find((o) => o.session === sessionInfo?.Name && Date.parse(o.was) === startMs);
-      if (override && sessionStartedTs == null) startMs = Date.parse(override.start);
+      const startMs = Date.parse(sessionInfo.StartDate + "Z") - offsetMs(sessionInfo.GmtOffset);
       live = Number.isFinite(startMs) && Date.now() >= startMs - PRE_START_LIVE_MS;
     } else {
       live = status === "started" || status === "aborted";
@@ -1873,6 +1869,9 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
     round?: number; // meeting/round number of the current session
     /** A start time Race Control has announced for this session, before it has started. */
     announcedStart?: { label: string; ms: number };
+    /** The feed's session ("Qualifying"…) while it hasn't started — a later official start
+     *  from another source (FIA timetable, liveConfig) can then hold off "live". */
+    notStarted?: string;
   }> {
     if (!(await ensureConnection())) return { live: false };
     await refreshIfStale();
@@ -1886,6 +1885,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
       endedAt: endedAt ?? undefined,
       round: sessionInfo.Meeting?.Number,
       ...(announced != null && sessionInfo.Name ? { announcedStart: { label: sessionInfo.Name, ms: announced } } : {}),
+      ...(sessionStartedTs == null && sessionInfo.Name ? { notStarted: sessionInfo.Name } : {}),
     };
   }
 

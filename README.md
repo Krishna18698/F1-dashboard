@@ -148,6 +148,7 @@ through the live view. Click any image for full size.
 | Data | Source | Key needed? |
 | --- | --- | --- |
 | Standings, calendar, next race/sessions | [Jolpica-F1](https://github.com/jolpica/jolpica-f1) (Ergast successor) | No |
+| Delayed session starts (hero countdown, weekend schedule) | Race Control's "… WILL START AT", then the FIA's re-issued event timetable PDF (`fia.com` documents), then F1's `Index.json`; Jolpica's times never change once published | No |
 | Circuit outlines (for the track map + corner numbers) | [MultiViewer](https://multiviewer.app/) circuits API | No |
 | Paddock Intel news | Motorsport / Autosport / Formula1.com RSS | No |
 | **Timing board, tyres, sectors, race control, session status — real-time** | F1 live-timing WebSocket (`livetiming.formula1.com/signalrcore`) | **No.** F1 serves these to an anonymous subscribe |
@@ -288,6 +289,8 @@ lib/
   sessionWindows.ts           # every timing constant more than one file needs
   timingTypes.ts              # timing data shapes (pure types, no network)
   jolpica.ts                  # standings / calendar / weekend sessions / winners
+  fiaTimetable.ts             # session starts from the FIA's newest timetable PDF (delays)
+  sessionStarts.ts            # applies those official starts over Jolpica's schedule
   championshipPoints.ts       # 2026 points tables + applying a session to standings
   f1Token.ts, tokenExpiry.ts, visitorToken.ts, trackStatus.ts, news.ts,
   format.ts, geo.ts, lapRecords.ts, teamColors.ts, now.ts

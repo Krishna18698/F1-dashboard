@@ -180,17 +180,20 @@ export async function flatSessions(): Promise<FlatSession[]> {
  * ("Qualifying", "Sprint"…). F1 updates these when it reschedules a session; Jolpica's schedule
  * does not change once published. Includes sessions with no feed published yet.
  */
-export async function officialSessionStarts(): Promise<Record<string, number>> {
+export async function officialSessionStarts(): Promise<{ starts: Record<string, number>; gmtOffsetMs: number | null }> {
   const res = await fetch(`${F1_LIVE.base}/${new Date().getUTCFullYear()}/Index.json`, { headers: UA, cache: "no-store" });
-  if (!res.ok) return {};
+  if (!res.ok) return { starts: {}, gmtOffsetMs: null };
   const idx = JSON.parse((await res.text()).replace(/^\uFEFF/, "")) as { Meetings: IdxMeeting[] };
   const m = idx.Meetings.at(-1);
-  const out: Record<string, number> = {};
+  const starts: Record<string, number> = {};
+  let gmtOffsetMs: number | null = null;
   for (const s of m?.Sessions ?? []) {
     const ms = Date.parse(s.StartDate + "Z") - offsetMs(s.GmtOffset);
-    if (Number.isFinite(ms)) out[s.Name] = ms;
+    if (!Number.isFinite(ms)) continue;
+    starts[s.Name] = ms;
+    gmtOffsetMs = offsetMs(s.GmtOffset);
   }
-  return out;
+  return { starts, gmtOffsetMs };
 }
 
 /** A session on track right now that also has a published feed path. */
