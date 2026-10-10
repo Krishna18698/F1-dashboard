@@ -94,6 +94,8 @@ export default function TimingBoard({
   restartAtMs,
   formationLap,
   startDelayed,
+  startSuspended,
+  restartLabel,
   trackStatus,
   totalLaps,
   selectedNum,
@@ -130,6 +132,10 @@ export default function TimingBoard({
   formationLap?: boolean;
   /** Past the scheduled start, field still on the grid. */
   startDelayed?: boolean;
+  /** Race Control suspended the start (red flag before lights out). */
+  startSuspended?: boolean;
+  /** Race Control's wording for the announced time: "FORMATION LAP IN", "RESUMES IN"… */
+  restartLabel?: string | null;
   /** F1 TrackStatus code — the Safety Car / VSC chip. On the board rather than only the map, so
    *  visitors without a token (who get no map) see it too. */
   trackStatus?: string | null;
@@ -204,7 +210,7 @@ export default function TimingBoard({
         )}
         {redFlagged && restartIn && (
           <span className="text-[0.6rem] font-bold tracking-wider text-muted">
-            RESUMES IN <span className="tnum font-timing text-xs text-red">{restartIn}</span>
+            {restartLabel ?? "RESUMES IN"} <span className="tnum font-timing text-xs text-red">{restartIn}</span>
           </span>
         )}
         {isRace && !redFlagged && !forming && startDelayed && (
@@ -221,6 +227,14 @@ export default function TimingBoard({
           >
             <span className="live-dot h-1.5 w-1.5 rounded-full bg-current opacity-70" />
             {NEUTRALISED[trackStatus!].label}
+          </span>
+        )}
+        {/* A delayed or suspended start with a time announced by Race Control ("FORMATION LAP WILL
+            START AT 17:30"): count down to it. A suspended start already shows it beside the red
+            flag chip above, so only the delayed case needs its own. */}
+        {isRace && !redFlagged && startDelayed && !startSuspended && restartIn && (
+          <span className="text-[0.6rem] font-bold tracking-wider text-muted">
+            {restartLabel ?? "STARTS IN"} <span className="tnum font-timing text-xs text-red">{restartIn}</span>
           </span>
         )}
         {forming && (

@@ -54,6 +54,7 @@ export interface LiveState {
   /** Announced restart instant (epoch ms) while suspended, else null. */
   suspendedRestartMs?: number | null;
   formationLap?: boolean;
+  restartLabel?: string | null; // "FORMATION LAP IN" / "RESUMES IN" / "STARTS IN", for the announced time
   startSuspended?: boolean; // Race Control suspended the starting procedure (red flag before lights out)
   startDelayed?: boolean; // past the scheduled start, race not started, field still on the grid // race hasn't gone green yet — tints the map yellow, like a flag
   qualifyingPart?: number | null; // 1=Q1, 2=Q2, 3=Q3 (quali sessions only)

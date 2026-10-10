@@ -243,6 +243,8 @@ export interface F1LiveState {
   /** When race control has announced a restart ("RACE WILL RESUME AT 15:33"), that instant as
    *  epoch ms. Null if no restart has been announced since the session was suspended. */
   suspendedRestartMs: number | null;
+  /** What the announced time is for, from Race Control's wording: "FORMATION LAP", "RESUMES"… */
+  restartLabel?: string | null;
   trackStatus: string | null; // TrackStatus code (1 clear, 2 yellow, 4 SC, 5 red, 6 VSC, 7 VSC ending)
   telFrames: TelFrame[]; // recent timestamped telemetry window (client plays back at the map's clock)
   qualifyingPart: number | null; // 1=Q1, 2=Q2, 3=Q3 (quali sessions only)
@@ -1570,6 +1572,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
       trackStatus: outTrack,
       sessionStatus: sessionStatus?.Status ?? null,
       suspendedRestartMs: restartAtMs(),
+      restartLabel: restartLabel(),
       telFrames: telBuffer.slice(-200), // ~45s at ~4Hz
       qualifyingPart: qualiClock.part ?? qualifyingPart,
       qualifyingRemainingMs: qualiClock.remainingMs,
@@ -1684,6 +1687,20 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
    * be in the circuit's timezone. Takes the most recently SENT such message — a delayed restart
    * is announced again with a later time, and the newest one wins.
    */
+  /** What the latest announced start/resume time is FOR, worded for the countdown chip. */
+  function restartLabel(): string | null {
+    let best: { sent: number; msg: string } | null = null;
+    for (const m of Object.values(raceControl)) {
+      if (!/(?:RESUME(?:D)?|START(?:S)?) AT \d{1,2}:\d{2}/i.test(m.Message ?? "") || !m.Utc) continue;
+      const sent = Date.parse(m.Utc + "Z");
+      if (Number.isFinite(sent) && (!best || sent > best.sent)) best = { sent, msg: m.Message ?? "" };
+    }
+    if (!best) return null;
+    if (/FORMATION LAP/i.test(best.msg)) return "FORMATION LAP IN";
+    if (/RESUME/i.test(best.msg)) return "RESUMES IN";
+    return "STARTS IN";
+  }
+
   function restartAtMs(): number | null {
     const off = offsetMs(sessionInfo?.GmtOffset);
     let bestSent = -Infinity;
