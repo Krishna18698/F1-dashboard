@@ -9,11 +9,34 @@
  * reconstruct state at any instant (which powers both replay and live polling).
  */
 import { compoundOfLap, previousSegmentBest } from "../bestLapTyre";
+import { decodeTokenExpiry } from "../tokenExpiry";
 import { PRE_START_LIVE_MS, QUALI_DURATION_MS, QUALI_LAST_LAP_GRACE_MS, SPRINT_QUALI_DURATION_MS, postEndLiveMs } from "../sessionWindows";
 import zlib from "zlib";
 import { F1_LIVE } from "../live/liveConfig";
+import { OPENF1_PREFIX, loadOpenF1Session, openF1Candidates, openF1NewSetCounts, openF1WeekendSessions } from "./openf1Session";
 
 const UA = { "User-Agent": "BestHTTP" };
+
+/**
+ * Since ~15 Oct 2026 F1 has locked its whole archive (every year, every file under /static/<year>)
+ * behind an F1 TV login: anonymous requests get a 401 from a CloudFront rule. The site's own
+ * token goes along as a bearer token, server-side only, and only while it's still valid.
+ */
+function archiveHeaders(): Record<string, string> {
+  const token = process.env.F1_TV_TOKEN?.trim();
+  return token && !decodeTokenExpiry(token).expired ? { ...UA, Authorization: `Bearer ${token}` } : UA;
+}
+
+/** The last archive request was refused for want of a login — replay can say so instead of
+ *  claiming there's nothing to replay. */
+let archiveLocked = false;
+export function archiveNeedsLogin(): boolean {
+  return archiveLocked;
+}
+function noteArchiveStatus(status: number) {
+  if (status === 401 || status === 403) archiveLocked = status === 401;
+  else if (status >= 200 && status < 300) archiveLocked = false;
+}
 const TS_LEN = 12; // "HH:MM:SS.mmm"
 // Standard FIA qualifying segment durations.
 // See the matching pair in liveSocket.ts — Sprint Qualifying's segments are shorter than a
@@ -101,9 +124,10 @@ const TOO_BIG_TO_CACHE = new Set(["TimingData.jsonStream", "Position.z.jsonStrea
 async function fetchText(sessionPath: string, feed: string, live = true): Promise<string> {
   const cacheable = !live && !TOO_BIG_TO_CACHE.has(feed);
   const res = await fetch(`${F1_LIVE.base}/${sessionPath}${feed}`, {
-    headers: UA,
+    headers: archiveHeaders(),
     ...(cacheable ? { next: { revalidate: 86_400 } } : { cache: "no-store" as const }),
   });
+  noteArchiveStatus(res.status);
   if (!res.ok) throw new Error(`F1 feed ${feed} → ${res.status}`);
   return res.text();
 }
@@ -148,9 +172,10 @@ interface FlatSession extends ResolvedSession {
 
 export async function flatSessions(): Promise<FlatSession[]> {
   const res = await fetch(`${F1_LIVE.base}/${new Date().getUTCFullYear()}/Index.json`, {
-    headers: UA,
+    headers: archiveHeaders(),
     cache: "no-store",
   });
+  noteArchiveStatus(res.status);
   if (!res.ok) return [];
   const idx = JSON.parse((await res.text()).replace(/^﻿/, "")) as { Meetings: IdxMeeting[] };
 
@@ -181,7 +206,11 @@ export async function flatSessions(): Promise<FlatSession[]> {
  * does not change once published. Includes sessions with no feed published yet.
  */
 export async function officialSessionStarts(): Promise<{ starts: Record<string, number>; gmtOffsetMs: number | null }> {
-  const res = await fetch(`${F1_LIVE.base}/${new Date().getUTCFullYear()}/Index.json`, { headers: UA, cache: "no-store" });
+  const res = await fetch(`${F1_LIVE.base}/${new Date().getUTCFullYear()}/Index.json`, {
+    headers: archiveHeaders(),
+    cache: "no-store",
+  });
+  noteArchiveStatus(res.status);
   if (!res.ok) return { starts: {}, gmtOffsetMs: null };
   const idx = JSON.parse((await res.text()).replace(/^\uFEFF/, "")) as { Meetings: IdxMeeting[] };
   const m = idx.Meetings.at(-1);
@@ -214,7 +243,11 @@ export async function resolveLiveSession(): Promise<ResolvedSession | null> {
 export async function fallbackCandidates(): Promise<ResolvedSession[]> {
   if (F1_LIVE.mode === "live") return [];
   const now = Date.now();
-  const past = (await flatSessions())
+  const flat = await flatSessions();
+  // F1's archive needs an F1 TV login since Oct 2026; without one, OpenF1's copy of the same
+  // sessions is the source.
+  if (!flat.length) return openF1Candidates().catch(() => []);
+  const past = flat
     .filter((s) => s.startMs <= now)
     .filter((s) => !F1_LIVE.replayExcludePaths.some((bad) => s.path.includes(bad)))
     .sort((a, b) => b.startMs - a.startMs);
@@ -224,15 +257,15 @@ export async function fallbackCandidates(): Promise<ResolvedSession[]> {
 }
 
 /* ------------------------------ session cache ------------------------------ */
-interface Delta {
+export interface Delta {
   ts: number;
   lines: Record<string, unknown>;
 }
-interface PosFrame {
+export interface PosFrame {
   ts: number;
   cars: Record<string, [number, number]>;
 }
-interface RawDriver {
+export interface RawDriver {
   RacingNumber: string;
   Tla: string;
   FullName: string;
@@ -251,7 +284,7 @@ export interface RcMessage {
   RacingNumber?: string;
   Lap?: number;
 }
-interface SessionCache {
+export interface SessionCache {
   loadedAt: number;
   drivers: Record<string, RawDriver>;
   timing: Delta[];
@@ -276,6 +309,10 @@ interface SessionCache {
   posOffset: number | null; // absolute Utc → session-relative ms (shared by Position + CarData)
   frames: PosFrame[];
   durationMs: number;
+  /** Telemetry already decoded (OpenF1), on the same clock as `frames` — used instead of `car`. */
+  tel?: { t: number; c: Record<string, [number, number, number, number]> }[];
+  /** Loads `frames`/`tel` for a window of the session on demand (OpenF1 serves them in chunks). */
+  ensureWindow?: (fromMs: number, toMs: number) => Promise<void>;
 }
 
 const cache = new Map<string, SessionCache>();
@@ -296,6 +333,11 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
   const cached = cache.get(sessionPath);
   // Completed session → static, cache forever. Live → 2s TTL so polls see fresh data.
   if (cached && (!live || Date.now() - cached.loadedAt < 2000)) return cached;
+  if (sessionPath.startsWith(OPENF1_PREFIX)) {
+    const entry = await loadOpenF1Session(sessionPath);
+    cache.set(sessionPath, entry);
+    return entry;
+  }
 
   const [driverTxt, timingTxt, appTxt, posTxt, lapTxt, trackTxt, carTxt, rcTxt, qpTxt, infoTxt, clockTxt] = await Promise.all([
     fetchText(sessionPath, "DriverList.jsonStream", live).catch(() => ""),
@@ -734,6 +776,11 @@ const priorSessionNewSetCache = new Map<string, Record<string, Record<string, nu
 export async function newSetCountsForCompletedSession(sessionPath: string): Promise<Record<string, Record<string, number>>> {
   const cached = priorSessionNewSetCache.get(sessionPath);
   if (cached) return cached;
+  if (sessionPath.startsWith(OPENF1_PREFIX)) {
+    const counts = await openF1NewSetCounts(sessionPath);
+    priorSessionNewSetCache.set(sessionPath, counts);
+    return counts;
+  }
   // TimingAppData ALONE — this reads tyre stint flags and nothing else. It used to call load(),
   // which pulls all ten streams of the session; computing the weekend allocation walks every
   // earlier session, so a single render was downloading ~25 MB of position and telemetry data
@@ -757,6 +804,14 @@ async function weekendPriorSessions(
   sessionPath: string,
 ): Promise<{ paths: string[]; allocation: Record<string, number> }> {
   const prefix = sessionPath.split("/").slice(0, 2).join("/") + "/";
+  if (sessionPath.startsWith(OPENF1_PREFIX)) {
+    const weekend = await openF1WeekendSessions(sessionPath);
+    const mine = weekend.find((s) => s.path === sessionPath);
+    return {
+      paths: mine ? weekend.filter((s) => s.startMs < mine.startMs).map((s) => s.path) : [],
+      allocation: allocationForWeekend(weekend.map((s) => s.name)),
+    };
+  }
   const all = await flatSessions();
   const mine = all.find((s) => s.path === sessionPath);
   const weekend = all.filter((s) => s.path.startsWith(prefix));
@@ -854,6 +909,8 @@ export async function getF1LiveState(
   infoUptoMs: number = uptoMs,
 ): Promise<F1LiveState> {
   const s = await load(sessionPath, live);
+  // OpenF1 sessions fetch positions/telemetry for the window being played, as it's reached.
+  await s.ensureWindow?.(uptoMs - 50_000, uptoMs + 1_000);
   const timing = mergeUpto(s.timing, infoUptoMs);
   // A sector's Value survives the line — F1 only overwrites it when the sector is next
   // completed. Merged state alone therefore can't say which lap a time belongs to. Walk the
@@ -1278,7 +1335,9 @@ export async function getF1LiveState(
   // (mapped via posOffset onto the session clock) so the client can play it back on the
   // same delayed clock as the dots — continuous ~4Hz updates, in sync with the map.
   const telFrames: F1LiveState["telFrames"] = [];
-  if (s.car.length) {
+  if (s.tel) {
+    for (const f of s.tel) if (f.t <= uptoMs && f.t >= uptoMs - FRAME_WINDOW) telFrames.push(f);
+  } else if (s.car.length) {
     // Binary-search the first line that could contribute to the window (lines batch ~1.3s
     // of samples stamped up to ~2s after the line ts, so start a little early).
     const startTs = uptoMs - FRAME_WINDOW - 3000;

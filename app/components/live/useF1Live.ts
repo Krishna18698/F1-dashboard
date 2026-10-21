@@ -82,6 +82,8 @@ interface ApiResponse {
   tokenIssue?: "invalid" | "busy";
   ownerTokenConfigured?: boolean;
   scheduledLive?: { location: string; session_name: string } | null;
+  archiveLocked?: boolean;
+  replayLiveBlocked?: boolean;
 }
 
 const empty: LiveState = {
@@ -300,6 +302,8 @@ export function useF1Live(
             tokenIssue: data.tokenIssue ?? null,
             ownerTokenConfigured: data.ownerTokenConfigured ?? false,
             scheduledLive: data.scheduledLive ?? null,
+            archiveLocked: data.archiveLocked ?? false,
+            replayLiveBlocked: data.replayLiveBlocked ?? false,
           }));
         } else {
           // Feed the map's animation buffer directly — NOT through React state — so the

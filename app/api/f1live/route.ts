@@ -6,10 +6,13 @@ import { F1_LIVE } from "@/lib/live/liveConfig";
 import { liveTestReplayDuration, liveTestReplayState } from "@/lib/live/liveTest";
 import { currentlyLiveWeekendSession, getNextRace } from "@/lib/jolpica";
 import { getTokenStatus } from "@/lib/f1Token";
+import { archiveNeedsLogin } from "@/lib/archive/archiveParser";
+import { OPENF1_PREFIX, openF1LiveLocked } from "@/lib/archive/openf1Session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 20; // allow time to connect+subscribe on serverless
+// Connect+subscribe on serverless, and a cold OpenF1 replay load (~14 rate-limited requests, ~12 s).
+export const maxDuration = 60;
 
 /** Incremental frames: only those newer than the client's `since` — shrinks each poll from
  *  the full ~45s window (~100KB to parse on the main thread, which cost an animation frame
@@ -206,13 +209,19 @@ export async function GET(req: NextRequest) {
     // looping, via the free feed. Deliberate, user-requested view — never idle just
     // because something else happens to be live; that's what view=live is for.
     for (const c of await replayArchiveCandidates()) {
-      const dur = await replayArchiveDuration(c.path, false);
-      if (!dur) continue;
-      const anchor = await replayArchiveAnchorMs(c.path, false);
-      const span = Math.max(1, dur - anchor);
-      const upto = anchor + ((Date.now() - replayT0) % span);
-      const state = await replayArchiveState(c.path, c.type, upto, false, asOf ?? upto);
-      if (state.drivers.length > 0) {
+      // One candidate failing (OpenF1 refusing, a session with no data) moves on to the next.
+      const state = await (async () => {
+        const dur = await replayArchiveDuration(c.path, false);
+        if (!dur) return null;
+        const anchor = await replayArchiveAnchorMs(c.path, false);
+        const span = Math.max(1, dur - anchor);
+        const upto = anchor + ((Date.now() - replayT0) % span);
+        return replayArchiveState(c.path, c.type, upto, false, asOf ?? upto);
+      })().catch(() => null);
+      // OpenF1 closed mid-replay (a session went live): what's cached would play on with no cars
+      // on the map, so it's "unavailable during a live session" instead.
+      if (c.path.startsWith(OPENF1_PREFIX) && openF1LiveLocked()) break;
+      if (state && state.drivers.length > 0) {
         return respond({
           status: "live",
           replay: true,
@@ -226,7 +235,11 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    return respond({ status: "idle" });
+    // Nothing to replay — and if that's because F1 refused the archive (an F1 TV login has been
+    // required since Oct 2026), say so rather than "no past session".
+    // OpenF1 (the source without an F1 TV login) refuses everything while a session is live.
+    if (openF1LiveLocked()) return respond({ status: "idle", replayLiveBlocked: true });
+    return respond({ status: "idle", archiveLocked: archiveNeedsLogin() });
   } catch {
     return Response.json({ status: "error", ownerTokenConfigured }, { status: 200 });
   }

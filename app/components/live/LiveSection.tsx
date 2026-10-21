@@ -132,7 +132,21 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
             <span className="skeleton mt-2 block h-4 w-64" />
           ) : view === "replay" ? (
             <div className="mt-2 pl-5 text-sm">
-              <p className="font-medium text-ink-soft">No past session is available to replay yet.</p>
+              {s.replayLiveBlocked ? (
+                <>
+                  <p className="font-medium text-ink-soft">Replay is unavailable while a session is live.</p>
+                  <p className="mt-0.5 text-xs text-muted">It comes back as soon as the session ends.</p>
+                </>
+              ) : s.archiveLocked ? (
+                <>
+                  <p className="font-medium text-ink-soft">Replays are unavailable right now.</p>
+                  <p className="mt-0.5 text-xs text-muted">
+                    F1 now requires an F1 TV login to read its session archive.
+                  </p>
+                </>
+              ) : (
+                <p className="font-medium text-ink-soft">No past session is available to replay yet.</p>
+              )}
             </div>
           ) : (
             <div className="mt-2 pl-5 text-sm">

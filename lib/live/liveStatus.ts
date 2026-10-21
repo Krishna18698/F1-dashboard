@@ -6,7 +6,7 @@
  */
 import { liveSocketStatus } from "./liveSocket";
 import { liveArchiveSession } from "./liveArchive";
-import { currentlyLiveWeekendSession, getNextRace } from "../jolpica";
+import { currentlyLiveWeekendSession, getNextRace, weekendSessions } from "../jolpica";
 import { officialSessionStarts } from "../archive/archiveParser";
 import { F1_LIVE } from "./liveConfig";
 import { fiaTimetableStarts } from "../fiaTimetable";
@@ -57,13 +57,41 @@ async function fiaStarts(): Promise<Record<string, string>> {
 /** Largest move the FIA timetable may make from F1's index — anything more is another meeting. */
 const FIA_MAX_SHIFT_MS = 12 * 3600_000;
 
-/** FIA timetable starts (local wall time) as epoch ms, for sessions F1's index also lists. */
-function fiaEpochStarts(fia: Record<string, string>, index: Record<string, number>, gmtOffsetMs: number | null) {
-  const out: Record<string, number> = {};
-  if (gmtOffsetMs == null) return out;
+/**
+ * The circuit's UTC offset from the FIA timetable itself: its local times against Jolpica's UTC
+ * schedule, the most common difference across sessions (a delayed session is the odd one out).
+ * For when F1's index can't be read — it has needed an F1 TV login since Oct 2026.
+ */
+function offsetFromSchedule(fia: Record<string, string>, scheduled: Record<string, number>): number | null {
+  const counts = new Map<number, number>();
   for (const [name, local] of Object.entries(fia)) {
-    const ms = Date.parse(local + ":00Z") - gmtOffsetMs;
-    if (Number.isFinite(ms) && index[name] != null && Math.abs(ms - index[name]) <= FIA_MAX_SHIFT_MS) out[name] = ms;
+    if (scheduled[name] == null) continue;
+    const diff = Math.round((Date.parse(local + ":00Z") - scheduled[name]) / 900_000) * 900_000;
+    if (Number.isFinite(diff)) counts.set(diff, (counts.get(diff) ?? 0) + 1);
+  }
+  const [best] = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  return best && best[1] >= 2 ? best[0] : null;
+}
+
+/** FIA timetable starts (local wall time) as epoch ms, for sessions the schedule also lists. */
+function fiaEpochStarts(fia: Record<string, string>, scheduled: Record<string, number>, gmtOffsetMs: number | null) {
+  const out: Record<string, number> = {};
+  const offset = gmtOffsetMs ?? offsetFromSchedule(fia, scheduled);
+  if (offset == null) return out;
+  for (const [name, local] of Object.entries(fia)) {
+    const ms = Date.parse(local + ":00Z") - offset;
+    if (Number.isFinite(ms) && scheduled[name] != null && Math.abs(ms - scheduled[name]) <= FIA_MAX_SHIFT_MS) out[name] = ms;
+  }
+  return out;
+}
+
+/** Jolpica's start per session name — the fallback reference when F1's index is unreadable. */
+async function jolpicaStarts(): Promise<Record<string, number>> {
+  const race = await getNextRace().catch(() => null);
+  const out: Record<string, number> = {};
+  for (const s of race ? weekendSessions(race) : []) {
+    const ms = Date.parse(s.iso);
+    if (Number.isFinite(ms)) out[s.label] = ms;
   }
   return out;
 }
@@ -87,7 +115,8 @@ export async function getLiveStatusData(): Promise<LiveStatusData> {
   // Most trusted last: F1's index, then the FIA's timetable (re-issued the moment a session
   // moves, while the index can lag for hours), a hand-set liveConfig entry, and finally a time
   // Race Control has announced for the session about to start.
-  const merged = { ...index, ...fiaEpochStarts(fia, index, gmtOffsetMs), ...manualStarts(index) };
+  const scheduled = Object.keys(index).length ? index : await jolpicaStarts();
+  const merged = { ...index, ...fiaEpochStarts(fia, scheduled, gmtOffsetMs), ...manualStarts(index) };
   if (announcedStart) merged[announcedStart.label] = announcedStart.ms;
   // F1 opens a delayed session on its feed at the old time; hold "live" until the new one.
   const start = notStarted ? merged[notStarted] : undefined;

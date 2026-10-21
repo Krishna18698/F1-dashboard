@@ -153,7 +153,8 @@ through the live view. Click any image for full size.
 | Paddock Intel news | Motorsport / Autosport / Formula1.com RSS | No |
 | **Timing board, tyres, sectors, race control, session status — real-time** | F1 live-timing WebSocket (`livetiming.formula1.com/signalrcore`) | **No.** F1 serves these to an anonymous subscribe |
 | **Car positions (the map) + telemetry** | The same socket — `Position.z` and `CarData.z` | **F1 TV token** (the site's, or a visitor's own) |
-| Replay, and the fallback when the socket is closed | F1 **static** archive (`livetiming.formula1.com/static`) — published hours after a session | No |
+| Replay, and the fallback when the socket is closed | F1 **static** archive (`livetiming.formula1.com/static`) — published hours after a session; since ~15 Oct 2026 it requires an F1 TV login, so the site's token is sent with it | **F1 TV token** |
+| Replay without a token | [OpenF1](https://openf1.org) — the same sessions, rebuilt into the archive's format (`lib/archive/openf1Session.ts`); its free tier is closed while any session is live, so replay says so | No |
 | Finished-round classification, kept after the socket closes | Supabase (optional) | Supabase URL + service-role key |
 
 Only **two** topics are actually gated, measured by an A-B subscribe against the same session:
@@ -278,6 +279,8 @@ lib/
   archive/
     archiveParser.ts          # private core: parse/decode/reduce. No mode of its own —
                               #   both liveArchive and replayArchive read through it
+    openf1Session.ts          # OpenF1 → the same session cache, for replay without an
+                              #   F1 TV login (positions/telemetry fetched in 2-min chunks)
   openf1/
     openf1Results.ts          # fallback classification source; free tier is locked out
                               #   (401) for the duration of any live F1 session

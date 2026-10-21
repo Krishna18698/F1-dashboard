@@ -63,6 +63,8 @@ export interface LiveState {
   nextQualifyingSegmentInMs?: number | null; // estimated countdown to the next segment
   tokenIssue?: "invalid" | "busy" | null; // set when a visitor's own token couldn't be used
   ownerTokenConfigured?: boolean; // does the SITE have its own F1_TV_TOKEN configured
+  archiveLocked?: boolean;
+  replayLiveBlocked?: boolean; // replay's tokenless source (OpenF1) is closed while a session is live // replay found nothing because F1 refused its archive without an F1 TV login
   scheduledLive?: { location: string; session_name: string } | null; // a session is on by the schedule right now, even though there's no data to show yet (no token / free feed hasn't caught up)
   tyreLaps?: Map<number, number>; // laps on current tyre, per driver
   sectors?: Map<number, { value: string; overallFastest: boolean; personalFastest: boolean; segments: number[] }[]>; // S1/S2/S3 with F1's purple/green flags
