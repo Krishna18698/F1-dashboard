@@ -182,10 +182,15 @@ export default function TimingBoard({
   // The header row and each driver row are SEPARATE grids, so `auto` columns size themselves
   // independently — the narrow "S1" header ended up a different width from the "30.609"
   // beneath it and the columns visibly failed to line up. Fixed widths make both grids agree.
+  //
+  // Breakpoints are on the BOARD's width (container queries), not the window's: beside the map
+  // the board gets half the window, and the sector columns switched on by a window breakpoint
+  // left the driver a sliver — "V." for VER. Sectors need ~30.5rem of fixed columns plus ~4rem
+  // for the driver (bar, code, pit badge), so they appear from 35rem of board.
   const cols = isRace
     ? "grid-cols-[2rem_1fr_auto]"
     : showSectors
-      ? "grid-cols-[2rem_1fr_4.5rem_1.5rem_3.5rem] sm:grid-cols-[2rem_1fr_repeat(3,4.25rem)_5rem_1.75rem_4rem]"
+      ? "grid-cols-[2rem_1fr_4.5rem_1.5rem_3.5rem] @min-[35rem]:grid-cols-[2rem_1fr_repeat(3,4.25rem)_5rem_1.75rem_4rem]"
       : "grid-cols-[2rem_1fr_4.5rem_1.5rem_3.5rem]";
 
   // Stretch to the bento row rather than sizing to content (the old `self-start`). At wider
@@ -194,7 +199,7 @@ export default function TimingBoard({
   // failed to bottom out together. The rows below carry `grow`, so that slack is shared
   // evenly across all 20-odd of them instead of pooling as dead space under the last one.
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="@container flex min-h-0 flex-1 flex-col">
       <div className="mb-2 flex items-center gap-2">
         <span className="eyebrow block text-[0.6rem] text-muted">
           Driver Live <span className="text-red">Tracker</span>
@@ -294,9 +299,9 @@ export default function TimingBoard({
             <>
               {showSectors && (
                 <>
-                  <span className="hidden text-right sm:block">S1</span>
-                  <span className="hidden text-right sm:block">S2</span>
-                  <span className="hidden text-right sm:block">S3</span>
+                  <span className="hidden text-right @min-[35rem]:block">S1</span>
+                  <span className="hidden text-right @min-[35rem]:block">S2</span>
+                  <span className="hidden text-right @min-[35rem]:block">S3</span>
                 </>
               )}
               <span className="text-right">Best</span>
@@ -339,10 +344,18 @@ export default function TimingBoard({
 
                 <div className="flex min-w-0 items-center gap-2">
                   <span className="h-4 w-1 shrink-0 rounded-full" style={{ backgroundColor: hex(d?.team_colour) }} />
-                  <span className={`truncate text-sm font-semibold ${inDanger ? "text-red" : ""}`}>
+                  {/* Three letters, never cut. The team name is the one that gives way: shown only
+                      where it has room, rather than squeezed to "Red …". */}
+                  <span className={`shrink-0 text-sm font-semibold ${inDanger ? "text-red" : ""}`}>
                     {d?.name_acronym ?? num}
                   </span>
-                  <span className="hidden truncate text-xs text-muted sm:inline">{d?.team_name}</span>
+                  {/* From 28rem of board; with sectors, they take that room back at 35rem until
+                      there's enough again at 40rem ("Red Bull Racing" needs ~90px). */}
+                  <span
+                    className={`hidden truncate text-xs text-muted @min-[28rem]:inline ${showSectors ? "@min-[35rem]:hidden @min-[40rem]:inline" : ""}`}
+                  >
+                    {d?.team_name}
+                  </span>
                   {/* Beside the driver, not in the gap column — their finishing gap is still
                       the useful number there, and this marks who is already home. */}
                   {/* In the pit lane, as F1 TV marks it in practice and qualifying — where cars
@@ -389,7 +402,7 @@ export default function TimingBoard({
                     </div>
                   )
                 ) : isKnockedOut ? (
-                  <div className={`text-right ${showSectors ? "col-span-3 sm:col-span-6" : "col-span-3"}`}>
+                  <div className={`text-right ${showSectors ? "col-span-3 @min-[35rem]:col-span-6" : "col-span-3"}`}>
                     <span className="rounded-sm bg-ink px-1.5 py-0.5 text-[0.6rem] font-bold tracking-wider text-white">
                       OUT
                     </span>
@@ -402,7 +415,7 @@ export default function TimingBoard({
                         return (
                           <span
                             key={si}
-                            className={`tnum hidden text-right font-mono text-xs sm:block ${sectorColour(sec)}`}
+                            className={`tnum hidden text-right font-mono text-xs @min-[35rem]:block ${sectorColour(sec)}`}
                             title={sec?.overallFastest ? "Fastest of anyone" : sec?.personalFastest ? "Personal best" : undefined}
                           >
                             {sec?.value || "–"}
