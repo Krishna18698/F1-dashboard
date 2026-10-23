@@ -7,6 +7,7 @@ import { Bounds, computeBounds, project, rotate, tracePath } from "@/lib/geo";
 import { hex } from "@/lib/format";
 import { trackStatusInfo } from "@/lib/trackStatus";
 import { getFrames, resetFrames, setPlaybackT, subscribeFrames, useHasFrames } from "./framesStore";
+import { placeCornerLabels } from "./cornerPlacement";
 
 const SIZE = 1000;
 
@@ -292,8 +293,9 @@ export default function TrackMap({
     return { x1: a.cx - nx * half, y1: a.cy - ny * half, x2: a.cx + nx * half, y2: a.cy + ny * half };
   }, [bounds, outline]);
 
-  // Corner numbers, sitting just OUTSIDE the track line: project each corner to screen
-  // coords, then push it ~26px along the corner's outward angle (from MultiViewer).
+  // Corner numbers, sitting just OUTSIDE the track line: project each corner to screen coords,
+  // then place it along the corner's outward angle (from MultiViewer), moved off any other
+  // stretch of track it would land on (cornerPlacement).
   const cornerLabels = useMemo(() => {
     if (!circuit?.corners?.length || !bounds) return [];
     const w = bounds.maxX - bounds.minX || 1;
@@ -304,11 +306,6 @@ export default function TrackMap({
     const r = (rot * Math.PI) / 180;
     const cos = Math.cos(r);
     const sin = Math.sin(r);
-    // Driver tags float a FIXED distance above each dot in screen space (see the dot's
-    // own `translate(0,-27)` below), while corner numbers sit a track-relative distance
-    // outward — so on some corners the two land in the same screen spot. Push numbers
-    // further out so they clear the tags' ~22px-tall footprint in the common case.
-    const OFF = 42;
     // Some circuits' corner data (from MultiViewer) has more than one point sharing the
     // same corner number — not a second real corner, just extra/incorrect entries. Show
     // each number once, keeping its first (correct) point.
@@ -318,7 +315,7 @@ export default function TrackMap({
       seen.add(c.number);
       return true;
     });
-    return uniqueCorners.map((c) => {
+    const anchors = uniqueCorners.map((c) => {
       const rx = c.x * cos - c.y * sin;
       const ry = c.x * sin + c.y * cos;
       const cx = offX + (rx - bounds.minX) * scale;
@@ -326,10 +323,18 @@ export default function TrackMap({
       const a = ((c.angle ?? 0) * Math.PI) / 180;
       const dx = Math.cos(a) * cos - Math.sin(a) * sin;
       const dy = Math.cos(a) * sin + Math.sin(a) * cos;
-      // Prefer the organiser's label so a lettered turn (5A) shows as written, not as "5".
-      return { n: c.label ?? String(c.number), x: cx + dx * OFF, y: cy - dy * OFF };
+      // Screen space: y runs down, so the outward direction's y flips.
+      return { x: cx, y: cy, dx, dy: -dy };
     });
-  }, [circuit, bounds, rot]);
+    const track = outline.map((p) => {
+      const { cx, cy } = project(p.x, p.y, bounds, SIZE);
+      return { x: cx, y: cy };
+    });
+    // Outside the track at the corner, but never on another stretch of it or another number.
+    const spots = placeCornerLabels(anchors, track, SIZE);
+    // Prefer the organiser's label so a lettered turn (5A) shows as written, not as "5".
+    return uniqueCorners.map((c, i) => ({ n: c.label ?? String(c.number), x: spots[i].x, y: spots[i].y }));
+  }, [circuit, bounds, rot, outline]);
 
   // Precompute rotation + projection scalars once (updated when the circuit changes),
   // so the 60fps loop does pure scalar math with ZERO allocations → no GC stutter.
