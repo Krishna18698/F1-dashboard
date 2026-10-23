@@ -24,3 +24,24 @@ export function storeHeaders(key: string, extra: Record<string, string> = {}): R
     ...extra,
   };
 }
+
+/**
+ * One single-row read, so the project registers activity. Supabase pauses a free project after
+ * seven days without any, and between race weekends nothing else here touches it: the daily cron
+ * bails out with no round long before reaching the database. Paused that way after the 12-day gap
+ * between Singapore and Austin 2026. The daily cron calls this first, every day.
+ */
+export async function touchStore(): Promise<boolean> {
+  const c = storeConfig();
+  if (!c) return false;
+  try {
+    const res = await fetch(`${c.url}/rest/v1/round_result?select=round&limit=1`, {
+      headers: storeHeaders(c.key),
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}

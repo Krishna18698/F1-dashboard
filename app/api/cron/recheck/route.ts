@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { liveSocketResults, liveSocketStatus } from "@/lib/live/liveSocket";
 import { liveArchiveResults } from "@/lib/live/liveArchive";
 import { getRoundResult, roundStoreConfigured, saveRoundResult } from "@/lib/store/roundResults";
+import { touchStore } from "@/lib/store/supabase";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,19 +32,27 @@ export async function GET(req: NextRequest) {
   }
   if (!roundStoreConfigured()) return Response.json({ status: "no-store" });
 
+  // Before anything can bail out: a daily request keeps the free Supabase project from pausing
+  // in the weeks without a race (see touchStore).
+  const storeAwake = await touchStore();
+
   try {
     const status = await liveSocketStatus();
     const round = status.round ?? 0;
-    if (round < 1) return Response.json({ status: "no-round" });
+    if (round < 1) return Response.json({ status: "no-round", storeAwake });
 
     const stored = await getRoundResult(round);
-    if (!stored) return Response.json({ status: "nothing-stored", round });
-    if (stored.recheckedAt) return Response.json({ status: "already-rechecked", round });
+    if (!stored) return Response.json({ status: "nothing-stored", round, storeAwake });
+    if (stored.recheckedAt) return Response.json({ status: "already-rechecked", round, storeAwake });
 
     // Socket first (it carries any penalty the moment F1 applies it), archive second.
     const fresh = (await liveSocketResults()) ?? (await liveArchiveResults());
     if (!fresh?.complete || !fresh.top?.length) {
-      return Response.json({ status: "no-result-available", round });
+      return Response.json({ status: "no-result-available", round, storeAwake });
+    }
+    // Only the same session's re-issued result may replace it — never a later session's.
+    if (fresh.session_name && fresh.session_name !== stored.sessionName) {
+      return Response.json({ status: "different-session", round, storeAwake });
     }
 
     const places = fresh.top.map((t) => ({ pos: t.pos, tla: t.tla }));
@@ -58,8 +67,8 @@ export async function GET(req: NextRequest) {
       recheckedAt: Date.now(),
     });
 
-    return Response.json({ status: "ok", round, changed, before: changed ? before : undefined, after: changed ? after : undefined });
+    return Response.json({ status: "ok", round, changed, before: changed ? before : undefined, after: changed ? after : undefined, storeAwake });
   } catch {
-    return Response.json({ status: "error" }, { status: 200 });
+    return Response.json({ status: "error", storeAwake }, { status: 200 });
   }
 }

@@ -27,7 +27,7 @@ import LiveSection from "./components/live/LiveSection";
 // Dynamic: the hero consults the live socket to decide when a finished race weekend should
 // flip to the next round. Standings/news stay cached at the fetch layer.
 import { applyToConstructors, applyToDrivers, pointsFor } from "@/lib/championshipPoints";
-import { getRoundResult, roundStoreConfigured, saveRoundResult } from "@/lib/store/roundResults";
+import { getRoundResult, isGrandPrix, roundStoreConfigured, saveRoundResult } from "@/lib/store/roundResults";
 import { liveSocketResults } from "@/lib/live/liveSocket";
 
 export const dynamic = "force-dynamic";
@@ -122,7 +122,7 @@ export default async function Page() {
     let sessionName = finished?.session_name ?? "";
     if (!places && !lastRunIngested && lastRunRound > 0 && roundStoreConfigured()) {
       const snap = await getRoundResult(lastRunRound);
-      if (snap) {
+      if (snap && isGrandPrix(snap.sessionName)) {
         places = snap.places;
         sessionName = snap.sessionName;
       }
@@ -131,7 +131,14 @@ export default async function Page() {
     // Capture it once, while a source still has it. Guarded on the snapshot being absent so a
     // page render is not a database write; `round_result` is keyed by round, so the flag-time
     // classification is written exactly once and the cron re-check owns it after that.
-    if (finished?.complete && finished.top?.length && round && !alreadyIngested && roundStoreConfigured()) {
+    if (
+      finished?.complete &&
+      finished.top?.length &&
+      isGrandPrix(finished.session_name ?? "") &&
+      round &&
+      !alreadyIngested &&
+      roundStoreConfigured()
+    ) {
       const existing = await getRoundResult(Number(round));
       if (!existing) {
         await saveRoundResult({

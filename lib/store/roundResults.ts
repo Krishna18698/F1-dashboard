@@ -44,6 +44,16 @@ export interface RoundResult {
 
 const TABLE = "round_result";
 
+/**
+ * A round's stored result is its GRAND PRIX — the session the standings are scored from. Saving
+ * "the first finished session of the round" stored Singapore 2026's Sprint and Spain's
+ * qualifying, and a stored qualifying would have been scored as the race (race points in grid
+ * order) between the flag and Jolpica publishing.
+ */
+export function isGrandPrix(sessionName: string): boolean {
+  return /·\s*race\s*$/i.test(sessionName);
+}
+
 /** True when a durable store is available — callers use it to decide whether to bother. */
 export function roundStoreConfigured(): boolean {
   return storeConfig() !== null;
