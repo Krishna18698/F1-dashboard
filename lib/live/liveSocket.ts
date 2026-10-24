@@ -34,6 +34,14 @@ const ENDED = new Set(["finished", "finalised", "ends"]);
 /** How long a snapshot refresh may take before the connection is presumed dead. */
 const REFRESH_TIMEOUT_MS = 4000;
 const BUFFER_MS = 45_000; // keep ~45s of position frames (covers a 20s playback delay)
+/**
+ * Position history a poll may receive: the map's 20 s playback delay (TrackMap DELAY_MS) plus
+ * margin. Only the FIRST poll gets all of it — later ones ask for just what's newer (`since`).
+ * It used to be the last 150 frames, written when that was ~45 s; F1 now sends ~22 frames a
+ * second, so 150 was 6.7 s. The map anchors 20 s behind the newest frame, found no data there,
+ * and held every car still for ~10 s after the page opened (Austin quali 2026, phone and desktop).
+ */
+const FIRST_POLL_FRAMES_MS = 26_000;
 // Sprint Qualifying (SQ1/SQ2/SQ3) runs shorter segments than a Saturday qualifying — the
 // whole session is ~44 min end-to-end where a normal quali is ~60. Both arrive with
 // Type "Qualifying", so they're only distinguishable by name.
@@ -451,6 +459,12 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
   let sessionInfo: SessionInfo | null = null;
   let sessionStatus: { Status?: string } | null = null;
   let frameBuffer: PosFrame[] = [];
+  const recentFrames = () => {
+    const from = (frameBuffer.at(-1)?.t ?? 0) - FIRST_POLL_FRAMES_MS;
+    let i = frameBuffer.length;
+    while (i > 0 && frameBuffer[i - 1].t >= from) i--;
+    return frameBuffer.slice(i);
+  };
   // Live championship projection — PERSISTS across sessions (not reset by resetOnNewSession),
   // so post-race points survive after the feed clears the topic, until Jolpica catches up.
   let championship: Championship | null = null;
@@ -1634,7 +1648,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
       drivers: driverList,
       order: outOrder,
       rows,
-      frames: frameBuffer.slice(-150), // ~45s window (covers the 20s delay + jitter)
+      frames: recentFrames(),
       totalLaps: mode === "race" ? Number(lapCount?.TotalLaps ?? 0) : 0,
       currentLap: outLap,
       fastestLap,

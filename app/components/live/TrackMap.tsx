@@ -407,15 +407,20 @@ export default function TrackMap({
         lastNow.current = now;
         if (ptRef.current === null || dt > 1500 || latest - ptRef.current > 40000) {
           // First frame / tab was hidden / fell to the buffer's edge → (re)anchor. Rare.
-          ptRef.current = latest - DELAY_MS;
+          // Never before the oldest frame we hold: a server that has only just connected has a
+          // few seconds of history, and anchoring the full delay back put the clock in a gap
+          // with no data — every car sat still until real time caught up (~10 s, Austin 2026).
+          ptRef.current = Math.max(latest - DELAY_MS, buf[0].t);
         } else {
-          // Advance the render clock at EXACTLY real time — NEVER correct its rate. Playback
-          // speed is therefore perfectly constant; interpolation between the bracketing
-          // frames absorbs all network jitter. (This is "renderTime = clock − delay", but
-          // driven by a monotonic timer and anchored to the data's own timestamps, so a
-          // skewed system clock can't break it.) If we catch up to the newest frame because
-          // data stalled, hold there instead of jumping backwards.
-          ptRef.current += dt;
+          // Advance the render clock at real time, interpolation between the bracketing frames
+          // absorbing network jitter. (This is "renderTime = clock − delay", but driven by a
+          // monotonic timer and anchored to the data's own timestamps, so a skewed system clock
+          // can't break it.) The one exception: started well short of the delay (above), play
+          // at 90% until there's a cushion again — at full speed the dots would reach the newest
+          // frame before each poll and stop. Well short, not just short: in normal running the
+          // lead swings ~17-20 s as each poll lands, and that must not change the speed. If we
+          // catch up because data stalled, hold there instead of jumping backwards.
+          ptRef.current += latest - ptRef.current < DELAY_MS - 6000 ? dt * 0.9 : dt;
           if (ptRef.current > latest) ptRef.current = latest;
         }
         const pt = ptRef.current;
