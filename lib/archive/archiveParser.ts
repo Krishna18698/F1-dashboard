@@ -562,6 +562,8 @@ export interface F1LiveRow {
   prev_best_compound?: string | null;
   retired: boolean;
   knocked_out: boolean;
+  /** Crossed the line after the chequered flag (practice/quali; feed line Status bit 1024). */
+  took_flag: boolean;
   grid: number;
   stints: { compound: string; laps: number; age: number; isNew: boolean; segment: number | null }[];
   weekendTyresLeft: { compound: string; left: number }[];
@@ -1012,6 +1014,7 @@ export async function getF1LiveState(
       })(),
       retired: Boolean(t.Retired || t.Stopped),
       knocked_out: Boolean(t.KnockedOut),
+      took_flag: (Number(t.Status ?? 0) & 1024) !== 0,
       grid: Number((appState[numStr]?.GridPos as string | number) ?? 0),
       stints,
       weekendTyresLeft: weekendMap[numStr] ?? DRY_COMPOUNDS.map((c) => ({ compound: c, left: WEEKEND_ALLOCATION[c] })),

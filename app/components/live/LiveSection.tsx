@@ -365,16 +365,17 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
               the card collapsed to sector times the timing board already carries in its own
               S1/S2/S3 columns — an near-empty panel restating what's beside it. Selecting a
               driver still highlights their row; there's just no card. */}
-          {/* Sectors on this card are quali-only: they're how a qualifying lap is read,
-              whereas a race is about gaps and strategy — there the card is telemetry alone. */}
+          {/* Sectors on this card everywhere but the race: they're how a lap is read in
+              qualifying and practice alike, whereas a race is about gaps and strategy — there
+              the card is telemetry alone. */}
           {selected != null && !mapUnavailable && (
             <TelemetryCard
               num={selected}
               driver={s.drivers.get(selected)}
               onClose={() => setSelected(null)}
-              sectors={s.mode === "quali" ? s.sectors?.get(selected) : undefined}
+              sectors={s.mode !== "race" ? s.sectors?.get(selected) : undefined}
               lapResets={s.lapResets}
-              sectorEvents={s.mode === "quali" ? s.sectorEvents : undefined}
+              sectorEvents={s.mode !== "race" ? s.sectorEvents : undefined}
             />
           )}
           {/* Absorbs the column's spare height, and gives it back when the telemetry card
@@ -413,6 +414,7 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
           qualifyingSegmentEnded={s.qualifyingSegmentEnded}
           nextQualifyingSegmentInMs={s.nextQualifyingSegmentInMs}
           knockedOut={s.knockedOut}
+          tookFlag={s.tookFlag}
           suspended={s.sessionStatus === "Aborted" || s.startSuspended}
           restartAtMs={s.suspendedRestartMs}
           formationLap={s.formationLap}

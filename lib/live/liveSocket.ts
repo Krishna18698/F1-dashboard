@@ -224,6 +224,7 @@ export interface F1LiveRow {
   prev_best_compound?: string | null;
   retired: boolean; // crashed / DNF (feed Retired or Stopped)
   knocked_out: boolean; // eliminated in a prior quali segment (feed KnockedOut)
+  took_flag: boolean; // crossed the line after the chequered flag (practice/quali; feed line Status bit 1024)
   grid: number; // starting grid position (0 = unknown) — for gained/lost indicator
   stints: { compound: string; laps: number; age: number; isNew: boolean; segment: number | null }[]; // full tyre history (strategy bar)
   weekendTyresLeft: { compound: string; left: number }[]; // fresh sets left vs. the weekend allocation
@@ -539,6 +540,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
       last: number | null;
       tyreLaps: number;
       stints: F1LiveRow["stints"];
+      tookFlag: boolean;
     }>;
   }[] = [];
   /**
@@ -1426,6 +1428,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
         Retired?: boolean;
         Stopped?: boolean;
         KnockedOut?: boolean;
+        Status?: number;
         Sectors?: {
           Value?: string;
           PreviousValue?: string;
@@ -1460,6 +1463,11 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
         })(),
         retired: Boolean(t.Retired || t.Stopped),
         knocked_out: Boolean(t.KnockedOut),
+        // F1 sets this bit on a car's line as it crosses after the chequered flag (each
+        // qualifying segment's too), and clears it before the next segment starts. Measured on
+        // Madrid qualifying and Bahrain FP3 2026: every car that crossed after the flag got it,
+        // cars already in the pits did not.
+        took_flag: ((t.Status ?? 0) & 1024) !== 0,
         grid: Number((app[n] as { GridPos?: string | number })?.GridPos ?? 0),
         stints: clampStintsToLaps(allStints(n), numberOfLaps, Boolean(t.InPit)),
         weekendTyresLeft: DRY_COMPOUNDS.map((c) => ({ compound: c, left: WEEKEND_ALLOCATION[c] })), // filled in below
@@ -1666,6 +1674,8 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
             last: r.last,
             tyreLaps: r.tyre_laps,
             stints: r.stints,
+            // As the car reaches the line on the map, not ~20s before.
+            tookFlag: r.took_flag,
           };
         }
         orderHistory.push({ t: now, order: [...order], currentLap: outLap, trackStatus: outTrack, by });
@@ -1698,6 +1708,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
             r.last = v.last;
             r.tyre_laps = v.tyreLaps;
             r.stints = v.stints;
+            r.took_flag = v.tookFlag;
           }
         }
       }

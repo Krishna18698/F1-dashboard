@@ -23,6 +23,7 @@ interface ApiRow {
   prev_best_compound?: string | null;
   retired?: boolean;
   knocked_out?: boolean;
+  took_flag?: boolean;
   grid?: number;
   stints?: { compound: string; laps: number; age: number; isNew: boolean; segment: number | null }[];
   weekendTyresLeft?: { compound: string; left: number }[];
@@ -126,6 +127,7 @@ function toState(r: ApiResponse): LiveState {
   const inPit = new Set<number>();
   const retired = new Set<number>();
   const knockedOut = new Set<number>();
+  const tookFlag = new Set<number>();
   const laps = new Map<number, LapSummary>();
   for (const [numStr, row] of Object.entries(r.rows ?? {})) {
     const num = +numStr;
@@ -134,6 +136,7 @@ function toState(r: ApiResponse): LiveState {
     tyreLaps.set(num, row.tyre_laps ?? 0);
     if (row.retired) retired.add(num);
     if (row.knocked_out) knockedOut.add(num);
+    if (row.took_flag) tookFlag.add(num);
     // Full history from the token feed; otherwise synthesize one stint from the current tyre.
     tyreStints.set(
       num,
@@ -213,6 +216,7 @@ function toState(r: ApiResponse): LiveState {
     inPit,
     retired,
     knockedOut,
+    tookFlag,
     locations: new Map(),
     laps,
     trace: [],

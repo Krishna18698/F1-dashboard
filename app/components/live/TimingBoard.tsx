@@ -90,6 +90,7 @@ export default function TimingBoard({
   nextQualifyingSegmentInMs,
   sprintQuali,
   knockedOut,
+  tookFlag,
   suspended,
   restartAtMs,
   formationLap,
@@ -123,6 +124,8 @@ export default function TimingBoard({
   nextQualifyingSegmentInMs?: number | null;
   sprintQuali?: boolean;
   knockedOut?: Set<number>;
+  /** Practice/quali: crossed the line after the chequered flag (F1's own per-car flag). */
+  tookFlag?: Set<number>;
   /** Race is red-flagged and stopped (F1 SessionStatus "Aborted"). */
   suspended?: boolean;
   /** Announced restart instant, epoch ms — drives the countdown while suspended. */
@@ -177,8 +180,10 @@ export default function TimingBoard({
   // driver rather than from the session ending, because they cross over ~a minute and the board
   // should show each one as it happens. Guarded on a real totalLaps: it is 0 until F1 publishes
   // LapCount, and 0 >= 0 would flag the whole grid as finished before the race had begun.
+  // Practice and qualifying have no distance: there it's F1's own flag on each car as it crosses
+  // after the chequered flag (each qualifying segment's too — cleared as the next one starts).
   const finished = (num: number) =>
-    isRace && (totalLaps ?? 0) > 0 && (laps.get(num)?.count ?? 0) >= (totalLaps as number);
+    isRace ? (totalLaps ?? 0) > 0 && (laps.get(num)?.count ?? 0) >= (totalLaps as number) : !!tookFlag?.has(num);
   // The header row and each driver row are SEPARATE grids, so `auto` columns size themselves
   // independently — the narrow "S1" header ended up a different width from the "30.609"
   // beneath it and the columns visibly failed to line up. Fixed widths make both grids agree.

@@ -73,6 +73,7 @@ export interface LiveState {
   inPit?: Set<number>; // drivers currently in the pit lane
   retired?: Set<number>; // crashed / DNF drivers
   knockedOut?: Set<number>; // eliminated in a prior quali segment
+  tookFlag?: Set<number>; // crossed the line after the chequered flag (practice/quali)
   locations: Map<number, LocationRow>;
   frames?: PosFrame[]; // recent position window for smooth playback
   laps: Map<number, LapSummary>;
