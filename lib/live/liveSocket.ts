@@ -23,7 +23,7 @@ import WsImpl from "ws";
 import zlib from "zlib";
 import { DRY_COMPOUNDS, flatSessions, parseLapTime, weekendTyresLeftForMeeting, WEEKEND_ALLOCATION } from "../archive/archiveParser";
 import { decodeTokenExpiry, looksLikeJwt } from "../tokenExpiry";
-import { getNextRace, withinFeedWindow } from "../jolpica";
+import { getNextRace, weekendSessions, withinFeedWindow } from "../jolpica";
 
 const g = globalThis as unknown as { WebSocket?: unknown };
 if (typeof g.WebSocket === "undefined") g.WebSocket = WsImpl;
@@ -456,7 +456,14 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
    *  fresh connection where bestSectorOf only knows the laps this process happened to see. */
   let stats: Record<string, Dict> = {};
   let drivers: Record<string, RawDriver> = {};
+  // What the app treats as the session: the hub's SessionInfo, or a corrected copy when it
+  // describes a different session from the one running (see relabel).
   let sessionInfo: SessionInfo | null = null;
+  // SessionInfo exactly as F1 sent it.
+  let hubSessionInfo: SessionInfo | null = null;
+  // The weekend schedule's name for a relabelled session, keyed by the start it was matched to.
+  let scheduledLabel: { started: number; name: string; type: string } | null = null;
+  let scheduleLookupFor: number | null = null;
   let sessionStatus: { Status?: string } | null = null;
   let frameBuffer: PosFrame[] = [];
   const recentFrames = () => {
@@ -601,8 +608,61 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
       telBuffer = [];
       endedAt = null;
       sawLive = false;
+      scheduledLabel = null;
+      scheduleLookupFor = null;
     }
-    sessionInfo = info;
+    hubSessionInfo = info;
+    relabel();
+  }
+
+  /**
+   * F1's hub can carry one session under ANOTHER session's SessionInfo. Mexico City FP3 2026
+   * ran with SessionInfo saying "Race" — the next afternoon's start, path and key — while
+   * everything else was FP3: SessionStatus "Started" at 17:32Z, a 60-minute clock, FP3's Race
+   * Control messages and timing. Taken as given, that was a race that hadn't started: the app
+   * sat idle through a running session (locally and in production), and at FP3's flag it would
+   * have read "the Grand Prix is over" — stored FP3's order as the race result and flipped the
+   * hero to the next round.
+   *
+   * So when F1's own StatusSeries has a session starting hours before SessionInfo's start, and
+   * that session is running or has just finished, SessionInfo is describing the wrong one. The
+   * start then is the real one, the type comes from the data (a qualifying segment, a lap count,
+   * else practice) and the name from the weekend's schedule — the session scheduled nearest that
+   * start. Meeting, path and key stay as F1 sent them.
+   */
+  function relabel() {
+    const hub = hubSessionInfo;
+    sessionInfo = hub;
+    if (!hub?.StartDate || sessionStartedTs == null) return;
+    const off = offsetMs(hub.GmtOffset);
+    const labelledStart = Date.parse(hub.StartDate + "Z") - off;
+    const started = sessionStartedTs;
+    const status = (sessionStatus?.Status ?? "").toLowerCase();
+    const running = status === "started" || status === "aborted";
+    const justFinished = sessionFinishedTs != null && sessionFinishedTs > started;
+    const mislabelled = labelledStart - started > 2 * 3600_000 && Date.now() - started < 4 * 3600_000 && (running || justFinished);
+    if (!mislabelled) return;
+    const named = scheduledLabel?.started === started ? scheduledLabel : null;
+    const type = named?.type ?? ((qualifyingPart ?? 0) > 0 ? "Qualifying" : lapCount?.TotalLaps ? "Race" : "Practice");
+    sessionInfo = { ...hub, Name: named?.name ?? type, Type: type, StartDate: new Date(started + off).toISOString().slice(0, 19), EndDate: undefined };
+    if (!named && scheduleLookupFor !== started) void nameFromSchedule(started);
+  }
+
+  async function nameFromSchedule(started: number) {
+    scheduleLookupFor = started;
+    try {
+      const race = await getNextRace();
+      let best: { label: string; off: number } | null = null;
+      for (const w of race ? weekendSessions(race) : []) {
+        const d = Math.abs(Date.parse(w.iso) - started);
+        if (!best || d < best.off) best = { label: w.label, off: d };
+      }
+      // Within the window a delayed start could plausibly move it; otherwise keep the type.
+      if (!best || best.off > 45 * 60_000) return;
+      const type = best.label.includes("Practice") ? "Practice" : best.label.includes("Qualifying") ? "Qualifying" : "Race";
+      scheduledLabel = { started, name: best.label, type };
+      relabel();
+    } catch {}
   }
 
   function pushFrames(payload: string) {
@@ -937,6 +997,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
     } else if (topic === "CarData.z") {
       applyCarData(data as string);
     }
+    if (topic === "SessionData" || topic === "SessionStatus" || topic === "LapCount") relabel();
   }
 
   function applySnapshot(snap: Record<string, unknown>) {
@@ -958,6 +1019,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
     if (snap.ExtrapolatedClock) applyFeed("ExtrapolatedClock", snap.ExtrapolatedClock);
     if (snap["Position.z"]) pushFrames(snap["Position.z"] as string);
     if (snap["CarData.z"]) applyCarData(snap["CarData.z"] as string);
+    relabel();
   }
 
   /**
