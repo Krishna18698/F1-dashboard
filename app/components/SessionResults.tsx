@@ -24,9 +24,11 @@ const RESULT_TTL = 24 * 60 * 60 * 1000; // keep the result bar for 24h after the
 // Renderable only if it's a live result, or a completed one dated within the last 24h.
 // Anything else renders NOTHING (not a placeholder) → the bar never flashes in and
 // collapses out on reload, which was sliding the page.
+// A complete result must also have ENDED: one stamped with a future end was an exercise F1 ran
+// under a race that hadn't happened, and — saved in the browser — outranked every real result.
 const showable = (d: Res | null): d is Res & { top: Row[] } =>
   !!d && d.status !== "off" && !!d.top?.length &&
-  (d.complete === false || (!!d.endedAtMs && Date.now() <= d.endedAtMs + RESULT_TTL));
+  (d.complete === false || (!!d.endedAtMs && Date.now() <= d.endedAtMs + RESULT_TTL && d.endedAtMs <= Date.now() + 5 * 60_000));
 
 function Item({ d, isRace }: { d: Row; isRace: boolean }) {
   // F1 fills the LEADER's gap with the lap number ("LAP 1") — not a gap. The leader shows
@@ -55,7 +57,12 @@ const CACHE_KEY = "pitwall:lastResult";
  * `>=` rather than `>` so a live session, whose endedAtMs is its fixed scheduled end, still
  * updates itself as laps come in.
  */
-const fresher = (next: Res, prev: Res | null) => !prev || (next.endedAtMs ?? 0) >= (prev.endedAtMs ?? 0);
+// The same session is always an update, whatever its end time says: that can move while it
+// runs (a session F1's feed had under another session's name ended up with an estimated end
+// later than its real one), and `>=` then refused its final result, leaving the bar on
+// "· LIVE" with a mid-session order until the next session started.
+const fresher = (next: Res, prev: Res | null) =>
+  !prev || next.session_name === prev.session_name || (next.endedAtMs ?? 0) >= (prev.endedAtMs ?? 0);
 
 export default function SessionResults() {
   const [r, setR] = useState<Res | null>(null);
@@ -140,6 +147,8 @@ export default function SessionResults() {
   // placeholder, so the bar can't flash in and collapse out (that slid the page).
   if (!showable(r)) return null;
   const isRace = r.mode === "race";
+  // In classification order, whatever order it arrived (or was cached) in.
+  const top = [...r.top].sort((a, b) => a.pos - b.pos);
   // Slower for longer grids; one full loop ≈ 2.4s per entry.
   const duration = Math.max(20, r.top.length * 2.4);
 
@@ -164,7 +173,7 @@ export default function SessionResults() {
         <div className="ticker-track" style={{ animationDuration: `${duration}s` }}>
           {[0, 1].map((copy) => (
             <span key={copy} className="inline-flex shrink-0" aria-hidden={copy === 1}>
-              {r.top.map((d) => (
+              {top.map((d) => (
                 <Item key={`${copy}-${d.pos}-${d.tla}`} d={d} isRace={isRace} />
               ))}
             </span>

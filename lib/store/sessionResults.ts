@@ -54,7 +54,9 @@ export async function getLatestSessionResult(): Promise<StoredSession | null> {
   const c = storeConfig();
   if (!c) return null;
   try {
-    const res = await fetch(`${c.url}/rest/v1/${TABLE}?select=*&order=ended_at.desc&limit=1`, {
+    // Only sessions that have ended: a row stamped with a future end (a finished result can't
+    // have one — see socketResults) would otherwise outrank every real session until then.
+    const res = await fetch(`${c.url}/rest/v1/${TABLE}?select=*&ended_at=lte.${Date.now()}&order=ended_at.desc&limit=1`, {
       headers: storeHeaders(c.key),
       cache: "no-store",
     });

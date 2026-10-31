@@ -1101,17 +1101,11 @@ export async function getF1LiveState(
   // Formation lap: after the anchor (which already backs off from SessionStatus:"Started"
   // to include it) but before the race has actually gone green — races only.
   const formationLap = m === "race" && s.sessionStartedTs != null && infoUptoMs < s.sessionStartedTs;
+  // F1's own classification, in every session — see the same order in liveSocket.ts: sorting
+  // qualifying by best lap compared one segment's times with another's.
   const order = Object.keys(rows)
     .map(Number)
-    .sort((a, b) => {
-      if (m === "race") return rows[a].position - rows[b].position;
-      const ba = rows[a].best ?? Infinity;
-      const bb = rows[b].best ?? Infinity;
-      // See the identical guard in liveSocket.ts: Infinity - Infinity is NaN, and a NaN
-      // comparator leaves every yet-to-set-a-time driver in arbitrary order. Tie on position.
-      if (ba === bb) return rows[a].position - rows[b].position;
-      return ba - bb;
-    });
+    .sort((a, b) => rows[a].position - rows[b].position);
 
   let latest: PosFrame | undefined;
   for (const f of s.frames) {

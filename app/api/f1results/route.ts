@@ -66,11 +66,23 @@ const STALE_TOLERANCE_MS = 5 * 60_000;
  * were the final classification. While a session is live the socket answers directly anyway, so
  * nothing is lost by waiting for the flag.
  */
+/**
+ * "Finished", with an end time still to come: not a result. The socket refuses a session that
+ * hasn't started (an exercise F1 ran under the Mexico City race the evening before came out as
+ * that race's result), and this keeps any other path to the same mistake off the ticker.
+ */
+function finishedInFuture(r: { complete?: boolean; endedAtMs?: number }): boolean {
+  return r.complete === true && r.endedAtMs != null && r.endedAtMs > Date.now();
+}
+
 async function capture(
   r: { session_name: string; mode: "race" | "quali" | "practice"; top: StoredSessionRow[]; endedAtMs?: number },
   complete: boolean,
 ): Promise<void> {
   if (!complete || !r.top.length || r.endedAtMs == null || saved.has(r.session_name)) return;
+  // A finished session ends in the past. One that "ends" tomorrow isn't a result (see
+  // finishedInFuture), and stored it would shadow every real session until then.
+  if (r.endedAtMs > Date.now()) return;
   const ok = await saveSessionResult({
     session_name: r.session_name,
     mode: r.mode,
@@ -91,7 +103,8 @@ export async function GET() {
       return Response.json({ status: "ok", ...openF1, live: false, complete: true });
     }
 
-    const result = await liveSocketResults();
+    const socket = await liveSocketResults();
+    const result = socket && !finishedInFuture(socket) ? socket : null;
     if (result) {
       // A completed qualifying snapshot from the live hub can still contain the last
       // qualifying segment's intermediate order. Prefer a completed independent

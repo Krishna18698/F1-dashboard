@@ -1488,17 +1488,12 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
         fastestLap = { driver_number: +n, tla: drivers[n]?.Tla ?? String(n), time: t.BestLapTime.Value, lap: Number(t.BestLapTime.Lap ?? 0) };
       }
     }
-    const order = nums.map(Number).sort((a, b) => {
-      if (mode === "race") return rows[a].position - rows[b].position;
-      const ba = rows[a].best ?? Infinity;
-      const bb = rows[b].best ?? Infinity;
-      // Two drivers with no time yet both map to Infinity, and Infinity - Infinity is NaN —
-      // a comparator returning NaN leaves the sort in engine-defined (effectively arbitrary)
-      // order. That's the WHOLE grid for the first minutes of any practice/quali session, so
-      // the board opened scrambled rather than in track order. Break ties on position.
-      if (ba === bb) return rows[a].position - rows[b].position;
-      return ba - bb;
-    });
+    // F1's own classification, in every session. Practice and qualifying used to be sorted by
+    // best lap, but in qualifying BestLapTime is the CURRENT segment's best, so a Q1 time and a
+    // Q2 time were compared as equals: Mexico City 2026 put ALB (out in Q1, 1:18.630) above SAI
+    // (out in Q2, 1:18.885), and the result read P15, P17, P16. F1's Position already ranks
+    // each segment's runners above those knocked out before it.
+    const order = nums.map(Number).sort((a, b) => rows[a].position - rows[b].position);
     return { nums, mode, rows, order, fastestLap };
   }
 
@@ -2051,6 +2046,13 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
     if (!(await ensureConnection())) return null;
     await refreshIfStale();
     if (!sessionInfo) return null;
+    // A session that hasn't started has no result, whatever its feed carries. The evening before
+    // the Mexico City race, F1 ran an exercise under that race's session (Race Control: "MEDICAL
+    // INTERVENTION EXERCISE") with a full classification and a finished status. It was served as
+    // "Mexico City Grand Prix · Race · RESULT" a day early, stored, and — stamped with the
+    // race's own end time, tomorrow — held the hero ticker until then.
+    const startMs = sessionInfo.StartDate ? Date.parse(sessionInfo.StartDate + "Z") - offsetMs(sessionInfo.GmtOffset) : NaN;
+    if (Number.isFinite(startMs) && Date.now() < startMs - PRE_START_LIVE_MS) return null;
     const { nums, mode, rows, order } = classify();
     if (!nums.length) return null;
     const runningNow = liveNow();
@@ -2069,9 +2071,11 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
     const off = offsetMs(sessionInfo.GmtOffset);
     const endedAtMs = sessionInfo.EndDate
       ? Date.parse(sessionInfo.EndDate + "Z") - off
-      : sessionInfo.StartDate
-        ? Date.parse(sessionInfo.StartDate + "Z") - off + 9_000_000 // ~2.5h after start if no EndDate
-        : undefined;
+      : complete && sessionFinishedTs != null
+        ? sessionFinishedTs // no scheduled end (a relabelled session): F1's own flag time
+        : sessionInfo.StartDate
+          ? Date.parse(sessionInfo.StartDate + "Z") - off + 9_000_000 // ~2.5h after start if no EndDate
+          : undefined;
     // A classification is only a result once every car in it has a name. On a fresh
     // connection — every cold serverless request — TimingData can land before DriverList,
     // and falling back to the car number put "12", "1", "4" on the hero ticker for a poll
