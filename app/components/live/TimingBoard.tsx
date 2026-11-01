@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import FastestLapIcon from "./FastestLapIcon";
 import { Driver, IntervalRow, LapSummary } from "@/lib/timingTypes";
 import { SessionMode } from "./liveTypes";
 import { formatDelta, formatGap, formatInterval, formatLap, hex } from "@/lib/format";
@@ -91,6 +92,7 @@ export default function TimingBoard({
   sprintQuali,
   knockedOut,
   tookFlag,
+  fastestLapNum,
   suspended,
   restartAtMs,
   formationLap,
@@ -126,6 +128,8 @@ export default function TimingBoard({
   knockedOut?: Set<number>;
   /** Practice/quali: crossed the line after the chequered flag (F1's own per-car flag). */
   tookFlag?: Set<number>;
+  /** Race: who holds the fastest lap — the stopwatch beside their name, as F1 TV's tower shows. */
+  fastestLapNum?: number | null;
   /** Race is red-flagged and stopped (F1 SessionStatus "Aborted"). */
   suspended?: boolean;
   /** Announced restart instant, epoch ms — drives the countdown while suspended. */
@@ -354,6 +358,7 @@ export default function TimingBoard({
                   <span className={`shrink-0 text-sm font-semibold ${inDanger ? "text-red" : ""}`}>
                     {d?.name_acronym ?? num}
                   </span>
+                  {isRace && fastestLapNum === num && <FastestLapIcon />}
                   {/* From 28rem of board; with sectors, they take that room back at 35rem until
                       there's enough again at 40rem ("Red Bull Racing" needs ~90px). */}
                   <span

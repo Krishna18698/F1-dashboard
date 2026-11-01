@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import FastestLapIcon from "./FastestLapIcon";
 import { Driver, IntervalRow, LapSummary } from "@/lib/timingTypes";
 import { formatGap, formatInterval, formatLap, hex } from "@/lib/format";
 import { shownStints, type Stint } from "./tyreStints";
@@ -158,6 +159,13 @@ export default function TyreTracker({
   const mini = view === "minisectors";
 
   const shown = new Map(order.map((n) => [n, shownStints(stints.get(n) ?? [])]));
+  // The fastest lap in seconds ("1:20.797" → 80.797), to tell whether a LAST time is that lap.
+  const fastestSecs = (() => {
+    const p = fastestLap?.time?.split(":");
+    if (!p) return null;
+    const v = p.length === 2 ? +p[0] * 60 + +p[1] : +p[0];
+    return Number.isFinite(v) && v > 0 ? v : null;
+  })();
   const maxRun = Math.max(1, ...order.map((n) => sumOf(shown.get(n) ?? [])));
   const scaleMax = Math.max(totalLaps, maxRun, 1);
   const pct = (laps: number) => (laps / scaleMax) * 100;
@@ -221,10 +229,15 @@ export default function TyreTracker({
 
           <div className="mt-1 space-y-1">
             {order.map((num, i) => {
+              // Purple only on the lap that IS the fastest: on every lap after it the holder's
+              // LAST is an ordinary lap, and the stopwatch beside the name carries who holds it
+              // (as on F1 TV's tower).
               const d = drivers.get(num);
               const pos = positions.get(num) ?? i + 1;
               const isP1 = pos === 1;
               const isFastest = num === fastestLap?.driver_number;
+              const last = laps.get(num)?.last;
+              const lastIsFastest = isFastest && last != null && fastestSecs != null && Math.abs(last - fastestSecs) < 0.0005;
               const isOut = retired?.has(num);
               const list = shown.get(num) ?? [];
               let cum = 0;
@@ -239,9 +252,10 @@ export default function TyreTracker({
                     {pos}
                   </span>
                   <Delta grid={grids?.get(num) ?? 0} pos={pos} />
-                  <div className="flex w-16 shrink-0 items-center gap-1.5 sm:w-24">
+                  <div className="flex w-16 shrink-0 items-center gap-1 sm:w-24 sm:gap-1.5">
                     <span className="h-4 w-1 shrink-0 rounded-full" style={{ backgroundColor: hex(d?.team_colour) }} />
-                    <span className="truncate text-sm font-semibold">{d?.name_acronym ?? num}</span>
+                    <span className="shrink-0 text-sm font-semibold">{d?.name_acronym ?? num}</span>
+                    {isFastest && <FastestLapIcon />}
                   </div>
                   <span className="tnum hidden w-14 shrink-0 text-right font-mono text-xs font-semibold sm:block">
                     {isOut ? "DNF" : formatGap(intervals.get(num), isP1)}
@@ -251,10 +265,10 @@ export default function TyreTracker({
                   </span>
                   <span
                     className={`tnum hidden w-14 shrink-0 text-right font-mono text-xs sm:block ${
-                      isFastest ? "font-bold text-[#d84bff]" : "text-white/80"
+                      lastIsFastest ? "font-bold text-[#d84bff]" : "text-white/80"
                     }`}
                   >
-                    {formatLap(laps.get(num)?.last) || "—"}
+                    {formatLap(last) || "—"}
                   </span>
                   {mini ? (
                     <MiniSectors sectors={sectors?.get(num)} />

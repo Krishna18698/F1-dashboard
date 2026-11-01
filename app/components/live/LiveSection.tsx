@@ -415,6 +415,7 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
           nextQualifyingSegmentInMs={s.nextQualifyingSegmentInMs}
           knockedOut={s.knockedOut}
           tookFlag={s.tookFlag}
+          fastestLapNum={s.fastestLap?.driver_number ?? null}
           suspended={s.sessionStatus === "Aborted" || s.startSuspended}
           restartAtMs={s.suspendedRestartMs}
           formationLap={s.formationLap}

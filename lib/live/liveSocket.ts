@@ -531,6 +531,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
     order: number[];
     currentLap: number;
     trackStatus: string | null;
+    fastestLap: FastestLap | null;
     by: Record<number, {
       position: number;
       gap: string;
@@ -1638,6 +1639,9 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
     // note above), and tyre stints stay live too — they turn over at a pit stop, which the
     // board already signals through `in_pit`.
     let outOrder = order;
+    // With the order, so the fastest lap changes hands as the car on the map finishes it — the
+    // same instant its purple time appears in the Tyre Tracker's LAST column.
+    let outFastest = fastestLap;
     let outLap = Number(lapCount?.CurrentLap ?? 0);
     let outTrack = trackStatus?.Status ?? null;
     {
@@ -1673,7 +1677,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
             tookFlag: r.took_flag,
           };
         }
-        orderHistory.push({ t: now, order: [...order], currentLap: outLap, trackStatus: outTrack, by });
+        orderHistory.push({ t: now, order: [...order], currentLap: outLap, trackStatus: outTrack, fastestLap, by });
         const cutoff = now - BUFFER_MS;
         if (orderHistory.length > 20 && orderHistory[0].t < cutoff) {
           orderHistory = orderHistory.filter((h) => h.t >= cutoff);
@@ -1692,6 +1696,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
           outOrder = pick.order.filter((n) => rows[n]);
           outLap = pick.currentLap;
           outTrack = pick.trackStatus;
+          outFastest = pick.fastestLap;
           for (const [k, v] of Object.entries(pick.by)) {
             const r = rows[+k];
             if (!r) continue;
@@ -1719,7 +1724,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
       frames: recentFrames(),
       totalLaps: mode === "race" ? Number(lapCount?.TotalLaps ?? 0) : 0,
       currentLap: outLap,
-      fastestLap,
+      fastestLap: outFastest,
       trackStatus: outTrack,
       sessionStatus: sessionStatus?.Status ?? null,
       suspendedRestartMs: restartAtMs(),
