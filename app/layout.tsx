@@ -1,32 +1,42 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, JetBrains_Mono, Playfair_Display } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { Analytics } from "@vercel/analytics/next";
 import VersionWatcher from "./components/VersionWatcher";
 
-const geistSans = Geist({
+// Fonts are served from the repo (app/fonts, latin subset, variable WOFF2 — their OFL licences
+// alongside), not fetched from Google at build time. That fetch made builds and dev compiles
+// fail intermittently ("next/font/google queries have exactly one entry", Nov 2026), and it
+// tied every build to Google being reachable. Same families, weights and CSS variables.
+const geistSans = localFont({
+  src: "./fonts/geist-latin.woff2",
   variable: "--font-geist-sans",
-  subsets: ["latin"],
+  weight: "100 900",
 });
 
-const geistMono = Geist_Mono({
+const geistMono = localFont({
+  src: "./fonts/geist-mono-latin.woff2",
   variable: "--font-geist-mono",
-  subsets: ["latin"],
+  weight: "100 900",
+  adjustFontFallback: false,
 });
 
 // Timing numbers (lap times, sectors, gaps, countdowns). JetBrains Mono has squarer,
 // more legible figures than Geist Mono at small sizes, which suits a timing screen.
-const timing = JetBrains_Mono({
+const timing = localFont({
+  src: "./fonts/jetbrains-mono-latin.woff2",
   variable: "--font-timing",
-  subsets: ["latin"],
-  weight: ["400", "500", "700"],
+  weight: "400 700",
+  adjustFontFallback: false,
 });
 
-const display = Playfair_Display({
+const display = localFont({
+  src: [
+    { path: "./fonts/playfair-display-latin.woff2", weight: "600 900", style: "normal" },
+    { path: "./fonts/playfair-display-latin-italic.woff2", weight: "600 900", style: "italic" },
+  ],
   variable: "--font-display",
-  subsets: ["latin"],
-  style: ["normal", "italic"],
-  weight: ["600", "700", "800", "900"],
+  adjustFontFallback: "Times New Roman",
 });
 
 export const metadata: Metadata = {
