@@ -93,6 +93,7 @@ export default function TimingBoard({
   knockedOut,
   tookFlag,
   fastestLapNum,
+  className,
   suspended,
   restartAtMs,
   formationLap,
@@ -130,6 +131,8 @@ export default function TimingBoard({
   tookFlag?: Set<number>;
   /** Race: who holds the fastest lap — the stopwatch beside their name, as F1 TV's tower shows. */
   fastestLapNum?: number | null;
+  /** Extra classes on the board's root (its place in the parent layout). */
+  className?: string;
   /** Race is red-flagged and stopped (F1 SessionStatus "Aborted"). */
   suspended?: boolean;
   /** Announced restart instant, epoch ms — drives the countdown while suspended. */
@@ -208,7 +211,7 @@ export default function TimingBoard({
   // failed to bottom out together. The rows below carry `grow`, so that slack is shared
   // evenly across all 20-odd of them instead of pooling as dead space under the last one.
   return (
-    <div className="@container flex min-h-0 flex-1 flex-col">
+    <div className={`@container flex min-h-0 flex-1 flex-col ${className ?? ""}`}>
       <div className="mb-2 flex items-center gap-2">
         <span className="eyebrow block text-[0.6rem] text-muted">
           Driver Live <span className="text-red">Tracker</span>
@@ -355,9 +358,26 @@ export default function TimingBoard({
                   <span className="h-4 w-1 shrink-0 rounded-full" style={{ backgroundColor: hex(d?.team_colour) }} />
                   {/* Three letters, never cut. The team name is the one that gives way: shown only
                       where it has room, rather than squeezed to "Red …". */}
-                  <span className={`shrink-0 text-sm font-semibold ${inDanger ? "text-red" : ""}`}>
-                    {d?.name_acronym ?? num}
-                  </span>
+                  {/* The row is clickable for a mouse; this is the same selection as a real button,
+                      so it can be reached and toggled by keyboard and is announced as pressed. */}
+                  {onSelect ? (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSelect(isSel ? null : num);
+                      }}
+                      aria-pressed={isSel}
+                      aria-label={`${isSel ? "Stop following" : "Follow"} ${d?.full_name || d?.name_acronym || num}`}
+                      className="shrink-0 rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red"
+                    >
+                      <span className={`text-sm font-semibold ${inDanger ? "text-red" : ""}`}>{d?.name_acronym ?? num}</span>
+                    </button>
+                  ) : (
+                    <span className={`shrink-0 text-sm font-semibold ${inDanger ? "text-red" : ""}`}>
+                      {d?.name_acronym ?? num}
+                    </span>
+                  )}
                   {isRace && fastestLapNum === num && <FastestLapIcon />}
                   {/* From 28rem of board; with sectors, they take that room back at 35rem until
                       there's enough again at 40rem ("Red Bull Racing" needs ~90px). */}

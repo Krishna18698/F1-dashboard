@@ -23,6 +23,10 @@ export interface PosFrame {
 export interface LiveState {
   status: LiveStatus;
   mode: SessionMode;
+  /** When the last poll succeeded (client clock) — drives the "Updated 4s ago" freshness chip. */
+  updatedAt?: number;
+  /** Polls are failing while a session is on screen: the board shown is the last good one. */
+  reconnecting?: boolean;
   sessionRemainingMs?: number | null;
   sessionClockRunning?: boolean | null; // false while F1 holds the session clock (e.g. a red flag)
   replay?: boolean; // true when showing a past session (nothing live right now)

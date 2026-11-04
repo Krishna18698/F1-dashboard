@@ -106,10 +106,11 @@ export async function GET(req: NextRequest) {
 
     if (view === "live") {
       // 1) Visitor's own token — highest priority when supplied. Never logged, never
-      //    persisted; exists only for the duration of this one request (see liveSocket.ts).
+      //    persisted; held only by that visitor's own session (see liveSocket.ts), which serves
+      //    it at the map's instant like the owner's feed.
       const visitorToken = req.headers.get("x-f1-token");
       if (visitorToken) {
-        const result = await liveSocketStateForVisitor(visitorToken);
+        const result = await liveSocketStateForVisitor(visitorToken, asOf);
         if (result.status === "ok") {
           return respond({
             status: "live",

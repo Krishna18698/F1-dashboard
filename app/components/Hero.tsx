@@ -39,7 +39,7 @@ export default function Hero({
 
   const lapRecordContent = record && (
     <>
-      <span className="eyebrow text-[0.55rem] text-white/45">Lap Record</span>
+      <span className="eyebrow text-[0.6rem] text-white/45">Lap Record</span>
       <span className="tnum font-mono text-lg font-bold text-white">{record.time}</span>
       <span className="text-xs text-white/55">
         {record.driver} · {record.year}

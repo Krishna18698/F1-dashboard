@@ -157,7 +157,7 @@ export default function SessionResults() {
       {/* Line 1: session · RESULT */}
       <div className="mb-2 px-6 sm:px-8">
         <span
-          className={`eyebrow inline-block rounded-sm px-2 py-1 text-[0.55rem] font-bold tracking-wide ${
+          className={`eyebrow inline-block rounded-sm px-2 py-1 text-[0.6rem] font-bold tracking-wide ${
             r.live ? "bg-red text-white" : "bg-white/15 text-white/75"
           }`}
         >

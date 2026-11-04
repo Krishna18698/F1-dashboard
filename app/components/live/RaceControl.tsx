@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePolling } from "../usePolling";
 import { trackStatusInfo } from "@/lib/trackStatus";
 import { getPlaybackT } from "./framesStore";
@@ -66,7 +66,34 @@ export default function RaceControl({
   replayT0?: number;
 }) {
   const [data, setData] = useState<RaceControl | null>(null);
-  const [open, setOpen] = useState(false);
+  const [open, setOpenState] = useState(false);
+  // The drawer is a modal dialog: focus moves into it when it opens, Escape closes it, and
+  // focus goes back to whatever opened it — and while closed (merely slid off-screen) it is
+  // inert, so its controls aren't reachable by keyboard.
+  const opener = useRef<HTMLElement | null>(null);
+  const closeBtn = useRef<HTMLButtonElement>(null);
+  const cardBtn = useRef<HTMLButtonElement>(null);
+  const setOpen = (v: boolean) => {
+    if (v) opener.current = document.activeElement as HTMLElement | null;
+    setOpenState(v);
+  };
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (!open) {
+      // Just closed: back to the button that opened it — or, as opening unmounts the floating
+      // card that held it, to the remounted card's own button.
+      if (wasOpen.current) (opener.current?.isConnected ? opener.current : cardBtn.current)?.focus();
+      wasOpen.current = false;
+      return;
+    }
+    wasOpen.current = true;
+    closeBtn.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpenState(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open]);
   // Collapses the floating card down to a small dot — mostly for mobile, where the
   // latest-2 card can sit over other content and gets in the way. Remembered across
   // reloads so minimizing it once actually makes it stop being annoying.
@@ -117,7 +144,7 @@ export default function RaceControl({
         className="carbon-bg fixed bottom-3 right-3 z-40 flex items-center gap-1.5 rounded-full px-3 py-2 shadow-xl ring-1 ring-white/15"
       >
         <span className="h-2 w-2 rounded-full" style={{ backgroundColor: ts.color }} />
-        <span className="eyebrow text-[0.55rem] text-white/70">Race Control</span>
+        <span className="eyebrow text-[0.6rem] text-white/70">Race Control</span>
       </button>
     );
   }
@@ -128,15 +155,15 @@ export default function RaceControl({
       {!open && (
         <div className="carbon-bg fixed bottom-3 right-3 z-40 w-72 max-w-[calc(100vw-1.5rem)] rounded-lg p-3 shadow-xl ring-1 ring-white/15">
           <div className="mb-1 flex items-center justify-between gap-2">
-            <button onClick={() => setOpen(true)} className="flex min-w-0 items-center gap-1.5">
+            <button ref={cardBtn} onClick={() => setOpen(true)} aria-haspopup="dialog" className="flex min-w-0 items-center gap-1.5">
               <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: ts.color }} />
-              <span className="eyebrow text-[0.55rem] text-red">Race Control</span>
+              <span className="eyebrow text-[0.6rem] text-red">Race Control</span>
             </button>
             <div className="flex shrink-0 items-center gap-2.5">
-              <button onClick={() => setOpen(true)} className="text-[0.55rem] text-white/40">
+              <button onClick={() => setOpen(true)} aria-haspopup="dialog" className="text-[0.6rem] text-white/60 hover:text-white">
                 view all →
               </button>
-              <button onClick={() => setMin(true)} aria-label="Minimize Race Control" className="text-white/50 hover:text-white">
+              <button onClick={() => setMin(true)} aria-label="Minimize Race Control" className="-m-1.5 p-1.5 text-base leading-none text-white/60 hover:text-white">
                 −
               </button>
             </div>
@@ -154,15 +181,20 @@ export default function RaceControl({
 
       {/* Drawer */}
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="race-control-title"
+        aria-hidden={!open}
+        inert={!open}
         className={`carbon-bg fixed inset-y-0 right-0 z-50 flex w-80 max-w-[85vw] flex-col shadow-2xl ring-1 ring-white/10 transition-transform duration-300 ${
           open ? "translate-x-0" : "translate-x-full"
         }`}
       >
         <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-          <h3 className="font-display text-lg text-white">
+          <h3 id="race-control-title" className="font-display text-lg text-white">
             Race <span className="italic text-red">Control</span>
           </h3>
-          <button onClick={() => setOpen(false)} className="text-white/60 hover:text-white" aria-label="Close">
+          <button ref={closeBtn} onClick={() => setOpen(false)} className="-m-2 p-2 text-white/60 hover:text-white" aria-label="Close Race Control">
             ✕
           </button>
         </div>

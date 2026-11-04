@@ -89,12 +89,17 @@ function parse(xml: string, source: string, limit: number): IntelItem[] {
   return items;
 }
 
+// Each feed gets this long before the next one is tried, so a slow provider costs at most this
+// much rather than holding the news section open indefinitely.
+const FEED_TIMEOUT_MS = 3_000;
+
 export async function getPaddockIntel(limit = 6): Promise<IntelItem[]> {
   for (const feed of FEEDS) {
     try {
       const res = await fetch(feed.url, {
         next: { revalidate: 1800 },
         headers: { "User-Agent": "Mozilla/5.0 (PitWall F1 Dashboard)" },
+        signal: AbortSignal.timeout(FEED_TIMEOUT_MS),
       });
       if (!res.ok) continue;
       const items = parse(await res.text(), feed.source, limit);

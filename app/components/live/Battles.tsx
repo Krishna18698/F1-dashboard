@@ -45,7 +45,7 @@ export default function Battles({ result, drivers }: { result: BattlesResult; dr
           <p className="py-2 text-center text-xs text-white/55">No one within a second right now.</p>
         ) : (
           <ol className="flex flex-col gap-2">
-            <li className="grid grid-cols-[2.6rem_1fr_3.2rem_1fr_2.6rem] items-center gap-2 text-[0.55rem] font-bold tracking-wider text-white/35">
+            <li className="grid grid-cols-[2.6rem_1fr_3.2rem_1fr_2.6rem] items-center gap-2 text-[0.6rem] font-bold tracking-wider text-white/35">
               <span>CHASING</span>
               <span />
               <span className="text-center">GAP</span>

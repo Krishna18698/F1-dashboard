@@ -12,15 +12,16 @@ export const maxDuration = 20;
 export async function GET(req: NextRequest) {
   try {
     const view = req.nextUrl.searchParams.get("view") === "replay" ? "replay" : "live";
+    // The instant the map is drawing — every view narrates that moment, not the feed's newest.
+    const asOf = Number(req.nextUrl.searchParams.get("asOf")) || undefined;
     // Live view: the socket carries RaceControlMessages untokenised, so prefer it either way —
     // it's real-time, where the static feed lags by hours. Replay deliberately skips it (the
     // socket only ever knows the CURRENT session; a replay needs the archived one).
     if (view === "live") {
-      const socket = await liveSocketRaceControl();
+      const socket = await liveSocketRaceControl(asOf);
       if (socket.available) return Response.json(socket);
     }
     const t0 = Number(req.nextUrl.searchParams.get("t0")) || undefined;
-    const asOf = Number(req.nextUrl.searchParams.get("asOf")) || undefined;
     const instant = await liveArchiveInstant(view, t0, asOf);
     if (!instant) return Response.json({ available: false });
     return Response.json(await liveArchiveRaceControl(instant.path, instant.uptoMs, instant.live));

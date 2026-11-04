@@ -6,12 +6,13 @@ import { SessionMode } from "./liveTypes";
 import { Bounds, computeBounds, project, rotate, tracePath } from "@/lib/geo";
 import { hex } from "@/lib/format";
 import { trackStatusInfo } from "@/lib/trackStatus";
-import { getFrames, resetFrames, setPlaybackT, subscribeFrames, useHasFrames } from "./framesStore";
+import { getFrames, PLAYBACK_DELAY_MS, resetFrames, setPlaybackT, subscribeFrames, useHasFrames } from "./framesStore";
 import { placeCornerLabels } from "./cornerPlacement";
 
 const SIZE = 1000;
 
-const DELAY_MS = 20000; // play back this far behind the latest data → smooth, F1-TV-style
+// Play back this far behind the latest data → smooth, F1-TV-style.
+const DELAY_MS = PLAYBACK_DELAY_MS;
 
 // Heat trail behind the selected car: TRAIL_SEGMENTS pieces, one per TRAIL_STEP_MS of playback,
 // so ~8 s of track. Hot orange at the car, cooling to red and fading out at the tail.

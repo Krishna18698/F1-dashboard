@@ -65,7 +65,7 @@ export default function WeekendSchedule({
         <h3 className="font-display whitespace-nowrap text-xl xl:text-2xl">
           Weekend <span className="italic text-red">Schedule</span>
         </h3>
-        <span className="eyebrow shrink-0 text-[0.55rem] text-muted">Your local time</span>
+        <span className="eyebrow shrink-0 text-[0.6rem] text-muted">Your local time</span>
       </div>
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
@@ -93,7 +93,7 @@ export default function WeekendSchedule({
                 {isLive ? (
                   /* No filled pill here — the pulsing dot is the signal, and it already
                      outranks the flat NEXT chip without competing with it. */
-                  <span className="flex items-center gap-1 text-[0.5rem] font-bold tracking-wide text-white">
+                  <span className="flex items-center gap-1 text-[0.55rem] font-bold tracking-wide text-white">
                     <span className="live-dot h-1.5 w-1.5 rounded-full bg-red" />
                     LIVE
                   </span>
@@ -102,7 +102,7 @@ export default function WeekendSchedule({
                      card and should carry the emphasis. It only drops to the quiet chip while
                      a session IS live, so it doesn't compete with the LIVE dot beside it. */
                   <span
-                    className={`rounded-sm px-1.5 py-0.5 text-[0.5rem] font-bold tracking-wide ${
+                    className={`rounded-sm px-1.5 py-0.5 text-[0.55rem] font-bold tracking-wide ${
                       live ? "bg-white/10 text-white/70 ring-1 ring-white/25" : "bg-red text-white"
                     }`}
                   >

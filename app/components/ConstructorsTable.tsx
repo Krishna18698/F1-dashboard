@@ -62,7 +62,7 @@ export default function ConstructorsTable({
             </div>
             <span className="tnum shrink-0 text-right font-mono text-base font-bold">
               {s.points}
-              <span className="ml-1 text-[0.55rem] font-normal text-muted">PTS</span>
+              <span className="ml-1 text-[0.6rem] font-normal text-muted">PTS</span>
               {gained > 0 && (
                 <span className="tnum block text-right font-mono text-[0.6rem] font-normal text-[#37b24d]">
                   +{gained}

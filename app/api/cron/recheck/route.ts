@@ -25,9 +25,11 @@ export const maxDuration = 30;
  */
 export async function GET(req: NextRequest) {
   // Vercel signs cron invocations with CRON_SECRET. Without this the endpoint would let anyone
-  // trigger a socket connection and a database write.
+  // trigger a socket connection and a database write — so it is required, not optional: with no
+  // secret configured the endpoint refuses everyone rather than opening up. (It is also exempt
+  // from the dashboard's password gate in proxy.ts, which would reject this Bearer header.)
   const secret = process.env.CRON_SECRET?.trim();
-  if (secret && req.headers.get("authorization") !== `Bearer ${secret}`) {
+  if (!secret || req.headers.get("authorization") !== `Bearer ${secret}`) {
     return Response.json({ status: "unauthorized" }, { status: 401 });
   }
   if (!roundStoreConfigured()) return Response.json({ status: "no-store" });

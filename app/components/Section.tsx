@@ -18,7 +18,7 @@ export default function Section({
           {title} {emphasis && <span className="italic text-red">{emphasis}</span>}
         </h3>
         {hint && (
-          <span className="eyebrow hidden shrink-0 text-[0.55rem] text-muted xl:inline">
+          <span className="eyebrow hidden shrink-0 text-[0.6rem] text-muted xl:inline">
             {hint}
           </span>
         )}

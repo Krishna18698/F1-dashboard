@@ -6,10 +6,10 @@
  *  1. The site's own `F1_TV_TOKEN` — ONE persistent, long-lived connection shared by every
  *     visitor (the original design). Holds a continuously-buffered ~3.3 Hz Position.z stream
  *     so the client can play it back on a delay with smooth interpolation.
- *  2. A VISITOR's own token (`liveSocketStateForVisitor`) — a fresh, isolated, short-lived
- *     connection per request: connect, collect a bounded window of updates, return, and
- *     always disconnect. Never shares state with the owner's session or with any other
- *     visitor. The token exists in server memory only for that one request.
+ *  2. A VISITOR's own token (`liveSocketStateForVisitor`) — an isolated session of its own,
+ *     kept open between that visitor's polls so it builds the history synchronized playback
+ *     needs, and closed a minute after their last poll (or when the token expires). Never
+ *     shares state with the owner's session or with any other token.
  *
  * (Persistent connections need a long-running process — great locally / on a persistent
  * host. On stateless serverless the connection can't persist across invocations anyway, so
@@ -21,6 +21,7 @@ import * as signalR from "@microsoft/signalr";
 import { compoundOfLap, previousSegmentBest } from "../bestLapTyre";
 import WsImpl from "ws";
 import zlib from "zlib";
+import { createHash } from "crypto";
 import { DRY_COMPOUNDS, flatSessions, parseLapTime, weekendTyresLeftForMeeting, WEEKEND_ALLOCATION } from "../archive/archiveParser";
 import { decodeTokenExpiry, looksLikeJwt } from "../tokenExpiry";
 import { getNextRace, weekendSessions, withinFeedWindow } from "../jolpica";
@@ -68,9 +69,6 @@ const LIVE_GRACE_MS = 120_000;
 // lost when this lapses — the hero results ticker keeps it for 24h, which is the right home
 // for "what happened earlier"; the live tracker is for what's happening now.
 const SHOW_FINISHED_MAX_MS = 2 * 60_000;
-// A visitor's connection stays open just long enough to catch a few incremental position/
-// telemetry updates beyond the initial snapshot, then always tears down — never held any
-// longer than this per request, regardless of how long the visitor keeps polling.
 /**
  * When the socket to F1 may be OPENED, as a window around each scheduled session.
  *
@@ -137,7 +135,10 @@ async function feedWindowOpen(): Promise<boolean> {
 }
 
 
+// A visitor's first poll waits this long after connecting, so a few incremental position/
+// telemetry updates land beyond the initial snapshot. Later polls reuse their open session.
 const VISITOR_COLLECT_MS = 2_500;
+// Open visitor sessions per server instance (one per token; see liveSocketStateForVisitor).
 const MAX_CONCURRENT_VISITOR_CONNECTIONS = 20;
 // How long to wait after a failed connect before trying again. Long enough to stop four
 // polling routes hammering the hub when nothing is live, short enough that a session
@@ -434,7 +435,7 @@ function clampStintsToLaps<T extends { laps: number }>(stints: T[], totalLaps: n
  * so it can be instantiated either once (the owner's persistent singleton, below) or fresh
  * per visitor request (`liveSocketStateForVisitor`) with zero shared state between instances.
  */
-function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
+function createLiveSocketSession(opts: { allowAnonymous?: boolean; token?: string } = {}) {
   let conn: signalR.HubConnection | null = null;
   let starting: Promise<void> | null = null;
   let lastRefresh = 0;
@@ -479,6 +480,9 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
   // Per-event race control messages (keyed by index) + track status — reset per session.
   let raceControl: Record<string, RcMessage> = {};
   let trackStatus: { Status?: string; Message?: string } | null = null;
+  // Each TrackStatus change on F1's own clock (the feed's stamp — the clock the car positions
+  // are on), so Race Control can show the flag at the instant the map is drawing.
+  let trackStatusLog: { t: number; status: string | null }[] = [];
   // Race lap counter (races only) — drives the tyre-strategy bar's lap axis.
   let lapCount: { CurrentLap?: number; TotalLaps?: number } | null = null;
   // Which qualifying segment is live (1=Q1, 2=Q2, 3=Q3) — from SessionData's QualifyingPart.
@@ -589,6 +593,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
       sessionStatus = null;
       raceControl = {};
       trackStatus = null;
+      trackStatusLog = [];
       lapCount = null;
       qualifyingPart = null;
       qualifyingPartHistory = [];
@@ -944,6 +949,12 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
       }
     } else if (topic === "TrackStatus") {
       trackStatus = data as typeof trackStatus;
+      // A snapshot carries no stamp: treat it as known from the newest data, so an older
+      // instant falls back to whatever was logged before it.
+      const at = stamp ? Date.parse(stamp) : NaN;
+      trackStatusLog.push({ t: Number.isFinite(at) ? at : (frameBuffer.at(-1)?.t ?? Date.now()), status: trackStatus?.Status ?? null });
+      trackStatusLog.sort((a, b) => a.t - b.t);
+      if (trackStatusLog.length > 60) trackStatusLog = trackStatusLog.slice(-60);
     } else if (topic === "ExtrapolatedClock") {
       // F1's own session clock. `Remaining` is the authority and `Extrapolating` says whether
       // it is running — it stops dead for a red flag and is adjusted afterwards, which is how
@@ -1049,8 +1060,10 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
    * were already complete on the hub).
    */
   async function ensureConnection(tokenOverride?: string): Promise<boolean> {
-    connToken = tokenOverride;
-    const token = tokenOverride ?? process.env.F1_TV_TOKEN?.trim();
+    // A visitor's session is bound to their token for its whole life: a reconnect (or any call
+    // that passes no token) must never fall back to the site's own F1_TV_TOKEN.
+    connToken = tokenOverride ?? opts.token;
+    const token = connToken ?? process.env.F1_TV_TOKEN?.trim();
     if (!token && !opts.allowAnonymous) return false;
     if (conn && conn.state === signalR.HubConnectionState.Connected) return true;
     if (Date.now() - lastConnectFailAt < CONNECT_RETRY_COOLDOWN_MS) return false;
@@ -1982,7 +1995,12 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
     return Number(lapCount?.CurrentLap ?? 0) <= lastForming;
   }
 
-  async function getRaceControl(): Promise<{
+  /**
+   * Race Control as of `asOfMs` on the map's clock (the playback instant the client is drawing,
+   * ~20 s behind the feed). Without it, a flag or an incident was listed before the cars on the
+   * map had reached it — the board and the map were already rewound; this drawer was not.
+   */
+  async function getRaceControl(asOfMs?: number): Promise<{
     available: boolean;
     trackStatus?: { Status?: string; Message?: string } | null;
     messages?: RcMessage[];
@@ -1990,12 +2008,22 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean } = {}) {
     if (!(await ensureConnection())) return { available: false };
     await refreshIfStale();
     if (!sessionInfo || !liveOrGrace()) return { available: false };
-    const messages = Object.values(raceControl)
-      .filter((m) => m.Message)
+    const all = Object.values(raceControl).filter((m) => m.Message);
+    if (!all.length) return { available: false };
+    const issuedAt = (m: RcMessage) => (m.Utc ? Date.parse(m.Utc.endsWith("Z") ? m.Utc : `${m.Utc}Z`) : NaN);
+    const messages = all
+      .filter((m) => !asOfMs || !(issuedAt(m) > asOfMs))
       .sort((a, b) => (b.Utc ?? "").localeCompare(a.Utc ?? ""))
       .slice(0, 150);
-    if (!messages.length) return { available: false };
-    return { available: true, trackStatus, messages };
+    let status = trackStatus;
+    if (asOfMs && trackStatusLog.length) {
+      // Newest change at or before the instant; if the log doesn't reach back that far (fresh
+      // connection), its oldest entry is the closest honest answer.
+      let pick = trackStatusLog[0];
+      for (const e of trackStatusLog) if (e.t <= asOfMs) pick = e;
+      status = pick.status === trackStatus?.Status ? trackStatus : { Status: pick.status ?? undefined };
+    }
+    return { available: true, trackStatus: status, messages };
   }
 
   /** Lightweight "is a session live and which one" — for the hero + schedule. */
@@ -2156,30 +2184,62 @@ export function liveSocketHasToken(): boolean {
 }
 
 /* --------------------------- per-visitor, bring-your-own-token --------------------------- */
-let activeVisitorConnections = 0;
-
 /**
- * A visitor's own F1 TV token, used for exactly one request: connect fresh, collect a
- * bounded window of updates, read the state, then ALWAYS disconnect — never shared with the
- * owner's session, never shared with any other visitor, never cached or reused across polls.
- * The token exists in server memory only for the few seconds this call takes to run, and is
- * never logged, written to disk, or placed in a URL anywhere in this path.
+ * A visitor's own F1 TV token gets a session of its own — the same machinery as the owner's,
+ * kept open between that visitor's polls. It used to be opened fresh for every poll, collect
+ * 2.5 s and close: every request paid a connect, and with no history to rewind into, the
+ * visitor's board, flags and lap times ran ~20 s ahead of their own map (the owner's feed is
+ * served at the map's instant, `asOf`). Kept open, it builds that history.
+ *
+ * Still isolated and bounded: sessions are keyed by a hash of the token (never the token
+ * itself), so no two tokens share one and none touches the owner's; each is bound to its own
+ * token for its whole life (see ensureConnection); and each closes VISITOR_IDLE_MS after its
+ * last poll, when its token expires, or the moment it fails. The token is held only by that
+ * open connection — never logged, written anywhere, or put in a URL.
  */
-export async function liveSocketStateForVisitor(token: string): Promise<VisitorSocketResult> {
-  if (!looksLikeJwt(token)) return { status: "invalid_token" };
-  if (activeVisitorConnections >= MAX_CONCURRENT_VISITOR_CONNECTIONS) return { status: "too_many" };
+const VISITOR_IDLE_MS = 60_000;
+type VisitorEntry = { session: ReturnType<typeof createLiveSocketSession>; idle: ReturnType<typeof setTimeout> | null; ready: Promise<boolean> };
+const visitorSessions = new Map<string, VisitorEntry>();
 
-  activeVisitorConnections++;
-  const session = createLiveSocketSession();
+function closeVisitorSession(key: string) {
+  const v = visitorSessions.get(key);
+  if (!v) return;
+  visitorSessions.delete(key);
+  if (v.idle) clearTimeout(v.idle);
+  void v.session.disconnect();
+}
+
+export async function liveSocketStateForVisitor(token: string, asOfMs?: number): Promise<VisitorSocketResult> {
+  if (!looksLikeJwt(token)) return { status: "invalid_token" };
+  const exp = decodeTokenExpiry(token);
+  if (exp.expired) return { status: "invalid_token" };
+  const expiresAt = exp.expiresAt ? Date.parse(exp.expiresAt) : null;
+
+  // Outside the window around a scheduled session F1's feed has nothing to connect to. That is
+  // not the token's fault — reporting it as "invalid" told visitors between race weekends that a
+  // perfectly good token had been rejected.
+  if (!(await feedWindowOpen())) return { status: "no_session" };
+
+  const key = createHash("sha256").update(token).digest("hex");
+  let v = visitorSessions.get(key);
+  if (!v) {
+    if (visitorSessions.size >= MAX_CONCURRENT_VISITOR_CONNECTIONS) return { status: "too_many" };
+    const session = createLiveSocketSession({ token });
+    // First poll: connect, and wait a moment so a few updates land beyond the snapshot.
+    v = { session, idle: null, ready: session.connectAndCollect(token, VISITOR_COLLECT_MS).catch(() => false) };
+    visitorSessions.set(key, v);
+  }
+  if (v.idle) clearTimeout(v.idle);
+  v.idle = setTimeout(() => closeVisitorSession(key), Math.min(VISITOR_IDLE_MS, expiresAt != null ? Math.max(0, expiresAt - Date.now()) : VISITOR_IDLE_MS));
   try {
-    const connected = await session.connectAndCollect(token, VISITOR_COLLECT_MS);
-    if (!connected) return { status: "invalid_token" };
-    const state = await session.socketState();
+    if (!(await v.ready)) {
+      closeVisitorSession(key);
+      return { status: "invalid_token" };
+    }
+    const state = await v.session.socketState(asOfMs);
     return state ? { status: "ok", state } : { status: "no_session" };
   } catch {
+    closeVisitorSession(key);
     return { status: "invalid_token" };
-  } finally {
-    await session.disconnect();
-    activeVisitorConnections--;
   }
 }

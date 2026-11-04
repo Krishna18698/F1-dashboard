@@ -9,7 +9,7 @@
   --panel-2: #efeff1;
   --ink: #0b0b0c;
   --ink-soft: #3f3f46;
-  --muted: #8a8a92;
+  --muted: #6b6b73; /* 5.3:1 on white, 4.6:1 on --panel-2 (WCAG AA for small text); was #8a8a92 at 3.4:1 */
   --line: #e3e3e6;
   --line-strong: #cfcfd4;
 
@@ -41,6 +41,13 @@
 
 * {
   border-color: var(--line);
+}
+
+/* Keyboard focus: one clear ring everywhere, in the brand red — shown for keyboard navigation,
+   never on a mouse click. */
+:focus-visible {
+  outline: 2px solid var(--red);
+  outline-offset: 2px;
 }
 
 body {

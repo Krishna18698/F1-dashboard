@@ -142,19 +142,19 @@ export default function TelemetryCard({
           <p className="tnum font-timing text-2xl font-bold leading-none text-white sm:text-3xl">
             {v?.speed ?? "—"}
           </p>
-          <p className="eyebrow mt-1 text-[0.5rem] text-white/40">km/h</p>
+          <p className="eyebrow mt-1 text-[0.55rem] text-white/40">km/h</p>
         </div>
         <div className="text-center">
           <p className="tnum font-timing text-2xl font-bold leading-none text-white sm:text-3xl">
             {v ? v.gear || "N" : "—"}
           </p>
-          <p className="eyebrow mt-1 text-[0.5rem] text-white/40">Gear</p>
+          <p className="eyebrow mt-1 text-[0.55rem] text-white/40">Gear</p>
         </div>
         <div className="hidden text-center sm:block">
           <p className="tnum font-timing text-2xl font-bold leading-none text-white sm:text-3xl">
             {v ? ((v.rpm ?? 0) / 1000).toFixed(1) : "—"}
           </p>
-          <p className="eyebrow mt-1 text-[0.5rem] text-white/40">kRPM</p>
+          <p className="eyebrow mt-1 text-[0.55rem] text-white/40">kRPM</p>
         </div>
         {/* Throttle bar */}
         <div className="w-20 sm:w-28">
@@ -164,7 +164,7 @@ export default function TelemetryCard({
               style={{ width: `${throttle}%` }}
             />
           </div>
-          <p className="eyebrow mt-1 text-center text-[0.5rem] text-white/40">Throttle {throttle}%</p>
+          <p className="eyebrow mt-1 text-center text-[0.55rem] text-white/40">Throttle {throttle}%</p>
         </div>
       </div>
       )}
@@ -226,7 +226,7 @@ export default function TelemetryCard({
               return (
               <div key={i}>
                 <div className="flex items-baseline justify-between gap-1">
-                  <span className="eyebrow text-[0.5rem] text-white/40">S{i + 1}</span>
+                  <span className="eyebrow text-[0.55rem] text-white/40">S{i + 1}</span>
                   {/* Nothing until this sector is completed ON THIS LAP — just the S1/S2/S3
                       label. `&nbsp;` rather than an empty string so the row keeps its height
                       and the bars below stay aligned across all three columns. */}

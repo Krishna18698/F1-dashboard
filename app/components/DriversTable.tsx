@@ -58,14 +58,14 @@ export default function DriversTable({
                 {s.Driver.givenName} {s.Driver.familyName}
               </span>
               {s.Driver.code && (
-                <span className="shrink-0 rounded-sm bg-panel-2 px-1 py-0.5 text-[0.55rem] font-bold tracking-wider text-ink-soft">
+                <span className="shrink-0 rounded-sm bg-panel-2 px-1 py-0.5 text-[0.6rem] font-bold tracking-wider text-ink-soft">
                   {s.Driver.code}
                 </span>
               )}
             </div>
             <span className="tnum shrink-0 text-right font-mono text-base font-bold">
               {s.points}
-              <span className="ml-1 text-[0.55rem] font-normal text-muted">PTS</span>
+              <span className="ml-1 text-[0.6rem] font-normal text-muted">PTS</span>
               {gained > 0 && (
                 <span className="tnum block text-right font-mono text-[0.6rem] font-normal text-[#37b24d]">
                   +{gained}

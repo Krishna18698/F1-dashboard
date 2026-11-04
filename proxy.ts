@@ -12,12 +12,17 @@ import { NextRequest, NextResponse } from "next/server";
 export function proxy(req: NextRequest) {
   const expected = process.env.DASHBOARD_PASSWORD;
   if (!expected) return NextResponse.next();
+  // Cron jobs carry their own Bearer secret, which this Basic-auth gate would reject; each cron
+  // route checks that secret itself and refuses everything without it.
+  if (req.nextUrl.pathname.startsWith("/api/cron/")) return NextResponse.next();
 
   const auth = req.headers.get("authorization");
   if (auth?.startsWith("Basic ")) {
     try {
-      const [, pass] = atob(auth.slice(6)).split(":");
-      if (pass === expected) return NextResponse.next();
+      // "user:pass" — split at the FIRST colon only: a password may contain colons itself.
+      const decoded = atob(auth.slice(6));
+      const colon = decoded.indexOf(":");
+      if (colon >= 0 && decoded.slice(colon + 1) === expected) return NextResponse.next();
     } catch {}
   }
   return new NextResponse("Authentication required.", {

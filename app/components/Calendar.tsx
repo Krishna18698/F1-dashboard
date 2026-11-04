@@ -68,7 +68,7 @@ export default function Calendar({
                    never appear together, so there's nothing here for a quieter chip to
                    distinguish itself from (unlike the weekend schedule, where NEXT can sit
                    beside a live session). */
-                <span className="rounded-sm bg-red px-1.5 py-0.5 text-[0.55rem] font-bold tracking-wide text-white">
+                <span className="rounded-sm bg-red px-1.5 py-0.5 text-[0.6rem] font-bold tracking-wide text-white">
                   {underway ? "CURRENT" : "NEXT"}
                 </span>
               )}

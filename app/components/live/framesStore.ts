@@ -10,6 +10,10 @@ import { useEffect, useState } from "react";
 
 export type Frame = { t: number; c: Record<string, [number, number]> };
 
+/** How far behind the newest data the map (and everything synced to it) plays back. Here
+ *  rather than in TrackMap so the section header can name it without loading the map. */
+export const PLAYBACK_DELAY_MS = 20_000;
+
 const WINDOW_MS = 45_000; // keep ~45 s of history (DELAY + interpolation margin)
 
 let buffer: Frame[] = [];

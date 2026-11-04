@@ -90,12 +90,12 @@ export default function TokenBanner() {
         {expired ? (
           <>
             <span className="tnum font-mono text-2xl font-bold leading-none text-red">0:00</span>
-            <span className="eyebrow mt-1.5 text-[0.55rem] text-red">Offline</span>
+            <span className="eyebrow mt-1.5 text-[0.6rem] text-red">Offline</span>
           </>
         ) : (
           <>
             <span className="tnum font-mono text-2xl font-bold leading-none text-white">{remaining}</span>
-            <span className="eyebrow mt-1.5 text-[0.55rem] text-white/55">hrs : min</span>
+            <span className="eyebrow mt-1.5 text-[0.6rem] text-white/55">hrs : min</span>
           </>
         )}
       </div>

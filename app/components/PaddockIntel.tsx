@@ -2,7 +2,7 @@ import { IntelItem } from "@/lib/news";
 
 function Meta({ source, date }: { source: string; date: string }) {
   return (
-    <span className="eyebrow text-[0.55rem] text-muted">
+    <span className="eyebrow text-[0.6rem] text-muted">
       {source}
       {date && <span className="text-red"> · {date}</span>}
     </span>

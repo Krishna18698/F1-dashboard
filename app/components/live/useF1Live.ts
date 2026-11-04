@@ -251,6 +251,8 @@ export function useF1Live(
     // while still rendering replay data — a real race that shipped and was reported).
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
+    // Aborts this effect's request when the view changes or the section unmounts.
+    const aborter = new AbortController();
     // Switching view (live <-> replay) is a different data stream/clock entirely — drop
     // any buffered positions and show "loading" instead of a stale frame from the other
     // view while the first poll for the new one is in flight. Deferred to a timer callback,
@@ -262,6 +264,9 @@ export function useF1Live(
     // Poll fast only while a session is live; back off hard when idle so we're not
     // hammering the feed when nothing is happening.
     const IDLE_MS = 30_000;
+    // A live poll answers in well under a second; a replay's first load can take most of the
+    // route's 60 s budget fetching the archive.
+    const POLL_TIMEOUT_MS = view === "replay" ? 55_000 : 20_000;
     // Guards against the visibilitychange handler below firing while a poll is already
     // in flight (very plausible — e.g. alt-tabbing during a live session) and spawning a
     // SECOND, overlapping poll on top of it. Two concurrent fetches racing to push frames
@@ -292,9 +297,13 @@ export function useF1Live(
         // window regardless, so the buffer keeps enough lead room to interpolate smoothly.
         const pt = getPlaybackT();
         const asOfParam = pt > 0 ? `&asOf=${Math.floor(pt)}` : "";
+        // Bounded: a request that stalls is abandoned, and the error path below releases the
+        // in-flight guard and schedules the next poll — rather than one hung request holding
+        // the guard and stopping every poll after it.
         const res = await fetch(`/api/f1live?since=${newestFrameT()}&view=${view}${t0Param}${asOfParam}`, {
           cache: "no-store",
           headers: myToken ? { "X-F1-Token": myToken } : undefined,
+          signal: AbortSignal.any([aborter.signal, AbortSignal.timeout(POLL_TIMEOUT_MS)]),
         });
         const data = (await res.json()) as ApiResponse;
         if (cancelled) return;
@@ -315,10 +324,14 @@ export function useF1Live(
           pushFrames(data.frames);
           pushTel(data.telFrames);
           // Table/tyre data is non-urgent: let React yield to the map animation.
-          startTransition(() => setState(toState(data)));
+          const at = Date.now();
+          startTransition(() => setState({ ...toState(data), updatedAt: at, reconnecting: false }));
         }
       } catch {
-        if (!cancelled) setState((s) => ({ ...s, status: "error" }));
+        // A failed or timed-out poll while a session is on screen keeps the last good board
+        // and says it's reconnecting; it used to drop the whole section to the idle card. The
+        // next poll is scheduled below either way.
+        if (!cancelled) setState((s) => (s.status === "live" ? { ...s, reconnecting: true } : { ...s, status: "error" }));
       }
       inFlight = false;
       if (!cancelled) {
@@ -342,6 +355,7 @@ export function useF1Live(
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
+      aborter.abort();
       clearTimeout(timer);
       clearTimeout(resetId);
       document.removeEventListener("visibilitychange", onVisible);

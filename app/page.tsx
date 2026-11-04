@@ -10,7 +10,6 @@ import {
   weekendSessions,
   raceStartISO,
 } from "@/lib/jolpica";
-import { getPaddockIntel } from "@/lib/news";
 import { getLiveStatusData, LiveStatusData } from "@/lib/live/liveStatus";
 import { WEEKEND_FLIP_MS } from "@/lib/sessionWindows";
 import { requestNow } from "@/lib/now";
@@ -20,7 +19,8 @@ import Section from "./components/Section";
 import DriversTable from "./components/DriversTable";
 import ConstructorsTable from "./components/ConstructorsTable";
 import Calendar from "./components/Calendar";
-import PaddockIntel from "./components/PaddockIntel";
+import { Suspense } from "react";
+import PaddockIntelStream, { PaddockIntelSkeleton } from "./components/PaddockIntelStream";
 import TokenBanner from "./components/TokenBanner";
 import LiveSection from "./components/live/LiveSection";
 
@@ -33,13 +33,14 @@ import { liveSocketResults } from "@/lib/live/liveSocket";
 export const dynamic = "force-dynamic";
 
 export default async function Page() {
-  const [rawNext, rawDrivers, rawConstructors, schedule, intel, standingsRound, winners, liveStatus, finished] =
+  // News is not in this batch: it streams in on its own (see the Paddock Intel section), so a
+  // slow RSS provider can't hold back the race data.
+  const [rawNext, rawDrivers, rawConstructors, schedule, standingsRound, winners, liveStatus, finished] =
     await Promise.all([
       getNextRace(),
       getDriverStandings().catch(() => []),
       getConstructorStandings().catch(() => []),
       getSchedule().catch(() => []),
-      getPaddockIntel().catch(() => []),
       getStandingsRound().catch(() => 0),
       getSeasonWinners().catch(() => ({})),
       // Seeds the hero/weekend-schedule "live" badge so the first client render already
@@ -191,6 +192,9 @@ export default async function Page() {
   let nextRace = rawNext;
 
   const status = liveStatus as LiveStatusData;
+  // The server already knows whether anything is on track; without this the section paints a
+  // spinner until hydration plus its own first poll (~0.5 s) resolve.
+  const liveSection = <LiveSection serverKnowsNothingLive={!status.live} />;
   const endedRound =
     !status.live &&
     (status.type ?? "").toLowerCase() === "race" &&
@@ -248,6 +252,10 @@ export default async function Page() {
       <div className="flex flex-col gap-10">
         <Hero race={nextRace} initialLiveStatus={liveStatus} nowMs={requestNow()} />
 
+        {/* During a session, tracking is what a visitor came for: straight under the hero rather
+            than below the weekend schedule and the season calendar. */}
+        {status.live && liveSection}
+
         {/* This weekend's sessions (local time) — above the season calendar */}
         {nextRace && (
           <WeekendSchedule
@@ -263,9 +271,7 @@ export default async function Page() {
           </Section>
         )}
 
-        {/* The server already knows whether anything is on track; without this the section
-            paints a spinner until hydration plus its own first poll (~0.5 s) resolve. */}
-        <LiveSection serverKnowsNothingLive={!status.live} />
+        {!status.live && liveSection}
 
         {/* Wide 3-column row: standings + paddock intel use the side space */}
         <div className="grid gap-10 lg:grid-cols-3">
@@ -286,7 +292,9 @@ export default async function Page() {
           </Section>
 
           <Section title="Paddock" emphasis="Intel" hint="Latest F1 news">
-            <PaddockIntel items={intel} />
+            <Suspense fallback={<PaddockIntelSkeleton />}>
+              <PaddockIntelStream />
+            </Suspense>
           </Section>
         </div>
       </div>

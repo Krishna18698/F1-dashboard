@@ -60,7 +60,7 @@ export default function SectorDeltas({
         <span className="eyebrow block text-[0.6rem] text-muted">
           Where the lap is <span className="text-red">lost</span>
         </span>
-        <span className="text-[0.55rem] text-muted">vs best sector</span>
+        <span className="text-[0.6rem] text-muted">vs best sector</span>
       </div>
       <div className="overflow-hidden rounded-lg border border-line">
         {/* The header uses the SAME nested grid as the rows below — a single merged
@@ -97,7 +97,7 @@ export default function SectorDeltas({
                             style={{ width: delta == null ? "0%" : `${Math.max(isBest ? 100 : 4, Math.min(100, (delta / scale) * 100))}%` }}
                           />
                         </div>
-                        <span className={`tnum block text-center font-timing text-[0.5rem] leading-tight ${isBest ? "text-violet-500" : "text-muted"}`}>
+                        <span className={`tnum block text-center font-timing text-[0.55rem] leading-tight ${isBest ? "text-violet-500" : "text-muted"}`}>
                           {delta == null ? "–" : isBest ? "BEST" : `+${delta.toFixed(3)}`}
                         </span>
                       </div>

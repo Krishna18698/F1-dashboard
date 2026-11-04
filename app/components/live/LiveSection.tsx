@@ -1,21 +1,38 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { useF1Live } from "./useF1Live";
-import TrackMap from "./TrackMap";
-import TimingBoard from "./TimingBoard";
-import TyreTracker from "./TyreTracker";
-import TyreAllocation from "./TyreAllocation";
-import SectorDeltas from "./SectorDeltas";
-import Battles from "./Battles";
 import { findBattles } from "./findBattles";
-import TelemetryCard from "./TelemetryCard";
 import MyTokenCard from "./MyTokenCard";
 import RaceControl from "./RaceControl";
-import { useHasFrames } from "./framesStore";
+import { PLAYBACK_DELAY_MS, useHasFrames } from "./framesStore";
 import { useCountdown } from "./useCountdown";
 import { getStoredVisitorToken } from "@/lib/visitorToken";
 import { F1_LIVE } from "@/lib/live/liveConfig";
+
+// The tracking interface only renders once a session (or replay) is on screen; an idle visit
+// shows a small card instead. Loaded on demand, so that visit doesn't download and parse the
+// map, board, tyre and analysis code. Each placeholder holds its component's shape while the
+// chunk arrives, so nothing shifts.
+const TrackMap = dynamic(() => import("./TrackMap"), {
+  loading: () => (
+    <div className="flex shrink-0 flex-col">
+      <span className="eyebrow mb-2 block text-[0.6rem] text-muted">
+        Driver <span className="text-red">Tracker</span>
+      </span>
+      <div className="relative aspect-square w-full overflow-hidden rounded-lg carbon-bg ring-1 ring-white/10">
+        <div className="skeleton-dark absolute inset-6 rounded-full opacity-60" />
+      </div>
+    </div>
+  ),
+});
+const TimingBoard = dynamic(() => import("./TimingBoard"), { loading: () => <div className="skeleton min-h-[28rem] flex-1 rounded-lg" /> });
+const TyreTracker = dynamic(() => import("./TyreTracker"), { loading: () => <div className="skeleton-dark h-[32rem] rounded-lg" /> });
+const TyreAllocation = dynamic(() => import("./TyreAllocation"), { loading: () => <div className="skeleton-dark h-64 rounded-lg" /> });
+const SectorDeltas = dynamic(() => import("./SectorDeltas"), { loading: () => <div className="skeleton h-72 rounded-lg" /> });
+const Battles = dynamic(() => import("./Battles"), { loading: () => <div className="skeleton-dark h-20 rounded-lg" /> });
+const TelemetryCard = dynamic(() => import("./TelemetryCard"), { loading: () => <div className="skeleton-dark mt-3 h-20 rounded-lg" /> });
 
 type View = "live" | "replay";
 
@@ -40,14 +57,52 @@ function ViewToggle({ view, onChange }: { view: View; onChange: (v: View) => voi
   );
 }
 
+/**
+ * How fresh the board is: "Updated 4s ago", or "Reconnecting…" when polls are failing — so a
+ * quiet session reads differently from a stalled connection — and the playback delay, which is
+ * why the dashboard sits behind a broadcast. Live only: a replay is labelled as one instead.
+ * Ticks on its own, so the section isn't re-rendered every second.
+ */
+function Freshness({ updatedAt, reconnecting }: { updatedAt?: number; reconnecting?: boolean }) {
+  const [now, setNow] = useState<number | null>(null);
+  useEffect(() => {
+    const tick = () => setNow(Date.now());
+    const first = setTimeout(tick, 0);
+    const id = setInterval(tick, 1000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(id);
+    };
+  }, []);
+  if (!updatedAt || now == null) return null;
+  const ago = Math.max(0, Math.round((now - updatedAt) / 1000));
+  // Polls land every ~3 s; four missed in a row is worth saying out loud.
+  const stale = reconnecting || ago > 12;
+  return (
+    <span
+      role="status"
+      className={`flex items-center gap-1.5 self-center whitespace-nowrap text-[0.7rem] font-medium ${stale ? "text-amber-700" : "text-ink-soft"}`}
+      title={`The map, timing and Race Control play ${PLAYBACK_DELAY_MS / 1000} s behind F1's live feed, so the cars move smoothly.`}
+    >
+      <span className={`h-1.5 w-1.5 rounded-full ${stale ? "bg-amber-500" : "bg-emerald-500"}`} aria-hidden />
+      {reconnecting ? "Reconnecting…" : stale ? `No update for ${ago}s` : `Updated ${ago}s ago`}
+      <span className="text-muted">· {PLAYBACK_DELAY_MS / 1000}s delay</span>
+    </span>
+  );
+}
+
 function Header({
   live,
   label,
   ended,
+  updatedAt,
+  reconnecting,
 }: {
   live?: boolean;
   label: string;
   ended?: boolean;
+  updatedAt?: number;
+  reconnecting?: boolean;
 }) {
   return (
     <div className="mb-4 flex flex-wrap items-end gap-x-4 gap-y-1 border-b-2 border-ink pb-2">
@@ -70,6 +125,7 @@ function Header({
           </span>
         )}
       </h3>
+      {live && !ended && <Freshness updatedAt={updatedAt} reconnecting={reconnecting} />}
       {/* Wraps onto its own line on a phone, where a right-aligned caption reads as detached
           from the heading above it — so it only pulls right once it shares the row. */}
       <span className="eyebrow text-left text-[0.6rem] text-muted sm:ml-auto sm:text-right">{label}</span>
@@ -258,7 +314,7 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
 
   return (
     <section>
-      <Header live={!s.replay} label={label} ended={ended} />
+      <Header live={!s.replay} label={label} ended={ended} updatedAt={s.updatedAt} reconnecting={s.reconnecting} />
       <ViewToggle view={view} onChange={changeView} />
       {!s.replay && <MyTokenCard tokenIssue={s.tokenIssue} ownerHasToken={s.ownerTokenConfigured} />}
 
@@ -267,9 +323,13 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
           height; the left column then distributes that height between the tracker and the
           tyre card so there's no gap under them — with or without a driver selected. */}
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="flex flex-col gap-4">
+        {/* Two columns on a wide screen. On a phone they stack, and the left column (map, tyre
+            allocation) used to come entirely before the running order — so below lg each column
+            dissolves into the grid (`contents`) and `order` puts the board straight after the
+            map and any telemetry, with the tyre allocation last. */}
+        <div className="contents lg:flex lg:flex-col lg:gap-4">
           {F1_LIVE.driverTrackerDisabled && !s.replay ? (
-            <div className="flex shrink-0 flex-col">
+            <div className="order-1 flex shrink-0 flex-col lg:order-none">
               <span className="eyebrow mb-2 block text-[0.6rem] text-muted">
                 Driver <span className="text-red">Tracker</span>
               </span>
@@ -282,7 +342,7 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
             /* Everything on this page except the car positions is coming through live — F1
                serves timing/tyres/race control to anyone, but gates Position.z behind a
                token. Say that plainly instead of rendering a map that can never draw. */
-            <div className="flex shrink-0 flex-col">
+            <div className="order-1 flex shrink-0 flex-col lg:order-none">
               <span className="eyebrow mb-2 block text-[0.6rem] text-muted">
                 Driver <span className="text-red">Tracker</span>
               </span>
@@ -339,7 +399,7 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
               </div>
             </div>
           ) : (
-            <div className="flex shrink-0 flex-col">
+            <div className="order-1 flex shrink-0 flex-col lg:order-none">
             <TrackMap
               circuitKey={s.circuitKey}
               drivers={s.drivers}
@@ -369,6 +429,7 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
               qualifying and practice alike, whereas a race is about gaps and strategy — there
               the card is telemetry alone. */}
           {selected != null && !mapUnavailable && (
+            <div className="order-2 lg:order-none">
             <TelemetryCard
               num={selected}
               driver={s.drivers.get(selected)}
@@ -377,11 +438,12 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
               lapResets={s.lapResets}
               sectorEvents={s.mode !== "race" ? s.sectorEvents : undefined}
             />
+            </div>
           )}
           {/* Absorbs the column's spare height, and gives it back when the telemetry card
               appears — so the tracker above keeps a constant size either way. */}
           {(s.mode === "race" || s.mode === "quali") && (
-            <div className="flex min-h-0 flex-1 flex-col">
+            <div className="order-5 flex min-h-0 flex-1 flex-col lg:order-none">
               <TyreAllocation
                 order={s.order}
                 drivers={s.drivers}
@@ -395,8 +457,9 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
         {/* Right column: the board and the sector analysis that reads off it, stacked. Keeping
             them together means "who is where" and "where each of them is losing it" sit in
             the same column rather than across the page from one another. */}
-        <div className="flex flex-col gap-4">
+        <div className="contents lg:flex lg:flex-col lg:gap-4">
         <TimingBoard
+          className="order-3 lg:order-none"
           mode={s.mode}
           order={boardOrder}
           drivers={s.drivers}
@@ -432,6 +495,7 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
               times, so it behaves the same with or without a token. */}
           {/* Race counterpart of the sector deltas: who is within a second of whom. */}
           {s.mode === "race" && (
+            <div className="order-4 lg:order-none">
             <Battles
               drivers={s.drivers}
               result={findBattles({
@@ -447,9 +511,10 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
                 formationLap: s.formationLap || s.startDelayed,
               })}
             />
+            </div>
           )}
           {s.mode === "quali" && (
-            <div>
+            <div className="order-4 lg:order-none">
               <SectorDeltas
                 order={s.order}
                 drivers={s.drivers}

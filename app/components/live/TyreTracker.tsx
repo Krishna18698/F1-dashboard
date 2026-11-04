@@ -197,7 +197,7 @@ export default function TyreTracker({
         {/* On phones the timing columns hide (the stint bar is the point) so it fits with no scroll. */}
         <div className="sm:min-w-xl">
           {/* Column header + lap axis */}
-          <div className="flex items-center gap-2 border-b border-white/10 pb-1.5 text-[0.55rem] font-bold uppercase tracking-wider text-white/35">
+          <div className="flex items-center gap-2 border-b border-white/10 pb-1.5 text-[0.6rem] font-bold uppercase tracking-wider text-white/35">
             <span className="w-6 shrink-0 text-right">P</span>
             <span className="w-7 shrink-0" />
             <span className="w-16 shrink-0 sm:w-24">Driver</span>
@@ -217,7 +217,7 @@ export default function TyreTracker({
               {ticks.map((t) => (
                 <span
                   key={t}
-                  className="tnum absolute -translate-x-1/2 font-mono text-[0.5rem] normal-case text-white/30"
+                  className="tnum absolute -translate-x-1/2 font-mono text-[0.55rem] normal-case text-white/30"
                   style={{ left: `${Math.min(100, pct(t))}%` }}
                 >
                   {t}

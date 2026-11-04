@@ -177,8 +177,9 @@ whichever of these is available:
 **Option A — a visitor brings their own F1 TV token (no setup for the site owner):**
 Anyone viewing the site can add their own token via the card shown in the Live Tracking
 section. It's saved only in their browser (`localStorage`), sent as a request header (never
-a URL) on their own polls, and used server-side for exactly that one request — never logged,
-never written to disk, never shared with any other visitor. This takes priority over the
+a URL) on their own polls, and held server-side only by that visitor's own feed connection —
+closed a minute after their last poll or when the token expires, never logged, never written
+to disk, never shared with any other visitor. This takes priority over the
 site's own token when present, so a visitor always gets their own real-time view. See the
 in-app card for how to grab a token (same steps as Option B below, just pasted into the page
 instead of `.env.local`).
