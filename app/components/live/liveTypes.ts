@@ -20,10 +20,24 @@ export interface PosFrame {
   c: Record<string, [number, number]>; // driver_number → [x, y]
 }
 
+export interface ReplayInfo {
+  path: string;
+  year: number;
+  anchorMs: number; // where the racing starts: the replay's opening point
+  durationMs: number;
+  laps: { lap: number; ms: number }[];
+  segments: { part: number; ms: number }[]; // qualifying: when each of Q1/Q2/Q3 went green
+}
+
 export interface LiveState {
   status: LiveStatus;
   mode: SessionMode;
-  /** When the last poll succeeded (client clock) — drives the "Updated 4s ago" freshness chip. */
+  /** A replay's timeline, for its controls — on the session's own clock (stream ms). */
+  replayInfo?: ReplayInfo;
+  /** The frame store's reset count this state belongs to: anything comparing one state with the
+   *  next must not compare across a replay jump. */
+  epoch?: number;
+  /** When the last poll succeeded (client clock) — drives the stalled-feed warning. */
   updatedAt?: number;
   /** Polls are failing while a session is on screen: the board shown is the last good one. */
   reconnecting?: boolean;
@@ -51,6 +65,7 @@ export interface LiveState {
   grids?: Map<number, number>; // starting grid position per driver (gained/lost indicator)
   fastestLap?: { driver_number: number; tla: string; time: string; lap: number } | null;
   trackStatus?: string | null; // TrackStatus code — tints the map (yellow/SC/red)
+  weather?: { air: number; track: number; rain: boolean } | null; // °C, at this instant
   /** F1's own SessionStatus. "Aborted" is the authoritative red-flag/suspension signal —
    *  TrackStatus is NOT: it returns to "1" (green) once marshals clear the track, while the
    *  race is still stopped and the cars are queued in the pit lane. */

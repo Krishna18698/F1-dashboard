@@ -32,13 +32,19 @@ function auth(): Record<string, string> {
 }
 
 // The free tier allows about 3 requests a second and 30 a minute. Space every request out so a
-// cold load (nine requests) can never trip it.
+// cold load (nine requests) can't trip the first, and count the last minute's so that loading
+// a few sessions in a row (the replay's picker makes that easy) doesn't trip the second.
 const SPACING_MS = 400;
+const PER_MINUTE = 28;
 let nextSlot = 0;
+const recent: number[] = [];
 async function slot() {
   const now = Date.now();
-  const at = Math.max(now, nextSlot);
+  while (recent.length && now - recent[0] > 60_000) recent.shift();
+  let at = Math.max(now, nextSlot);
+  if (recent.length >= PER_MINUTE) at = Math.max(at, recent[recent.length - PER_MINUTE] + 60_000);
   nextSlot = at + SPACING_MS;
+  recent.push(at);
   if (at > now) await new Promise((r) => setTimeout(r, at - now));
 }
 
@@ -53,7 +59,15 @@ class OpenF1Unavailable extends Error {}
 async function get<T>(path: string): Promise<T[]> {
   if (openF1LiveLocked()) throw new OpenF1Unavailable("live session in progress");
   await slot();
-  const res = await fetch(`${BASE}${path}`, { headers: auth(), cache: "no-store", signal: AbortSignal.timeout(15_000) });
+  let res = await fetch(`${BASE}${path}`, { headers: auth(), cache: "no-store", signal: AbortSignal.timeout(15_000) });
+  // Rate-limited anyway (another instance sharing the IP, say): wait and ask again rather than
+  // reporting a session as having no data.
+  for (const wait of [2_000, 5_000, 10_000]) {
+    if (res.status !== 429) break;
+    await new Promise((r) => setTimeout(r, wait));
+    await slot();
+    res = await fetch(`${BASE}${path}`, { headers: auth(), cache: "no-store", signal: AbortSignal.timeout(15_000) });
+  }
   if (res.status === 401) {
     const body = await res.text().catch(() => "");
     // {"detail":"Live F1 session in progress. Global API access (including past sessions) is
@@ -81,6 +95,12 @@ interface OSession {
   location: string;
   gmt_offset: string;
   is_cancelled?: boolean;
+}
+interface OWeather {
+  date: string;
+  air_temperature: number;
+  track_temperature: number;
+  rainfall: number;
 }
 interface OMeeting {
   meeting_key: number;
@@ -197,6 +217,28 @@ export async function openF1Candidates(): Promise<ResolvedSession[]> {
   return value;
 }
 
+/** Every completed session of `year` (OpenF1 covers 2023 on), for the replay's session picker. */
+const yearCache = new Map<number, { at: number; value: { path: string; type: string; name: string; location: string; circuitKey: number; startMs: number }[] }>();
+export async function openF1SessionList(year: number) {
+  const hit = yearCache.get(year);
+  if (hit && Date.now() - hit.at < 10 * 60_000) return hit.value;
+  const [sessions, meetings] = [await get<OSession>(`/sessions?year=${year}`), await get<OMeeting>(`/meetings?year=${year}`)];
+  const meetingName = new Map(meetings.map((m) => [m.meeting_key, m.meeting_name]));
+  const now = Date.now();
+  const value = sessions
+    .filter((s) => !s.is_cancelled && Date.parse(s.date_end) + 10 * 60_000 <= now)
+    .map((s) => ({
+      path: `${OPENF1_PREFIX}${s.session_key}/${s.session_name.replace(/\s+/g, "_")}`,
+      type: s.session_type,
+      name: `${meetingName.get(s.meeting_key) ?? s.location} · ${s.session_name}`,
+      location: s.location,
+      circuitKey: s.circuit_key,
+      startMs: Date.parse(s.date_start),
+    }));
+  yearCache.set(year, { at: Date.now(), value });
+  return value;
+}
+
 /* -------------------------------- formatting -------------------------------- */
 
 const ms = (iso: string) => Date.parse(iso);
@@ -209,8 +251,7 @@ function fmtLap(sec: number): string {
 }
 
 /** OpenF1 gaps are seconds (number) or already-formatted strings ("+1 LAP"). */
-function fmtGap(v: number | string | null): string {
-  if (v == null) return "";
+function fmtGap(v: number | string): string {
   if (typeof v === "number") return `+${v.toFixed(3)}`;
   return v;
 }
@@ -230,17 +271,22 @@ export async function loadOpenF1Session(path: string): Promise<SessionCache> {
   const q = `?session_key=${key}`;
   // Sequential on purpose: `get` spaces requests for the rate limit anyway.
   const drivers = await get<ODriver>(`/drivers${q}`);
-  const laps = await get<OLap>(`/laps${q}`);
-  const stints = await get<OStint>(`/stints${q}`);
-  const pits = await get<OPit>(`/pit${q}`);
+  let laps = await get<OLap>(`/laps${q}`);
+  let stints = await get<OStint>(`/stints${q}`);
+  let pits = await get<OPit>(`/pit${q}`);
   const rcRaw = await get<ORc>(`/race_control${q}`);
-  const positions = await get<OPosition>(`/position${q}`);
+  let positions = await get<OPosition>(`/position${q}`);
   const isRace = session.session_type === "Race";
-  const intervals = isRace ? await get<OInterval>(`/intervals${q}`) : [];
-  const results = await get<OResult>(`/session_result${q}`);
+  let intervals = isRace ? await get<OInterval>(`/intervals${q}`) : [];
+  let results = await get<OResult>(`/session_result${q}`);
+  const weatherRows = await get<OWeather>(`/weather${q}`).catch(() => [] as OWeather[]);
 
-  rcRaw.sort((a, b) => ms(a.date) - ms(b.date));
-  const statusMsgs = rcRaw.filter((r) => r.category === "SessionStatus");
+  // Only what belongs to this session. F1's feed carried Mexico City FP3 2026 under the Race's
+  // name, so OpenF1's race_control for that Race opens with FP3's "SESSION STARTED" a day
+  // early — taken as the session's zero point, the replay opened on 26 empty hours.
+  const notBefore = ms(session.date_start) - 2 * 3600_000;
+  const rcAll = rcRaw.filter((r) => ms(r.date) >= notBefore).sort((a, b) => ms(a.date) - ms(b.date));
+  const statusMsgs = rcAll.filter((r) => r.category === "SessionStatus");
   const firstStart = statusMsgs.find((r) => /STARTED/i.test(r.message));
   const T0 = (firstStart ? ms(firstStart.date) : ms(session.date_start)) - LEAD_MS;
   const rel = (iso: string) => ms(iso) - T0;
@@ -259,6 +305,16 @@ export async function loadOpenF1Session(path: string): Promise<SessionCache> {
       TeamColour: (d.team_colour ?? "").replace(/^#/, ""),
     };
   }
+
+  // Only cars in this session's driver list: a stray entry (#236 in Mexico City qualifying
+  // 2026) would otherwise reach the board as a nameless row.
+  const listed = <T extends { driver_number: number }>(rows: T[]) => rows.filter((r) => driverMap[String(r.driver_number)]);
+  laps = listed(laps);
+  stints = listed(stints);
+  pits = listed(pits);
+  positions = listed(positions);
+  intervals = listed(intervals);
+  results = listed(results);
 
   /* session status, qualifying segments, the clock */
   const statusHist: { ts: number; status: string }[] = [];
@@ -309,10 +365,12 @@ export async function loadOpenF1Session(path: string): Promise<SessionCache> {
 
   for (const p of positions) push(rel(p.date), p.driver_number, { Position: String(p.position), Line: p.position });
   for (const iv of intervals) {
-    push(rel(iv.date), iv.driver_number, {
-      GapToLeader: fmtGap(iv.gap_to_leader),
-      IntervalToPositionAhead: { Value: fmtGap(iv.interval) },
-    });
+    // OpenF1 leaves a blank row just before a car crosses the line, between two real readings.
+    // Nothing was measured, so the last gap stands: passed on, it would empty the car's gap.
+    const upd: Record<string, unknown> = {};
+    if (iv.gap_to_leader != null) upd.GapToLeader = fmtGap(iv.gap_to_leader);
+    if (iv.interval != null) upd.IntervalToPositionAhead = { Value: fmtGap(iv.interval) };
+    if (Object.keys(upd).length) push(rel(iv.date), iv.driver_number, upd);
   }
 
   // Practice and qualifying start with every car in the garage.
@@ -327,7 +385,7 @@ export async function loadOpenF1Session(path: string): Promise<SessionCache> {
   // Laps that race control deleted (track limits) never count as a best, from the moment the
   // deletion is announced: "CAR 87 (BEA) TIME 1:40.294 DELETED - TRACK LIMITS …".
   const deletions: { ts: number; num: string; time: string }[] = [];
-  for (const r of rcRaw) {
+  for (const r of rcAll) {
     const m = /CAR (\d+).*?TIME (\d+:\d{2}\.\d{3}|\d{2}\.\d{3}) DELETED/i.exec(r.message);
     if (m) deletions.push({ ts: rel(r.date), num: m[1], time: m[2] });
   }
@@ -523,7 +581,7 @@ export async function loadOpenF1Session(path: string): Promise<SessionCache> {
     const status = neutral ?? (yellow.size ? "2" : "1");
     if (track.at(-1)?.status !== status) track.push({ ts, status });
   };
-  rcRaw.forEach((r, i) => {
+  rcAll.forEach((r, i) => {
     const ts = rel(r.date);
     const m = r.message.toUpperCase();
     if (r.category === "SessionStatus") {
@@ -577,6 +635,9 @@ export async function loadOpenF1Session(path: string): Promise<SessionCache> {
     sessionStartedTs,
     statusHist,
     clockHist,
+    weather: weatherRows
+      .map((w) => ({ ts: rel(w.date), air: w.air_temperature, track: w.track_temperature, rain: w.rainfall > 0 }))
+      .sort((a, b) => a.ts - b.ts),
     car: [],
     posOffset: T0,
     frames: [],
@@ -608,22 +669,34 @@ function windowLoader(entry: SessionCache, key: number, T0: number, durationMs: 
   const chunks = new Map<number, { frames: PosFrame[]; tel: TelFrame[]; used: number }>();
   const pending = new Map<number, Promise<void>>();
 
+  const publish = () => {
+    const ordered = [...chunks.entries()].sort((a, b) => a[0] - b[0]);
+    entry.frames = ordered.flatMap(([, c]) => c.frames);
+    entry.tel = ordered.flatMap(([, c]) => c.tel);
+  };
+
+  // Resolves once the cars can be drawn. Each request takes seconds, so a replay jumping to a new
+  // point shouldn't also wait for telemetry: that follows in the background.
   const loadChunk = async (idx: number) => {
     const from = new Date(T0 + idx * CHUNK_MS - 2000).toISOString();
     const to = new Date(T0 + (idx + 1) * CHUNK_MS + 2000).toISOString();
     const range = `session_key=${key}&date>=${from}&date<${to}`;
-    const loc = await get<OLocation>(`/location?${range}`);
-    const car = await get<OCarData>(`/car_data?${range}`);
     const lo = idx * CHUNK_MS;
     const hi = (idx + 1) * CHUNK_MS;
-    chunks.set(idx, { frames: toFrames(loc, T0, lo, hi), tel: toTel(car, T0, lo, hi), used: Date.now() });
+    const loc = await get<OLocation>(`/location?${range}`);
+    const chunk = { frames: toFrames(loc, T0, lo, hi), tel: [] as TelFrame[], used: Date.now() };
+    chunks.set(idx, chunk);
     while (chunks.size > MAX_CHUNKS) {
       const oldest = [...chunks.entries()].sort((a, b) => a[1].used - b[1].used)[0];
       chunks.delete(oldest[0]);
     }
-    const ordered = [...chunks.entries()].sort((a, b) => a[0] - b[0]);
-    entry.frames = ordered.flatMap(([, c]) => c.frames);
-    entry.tel = ordered.flatMap(([, c]) => c.tel);
+    publish();
+    void get<OCarData>(`/car_data?${range}`)
+      .then((car) => {
+        chunk.tel = toTel(car, T0, lo, hi);
+        publish();
+      })
+      .catch(() => {});
   };
 
   return async (fromMs: number, toMs: number) => {
@@ -645,6 +718,17 @@ function windowLoader(entry: SessionCache, key: number, T0: number, durationMs: 
         );
       }
       waits.push(pending.get(idx)!);
+    }
+    // The next chunk, ahead of need and not waited for, so its positions and telemetry have both
+    // landed before playback reaches them and forward play never stalls on a boundary.
+    const next = Math.floor((toMs + 30_000) / CHUNK_MS);
+    if (next <= Math.floor(durationMs / CHUNK_MS) && !chunks.has(next) && !pending.has(next)) {
+      pending.set(
+        next,
+        loadChunk(next)
+          .catch(() => {})
+          .finally(() => pending.delete(next)),
+      );
     }
     await Promise.all(waits);
   };

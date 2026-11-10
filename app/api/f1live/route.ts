@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { liveArchiveSession, liveArchiveState } from "@/lib/live/liveArchive";
-import { replayArchiveAnchorMs, replayArchiveCandidates, replayArchiveDuration, replayArchiveState } from "@/lib/replay/replayArchive";
+import { replayArchiveAnchorMs, replayArchiveCandidates, replayArchiveChosen, replayArchiveDuration, replayArchiveState, replayArchiveTimeline } from "@/lib/replay/replayArchive";
 import { liveSocketStatus, liveSocketState, liveSocketStateForVisitor } from "@/lib/live/liveSocket";
 import { F1_LIVE } from "@/lib/live/liveConfig";
 import { liveTestReplayDuration, liveTestReplayState } from "@/lib/live/liveTest";
@@ -46,6 +46,10 @@ function newTel<T extends { t: number }>(frames: T[], since: number): T[] {
  *   Always shows the most recently completed session from lights out, looping, via F1's
  *   free static feed — regardless of tokens or whether something happens to be live.
  */
+// A replay just started opens at lights out with this much data beyond it, so the map has
+// what it needs to start moving at once (the frame window behind it is 45 s).
+const REPLAY_START_LEAD_MS = 30_000;
+
 export async function GET(req: NextRequest) {
   const since = Number(req.nextUrl.searchParams.get("since") ?? 0) || 0;
   const view = req.nextUrl.searchParams.get("view") === "replay" ? "replay" : "live";
@@ -206,19 +210,40 @@ export async function GET(req: NextRequest) {
       return respond({ status: "idle", scheduledLive });
     }
 
-    // view === "replay" — always the most recently completed session, from lights out,
-    // looping, via the free feed. Deliberate, user-requested view — never idle just
-    // because something else happens to be live; that's what view=live is for.
-    for (const c of await replayArchiveCandidates()) {
+    // view === "replay" — a completed session, played wherever the visitor's replay controls
+    // say. Deliberate, user-requested view — never idle just because something else happens to
+    // be live; that's what view=live is for.
+    //   session + year  the session picked (checked against that season's list), else the most
+    //                   recent race;
+    //   pos             the session time to serve data up to (the replay clock plus a lead for
+    //                   interpolation) — pause, speed and seeking are all just where `pos` is;
+    //   start=1         open at lights out with that lead, for a replay just started.
+    // Without either (an older client), the old behaviour: from lights out, looping, at `t0`.
+    const sessionParam = req.nextUrl.searchParams.get("session");
+    const posParam = Number(req.nextUrl.searchParams.get("pos"));
+    const start = req.nextUrl.searchParams.get("start") === "1";
+    const candidates = sessionParam
+      ? [await replayArchiveChosen(sessionParam, Number(req.nextUrl.searchParams.get("year")))].filter((c) => c !== null)
+      : await replayArchiveCandidates();
+    for (const c of candidates) {
       // One candidate failing (OpenF1 refusing, a session with no data) moves on to the next.
-      const state = await (async () => {
+      const result = await (async () => {
         const dur = await replayArchiveDuration(c.path, false);
         if (!dur) return null;
-        const anchor = await replayArchiveAnchorMs(c.path, false);
+        const anchor = await replayArchiveAnchorMs(c.path, false, c.type);
         const span = Math.max(1, dur - anchor);
-        const upto = anchor + ((Date.now() - replayT0) % span);
-        return replayArchiveState(c.path, c.type, upto, false, asOf ?? upto);
+        const upto = Number.isFinite(posParam) && posParam > 0
+          ? Math.min(dur, Math.max(anchor, posParam))
+          : start
+            ? Math.min(dur, anchor + REPLAY_START_LEAD_MS)
+            : anchor + ((Date.now() - replayT0) % span);
+        const state = await replayArchiveState(c.path, c.type, upto, false, asOf ?? upto);
+        // The timeline rides along whenever the client's buffer is empty (a start, a seek, a
+        // new session) — the only times its controls need it.
+        const timeline = since === 0 ? await replayArchiveTimeline(c.path, c.type) : undefined;
+        return { state, upto, timeline };
       })().catch(() => null);
+      const state = result?.state;
       // OpenF1 closed mid-replay (a session went live): what's cached would play on with no cars
       // on the map, so it's "unavailable during a live session" instead.
       if (c.path.startsWith(OPENF1_PREFIX) && openF1LiveLocked()) break;
@@ -232,6 +257,10 @@ export async function GET(req: NextRequest) {
           ...state,
           frames: newFrames(state.frames, since),
           telFrames: newTel(state.telFrames, since),
+          replayUpto: result?.upto,
+          ...(result?.timeline
+            ? { replayInfo: { path: c.path, year: Number(req.nextUrl.searchParams.get("year")) || new Date().getUTCFullYear(), ...result.timeline } }
+            : {}),
         });
       }
     }

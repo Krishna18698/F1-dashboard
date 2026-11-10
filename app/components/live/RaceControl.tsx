@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { publishRaceControl } from "./useRaceUpdates";
 import { usePolling } from "../usePolling";
 import { trackStatusInfo } from "@/lib/trackStatus";
 import { getPlaybackT } from "./framesStore";
@@ -9,6 +10,7 @@ const MIN_KEY = "pitwall:raceControlMinimized";
 
 interface RcMessage {
   Utc?: string;
+  t?: number; // when it was issued, on the map's clock
   Category?: string;
   Message?: string;
   Flag?: string;
@@ -16,6 +18,8 @@ interface RcMessage {
 interface RaceControl {
   available: boolean;
   trackStatus?: { Status?: string } | null;
+  /** Flag changes due in the next few seconds, on the map's clock. */
+  statusAhead?: { t: number; status: string | null }[];
   messages?: RcMessage[];
 }
 
@@ -60,10 +64,13 @@ export default function RaceControl({
   ready,
   view = "live",
   replayT0,
+  replaySession = null,
 }: {
   ready: boolean;
   view?: "live" | "replay";
   replayT0?: number;
+  /** The session picked for a replay (null: the most recent race). */
+  replaySession?: { path: string; year: number } | null;
 }) {
   const [data, setData] = useState<RaceControl | null>(null);
   const [open, setOpenState] = useState(false);
@@ -125,16 +132,36 @@ export default function RaceControl({
       const t = getPlaybackT();
       const asOfParam = t > 0 ? `&asOf=${Math.floor(t)}` : "";
       const t0Param = view === "replay" && replayT0 ? `&t0=${replayT0}` : "";
-      const d = (await (await fetch(`/api/racecontrol?view=${view}${t0Param}${asOfParam}`, { cache: "no-store" })).json()) as RaceControl;
+      const sessionParam = view === "replay" && replaySession ? `&session=${encodeURIComponent(replaySession.path)}&year=${replaySession.year}` : "";
+      const d = (await (await fetch(`/api/racecontrol?view=${view}${t0Param}${sessionParam}${asOfParam}`, { cache: "no-store" })).json()) as RaceControl;
       setData(d);
     } catch {}
   }, data?.available ? 5_000 : 30_000);
 
+  // The server sends what's due in the next few seconds along with what's already happened (it
+  // has that data ~20 s ahead of the map). Each is revealed as the map's clock reaches it, so a
+  // flag or a message lands with the cars, not on whichever poll came next.
+  const [playback, setPlayback] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setPlayback(getPlaybackT()), 250);
+    return () => clearInterval(id);
+  }, []);
+
+  const messages = (data?.messages ?? []).filter((m) => m.t == null || !playback || m.t <= playback);
+  // The race updates feed picks penalties and investigations out of what's showing here.
+  const newest = messages[0];
+  const shownCount = messages.length;
+  useEffect(() => {
+    publishRaceControl(messages);
+    // Keyed on what's visible changing, not on the array, which is rebuilt every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newest?.Utc, newest?.Message, shownCount]);
+
   // Don't appear before the Driver Live Tracker itself does — it was popping in well
   // before the map/board finished loading, which read as out of order.
   if (!ready || !data?.available) return null;
-  const messages = data.messages ?? [];
-  const ts = trackStatusInfo(data.trackStatus?.Status);
+  const dueStatus = playback ? data.statusAhead?.filter((e) => e.t <= playback).at(-1)?.status : undefined;
+  const ts = trackStatusInfo(dueStatus ?? data.trackStatus?.Status);
 
   if (minimized) {
     return (

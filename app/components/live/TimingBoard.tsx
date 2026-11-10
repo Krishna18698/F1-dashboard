@@ -18,10 +18,10 @@ const ELIMINATED_PER_SEGMENT = 6;
 
 /** F1's own colour semantics: purple = fastest anyone, green = personal best. */
 function sectorColour(s?: { overallFastest: boolean; personalFastest: boolean }): string {
-  if (!s) return "text-muted";
-  if (s.overallFastest) return "text-violet-500";
-  if (s.personalFastest) return "text-emerald-600";
-  return "text-ink-soft";
+  if (!s) return "text-white/60";
+  if (s.overallFastest) return "text-[#d84bff]";
+  if (s.personalFastest) return "text-emerald-400";
+  return "text-white/85";
 }
 
 /** TrackStatus codes that neutralise a race, as chips (same colours as the map's tint). */
@@ -182,7 +182,7 @@ export default function TimingBoard({
   // Sector columns only where sectors are the story (quali/practice) and only once there's
   // room — on a narrow screen they'd crush the driver name, so they collapse away and the
   // per-driver detail row below still carries them.
-  const showSectors = !isRace && !!sectors?.size;
+  const showSectors = !!sectors?.size;
   // A driver has taken the chequered flag once they have completed the race distance. Read per
   // driver rather than from the session ending, because they cross over ~a minute and the board
   // should show each one as it happens. Guarded on a real totalLaps: it is 0 until F1 publishes
@@ -200,7 +200,9 @@ export default function TimingBoard({
   // left the driver a sliver — "V." for VER. Sectors need ~30.5rem of fixed columns plus ~4rem
   // for the driver (bar, code, pit badge), so they appear from 35rem of board.
   const cols = isRace
-    ? "grid-cols-[2rem_1fr_auto]"
+    ? showSectors
+      ? "grid-cols-[2rem_1fr_auto] @min-[35rem]:grid-cols-[2rem_1fr_repeat(3,4.25rem)_5rem]"
+      : "grid-cols-[2rem_1fr_auto]"
     : showSectors
       ? "grid-cols-[2rem_1fr_4.5rem_1.5rem_3.5rem] @min-[35rem]:grid-cols-[2rem_1fr_repeat(3,4.25rem)_5rem_1.75rem_4rem]"
       : "grid-cols-[2rem_1fr_4.5rem_1.5rem_3.5rem]";
@@ -299,23 +301,23 @@ export default function TimingBoard({
           </span>
         )}
       </div>
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-line">
+      <div className="carbon-bg flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg text-white ring-1 ring-white/10">
         <div
-          className={`grid ${cols} gap-2 border-b border-line bg-panel px-3 py-1.5 text-[0.6rem] font-bold tracking-wider text-muted`}
+          className={`grid ${cols} gap-2 border-b border-white/10! bg-white/5 px-3 py-1.5 text-[0.6rem] font-bold tracking-wider text-white/50`}
         >
           <span className="text-right">P</span>
           <span>Driver</span>
+          {showSectors && (
+            <>
+              <span className="hidden text-right @min-[35rem]:block">S1</span>
+              <span className="hidden text-right @min-[35rem]:block">S2</span>
+              <span className="hidden text-right @min-[35rem]:block">S3</span>
+            </>
+          )}
           {isRace ? (
             <span className="text-right">{redFlagged ? "" : "Gap / Int"}</span>
           ) : (
             <>
-              {showSectors && (
-                <>
-                  <span className="hidden text-right @min-[35rem]:block">S1</span>
-                  <span className="hidden text-right @min-[35rem]:block">S2</span>
-                  <span className="hidden text-right @min-[35rem]:block">S3</span>
-                </>
-              )}
               <span className="text-right">Best</span>
               <span className="text-center" title="Tyre the best lap was set on">Tyre</span>
               <span className="text-right">Gap</span>
@@ -323,7 +325,7 @@ export default function TimingBoard({
           )}
         </div>
 
-        <ol className="flex min-h-0 flex-1 flex-col divide-y divide-line">
+        <ol className="flex min-h-0 flex-1 flex-col divide-y divide-white/10!">
           {order.map((num, i) => {
             const d = drivers.get(num);
             const pos = isRace ? (positions.get(num) ?? i + 1) : i + 1;
@@ -339,10 +341,10 @@ export default function TimingBoard({
                 onClick={() => onSelect?.(isSel ? null : num)}
                 className={`grid ${cols} grow cursor-pointer items-center gap-2 px-2 py-1.5 transition-colors sm:px-3 sm:py-2 ${
                   isSel
-                    ? "bg-red/5 ring-1 ring-inset ring-red/30"
+                    ? "bg-white/10 ring-1 ring-inset ring-red/60"
                     : inDanger
-                      ? "bg-red/10 hover:bg-red/15"
-                      : "hover:bg-panel"
+                      ? "bg-red/20 hover:bg-red/25"
+                      : "hover:bg-white/5"
                 } ${isOut || isKnockedOut ? "opacity-50" : ""}`}
                 title={
                   isKnockedOut
@@ -371,10 +373,10 @@ export default function TimingBoard({
                       aria-label={`${isSel ? "Stop following" : "Follow"} ${d?.full_name || d?.name_acronym || num}`}
                       className="shrink-0 rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red"
                     >
-                      <span className={`text-sm font-semibold ${inDanger ? "text-red" : ""}`}>{d?.name_acronym ?? num}</span>
+                      <span className={`text-sm font-semibold ${inDanger ? "text-red-400" : ""}`}>{d?.name_acronym ?? num}</span>
                     </button>
                   ) : (
-                    <span className={`shrink-0 text-sm font-semibold ${inDanger ? "text-red" : ""}`}>
+                    <span className={`shrink-0 text-sm font-semibold ${inDanger ? "text-red-400" : ""}`}>
                       {d?.name_acronym ?? num}
                     </span>
                   )}
@@ -382,7 +384,7 @@ export default function TimingBoard({
                   {/* From 28rem of board; with sectors, they take that room back at 35rem until
                       there's enough again at 40rem ("Red Bull Racing" needs ~90px). */}
                   <span
-                    className={`hidden truncate text-xs text-muted @min-[28rem]:inline ${showSectors ? "@min-[35rem]:hidden @min-[40rem]:inline" : ""}`}
+                    className={`hidden truncate text-xs text-white/60 @min-[28rem]:inline ${showSectors ? "@min-[35rem]:hidden @min-[40rem]:inline" : ""}`}
                   >
                     {d?.team_name}
                   </span>
@@ -393,7 +395,7 @@ export default function TimingBoard({
                       Not for an eliminated driver: their session is over anyway. */}
                   {!isRace && !isKnockedOut && inPit?.has(num) && (
                     <span
-                      className="shrink-0 rounded-sm border border-line-strong px-1 text-[0.6rem] font-bold leading-4 text-ink-soft"
+                      className="shrink-0 rounded-sm border border-white/30! px-1 text-[0.6rem] font-bold leading-4 text-white/80"
                       title="In the pit lane"
                       aria-label="In the pit lane"
                     >
@@ -407,10 +409,26 @@ export default function TimingBoard({
                   )}
                 </div>
 
+                {/* Sector times, where the board has room. Not for a car that's out, or under a red
+                    flag (everything F1 still sends then is frozen at the flag). */}
+                {showSectors &&
+                  !isKnockedOut &&
+                  [0, 1, 2].map((si) => {
+                    const sec = (isRace && (isOut || redFlagged)) ? undefined : sectors?.get(num)?.[si];
+                    return (
+                      <span
+                        key={si}
+                        className={`tnum hidden text-right font-mono text-xs @min-[35rem]:block ${sectorColour(sec)}`}
+                        title={sec?.overallFastest ? "Fastest of anyone" : sec?.personalFastest ? "Personal best" : undefined}
+                      >
+                        {sec?.value || "–"}
+                      </span>
+                    );
+                  })}
                 {isRace ? (
                   isOut ? (
                     <div className="text-right">
-                      <span className="rounded-sm bg-ink px-1.5 py-0.5 text-[0.6rem] font-bold tracking-wider text-white">
+                      <span className="rounded-sm bg-white/15 px-1.5 py-0.5 text-[0.6rem] font-bold tracking-wider text-white/85">
                         DNF
                       </span>
                     </div>
@@ -425,7 +443,7 @@ export default function TimingBoard({
                         {formatGap(intervals.get(num), isP1)}
                       </span>
                       {!isP1 && (
-                        <span className="tnum block font-mono text-[0.6rem] text-muted">
+                        <span className="tnum block font-mono text-[0.6rem] text-white/60">
                           {formatInterval(intervals.get(num))}
                         </span>
                       )}
@@ -433,29 +451,16 @@ export default function TimingBoard({
                   )
                 ) : isKnockedOut ? (
                   <div className={`text-right ${showSectors ? "col-span-3 @min-[35rem]:col-span-6" : "col-span-3"}`}>
-                    <span className="rounded-sm bg-ink px-1.5 py-0.5 text-[0.6rem] font-bold tracking-wider text-white">
+                    <span className="rounded-sm bg-white/15 px-1.5 py-0.5 text-[0.6rem] font-bold tracking-wider text-white/85">
                       OUT
                     </span>
                   </div>
                 ) : (
                   <>
-                    {showSectors &&
-                      [0, 1, 2].map((si) => {
-                        const sec = sectors?.get(num)?.[si];
-                        return (
-                          <span
-                            key={si}
-                            className={`tnum hidden text-right font-mono text-xs @min-[35rem]:block ${sectorColour(sec)}`}
-                            title={sec?.overallFastest ? "Fastest of anyone" : sec?.personalFastest ? "Personal best" : undefined}
-                          >
-                            {sec?.value || "–"}
-                          </span>
-                        );
-                      })}
                     {/* An earlier segment's time, greyed, while this segment has none yet: F1 empties
                         everyone's best when a segment ends. */}
                     {lap?.best == null && lap?.prevBest != null ? (
-                      <span className="tnum text-right font-mono text-xs text-muted" title="Best from the previous segment">
+                      <span className="tnum text-right font-mono text-xs text-white/60" title="Best from the previous segment">
                         {formatLap(lap.prevBest)}
                       </span>
                     ) : (
@@ -473,7 +478,7 @@ export default function TimingBoard({
                         </span>
                       ) : null}
                     </span>
-                    <span className="tnum text-right font-mono text-[0.7rem] text-muted">
+                    <span className="tnum text-right font-mono text-[0.7rem] text-white/60">
                       {isP1 ? "—" : formatDelta(lap?.best, fastest) || "—"}
                     </span>
                   </>

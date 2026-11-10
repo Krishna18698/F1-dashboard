@@ -30,11 +30,21 @@ const g = globalThis as unknown as { WebSocket?: unknown };
 if (typeof g.WebSocket === "undefined") g.WebSocket = WsImpl;
 
 const HUB = "https://livetiming.formula1.com/signalrcore";
-const TOPICS = ["DriverList", "TimingData", "TimingAppData", "TimingStats", "Position.z", "SessionInfo", "SessionStatus", "ChampionshipPrediction", "RaceControlMessages", "TrackStatus", "LapCount", "CarData.z", "SessionData", "ExtrapolatedClock"];
+const TOPICS = ["DriverList", "TimingData", "TimingAppData", "TimingStats", "Position.z", "SessionInfo", "SessionStatus", "ChampionshipPrediction", "RaceControlMessages", "TrackStatus", "LapCount", "CarData.z", "SessionData", "ExtrapolatedClock", "WeatherData"];
 const ENDED = new Set(["finished", "finalised", "ends"]);
+/** Without word from Race Control, how long past the scheduled start before a session counts
+ *  as late. Race Control can stay quiet through a real delay (Melbourne FP3 2026: nothing until
+ *  17 minutes past), and the formation lap takes a few seconds to appear in the feed. */
+const START_DELAY_GRACE_MS = 2 * 60_000;
+/** Race Control announcing a late start. See `startDelayAnnounced`. */
+const START_DELAY_WORDS =
+  /DELAYED START|START OF .*WILL BE DELAYED|\b(?:SESSION|RACE|SPRINT|QUALIFYING|SPRINT QUALIFYING|FORMATION LAP|Q1|SQ1) WILL START AT \d{1,2}:\d{2}/i;
+
 /** How long a snapshot refresh may take before the connection is presumed dead. */
 const REFRESH_TIMEOUT_MS = 4000;
 const BUFFER_MS = 45_000; // keep ~45s of position frames (covers a 20s playback delay)
+// How far past the map's instant each poll says what's coming: a poll interval, with margin.
+const BOARD_AHEAD_MS = 4_500;
 /**
  * Position history a poll may receive: the map's 20 s playback delay (TrackMap DELAY_MS) plus
  * margin. Only the FIRST poll gets all of it — later ones ask for just what's newer (`since`).
@@ -166,6 +176,8 @@ interface RcMessage {
   Sector?: number;
   Status?: string;
   Mode?: string;
+  /** When it was issued, on the map's clock — lets the page reveal it as the map gets there. */
+  t?: number;
   RacingNumber?: string;
   Lap?: number;
 }
@@ -180,6 +192,7 @@ type SessionInfo = {
   StartDate?: string;
   EndDate?: string;
   GmtOffset?: string;
+  Path?: string;
   ArchiveStatus?: { Status?: string };
   Meeting?: { Name?: string; Number?: number; Location?: string; Circuit?: { ShortName?: string; Key?: number } };
 };
@@ -232,6 +245,16 @@ export interface F1LiveRow {
   sectors: SectorTime[]; // S1/S2/S3 with F1's own purple/green flags
   bestSectors: (number | null)[]; // best S1/S2/S3 of the session, seconds
   speeds: Record<string, SpeedTrap>; // I1 / I2 / FL / ST speed traps
+}
+/** One moment's changes to the board, due at `t` on the map's clock (see changesAhead). */
+export interface BoardChange {
+  t: number;
+  rows?: Record<number, Partial<F1LiveRow>>;
+  order?: number[];
+  currentLap?: number;
+  trackStatus?: string | null;
+  sessionStatus?: string | null;
+  fastestLap?: FastestLap | null;
 }
 export interface FastestLap {
   driver_number: number;
@@ -294,6 +317,10 @@ export interface F1LiveState {
   lapResets?: { t: number; n: number }[];
   /** Upcoming sector-display changes (a time landing, the lap clearing) on the map's clock. */
   sectorEvents?: { t: number; n: number; s: SectorTime[] }[];
+  /** Board changes due before the next poll, for the page to apply as the map reaches them. */
+  ahead?: BoardChange[];
+  /** Air and track temperature (°C) and whether it's raining. */
+  weather?: { air: number; track: number; rain: boolean } | null;
   sectorsSynced?: boolean;
 }
 export interface SessionResult {
@@ -483,6 +510,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean; token?: strin
   // Each TrackStatus change on F1's own clock (the feed's stamp — the clock the car positions
   // are on), so Race Control can show the flag at the instant the map is drawing.
   let trackStatusLog: { t: number; status: string | null }[] = [];
+  let weather: { air: number; track: number; rain: boolean } | null = null;
   // Race lap counter (races only) — drives the tyre-strategy bar's lap axis.
   let lapCount: { CurrentLap?: number; TotalLaps?: number } | null = null;
   // Which qualifying segment is live (1=Q1, 2=Q2, 3=Q3) — from SessionData's QualifyingPart.
@@ -535,19 +563,21 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean; token?: strin
     order: number[];
     currentLap: number;
     trackStatus: string | null;
+    sessionStatus: string | null;
     fastestLap: FastestLap | null;
-    by: Record<number, {
-      position: number;
-      gap: string;
-      interval: string;
-      laps: number;
-      inPit: boolean;
-      last: number | null;
-      tyreLaps: number;
-      stints: F1LiveRow["stints"];
-      tookFlag: boolean;
-    }>;
+    by: Record<number, F1LiveRow>;
   }[] = [];
+  // The session and qualifying clocks as they stood at each poll, so they too can be served at
+  // the map's instant — the feed's own clock reads ~20 s ahead of the cars.
+  let clockHistory: {
+    t: number;
+    remainingMs: number | null; // qualifying segment
+    segmentEnded: boolean;
+    nextInMs: number | null;
+    part: number | null;
+    sessionRemainingMs: number | null;
+  }[] = [];
+  let lastFeedSnapshot = 0;
   /**
    * Which lap a sector time belongs to. F1 keeps a sector's Value across the start/finish
    * line and only overwrites it when that sector is next completed, so between the final
@@ -594,6 +624,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean; token?: strin
       raceControl = {};
       trackStatus = null;
       trackStatusLog = [];
+      weather = null;
       lapCount = null;
       qualifyingPart = null;
       qualifyingPartHistory = [];
@@ -606,6 +637,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean; token?: strin
       sessionClock = null;
       sectorLog = {};
       orderHistory = [];
+      clockHistory = [];
       valueSetAt = {};
       bestSectorOf = {};
       lapResetAt = {};
@@ -947,6 +979,11 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean; token?: strin
       } else if (m && typeof m === "object") {
         for (const [k, v] of Object.entries(m as Dict)) raceControl[k] = v as RcMessage;
       }
+    } else if (topic === "WeatherData") {
+      const w = data as { AirTemp?: string; TrackTemp?: string; Rainfall?: string };
+      const air = Number(w.AirTemp);
+      const track = Number(w.TrackTemp);
+      if (Number.isFinite(air) && Number.isFinite(track)) weather = { air, track, rain: Number(w.Rainfall) > 0 };
     } else if (topic === "TrackStatus") {
       trackStatus = data as typeof trackStatus;
       // A snapshot carries no stamp: treat it as known from the newest data, so an older
@@ -1012,6 +1049,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean; token?: strin
       applyCarData(data as string);
     }
     if (topic === "SessionData" || topic === "SessionStatus" || topic === "LapCount") relabel();
+    if (stamp && (topic === "TimingData" || topic === "TimingAppData" || topic === "TrackStatus" || topic === "LapCount" || topic === "SessionStatus")) snapshotFromFeed();
   }
 
   function applySnapshot(snap: Record<string, unknown>) {
@@ -1021,6 +1059,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean; token?: strin
     if (snap.ChampionshipPrediction) applyFeed("ChampionshipPrediction", snap.ChampionshipPrediction);
     if (snap.RaceControlMessages) applyFeed("RaceControlMessages", snap.RaceControlMessages);
     if (snap.TrackStatus) applyFeed("TrackStatus", snap.TrackStatus);
+    if (snap.WeatherData) applyFeed("WeatherData", snap.WeatherData);
     if (snap.LapCount) applyFeed("LapCount", snap.LapCount);
     if (snap.SessionData) applyFeed("SessionData", snap.SessionData);
     if (snap.DriverList) applyFeed("DriverList", snap.DriverList);
@@ -1511,6 +1550,75 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean; token?: strin
     return { nums, mode, rows, order, fastestLap };
   }
 
+  /**
+   * Notes the running order for the map's clock to be served from. Keyed by F1's own stamp on
+   * the newest timing message — the clock `asOf` is on, and what the sector log already uses.
+   * The newest position frame used to be the key, and those arrive in batches several seconds
+   * behind the timing, so a change could be filed that much early.
+   */
+  function recordOrder(rows: Record<number, F1LiveRow>, order: number[], fastestLap: FastestLap | null) {
+    const now = lastTimingStamp ?? frameBuffer.at(-1)?.t ?? Date.now();
+    const last = orderHistory[orderHistory.length - 1];
+    if (last && now - last.t <= 250) return;
+    const by: (typeof orderHistory)[number]["by"] = {};
+    for (const [n, r] of Object.entries(rows)) {
+      by[+n] = { ...r };
+    }
+    orderHistory.push({
+      t: now,
+      order: [...order],
+      currentLap: Number(lapCount?.CurrentLap ?? 0),
+      trackStatus: trackStatus?.Status ?? null,
+      sessionStatus: sessionStatus?.Status ?? null,
+      fastestLap,
+      by,
+    });
+    const cutoff = now - BUFFER_MS;
+    if (orderHistory.length > 20 && orderHistory[0].t < cutoff) orderHistory = orderHistory.filter((h) => h.t >= cutoff);
+  }
+
+  /** The same from the feed itself, at most every 0.4 s: with snapshots only at each poll, a
+   *  value could be a whole poll older than the instant asked for, on top of the poll's own
+   *  wait. */
+  function snapshotFromFeed() {
+    const now = Date.now();
+    if (now - lastFeedSnapshot < 400 || !sessionInfo) return;
+    lastFeedSnapshot = now;
+    const { rows, order, fastestLap } = classify();
+    if (order.length) recordOrder(rows, order, fastestLap);
+  }
+
+  /**
+   * What changes on the board in the next few seconds of the map's clock. The feed is ~20 s
+   * ahead of the map, so this is already known: each poll carries it, stamped, and the page
+   * applies each change as the cars reach it. Without this every card waited for the next poll
+   * — up to 3 s behind the map — however fresh the server's data was.
+   */
+  function changesAhead(asOfMs: number): BoardChange[] {
+    const same = (a: F1LiveRow, b: F1LiveRow) =>
+      JSON.stringify({ ...a, sectors: 0, weekendTyresLeft: 0 }) === JSON.stringify({ ...b, sectors: 0, weekendTyresLeft: 0 });
+    const out: BoardChange[] = [];
+    let prev: (typeof orderHistory)[number] | undefined;
+    for (const h of orderHistory) {
+      if (h.t > asOfMs + BOARD_AHEAD_MS) break;
+      if (h.t > asOfMs && prev) {
+        const change: BoardChange = { t: h.t };
+        for (const [n, r] of Object.entries(h.by)) {
+          const was = prev.by[+n];
+          if (!was || !same(was, r)) (change.rows ??= {})[+n] = { ...r, sectors: undefined, weekendTyresLeft: undefined };
+        }
+        if (h.order.join() !== prev.order.join()) change.order = h.order;
+        if (h.currentLap !== prev.currentLap) change.currentLap = h.currentLap;
+        if (h.trackStatus !== prev.trackStatus) change.trackStatus = h.trackStatus;
+        if (h.sessionStatus !== prev.sessionStatus) change.sessionStatus = h.sessionStatus;
+        if (h.fastestLap?.time !== prev.fastestLap?.time) change.fastestLap = h.fastestLap;
+        if (Object.keys(change).length > 1) out.push(change);
+      }
+      prev = h;
+    }
+    return out;
+  }
+
   async function socketState(asOfMs?: number): Promise<F1LiveState | null> {
     if (!(await ensureConnection())) return null;
     await refreshIfStale();
@@ -1657,7 +1765,24 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean; token?: strin
     let outFastest = fastestLap;
     let outLap = Number(lapCount?.CurrentLap ?? 0);
     let outTrack = trackStatus?.Status ?? null;
+    let outStatus = sessionStatus?.Status ?? null;
+    const liveSessionRemainingMs = (() => {
+      if (!sessionClock) return null;
+      return sessionClock.running ? Math.max(0, sessionClock.remainingMs - (Date.now() - sessionClock.atMs)) : sessionClock.remainingMs;
+    })();
+    let outClock = {
+      remainingMs: qualiClock.remainingMs,
+      segmentEnded: qualiClock.segmentEnded,
+      nextInMs: qualiClock.nextInMs,
+      part: qualiClock.part ?? qualifyingPart,
+      sessionRemainingMs: liveSessionRemainingMs,
+    };
     {
+      const clockAt = lastTimingStamp ?? frameBuffer.at(-1)?.t ?? Date.now();
+      if (!clockHistory.length || clockAt - clockHistory[clockHistory.length - 1].t > 500) {
+        clockHistory.push({ t: clockAt, ...outClock });
+        if (clockHistory.length > 400) clockHistory = clockHistory.slice(-300);
+      }
       // Key these by the SAME clock the client's `asOf` is derived from: F1's own position
       // timestamps (see pushFrames — `Date.parse(f.Timestamp)`), NOT local wall time. Keying
       // by Date.now() put the snapshots on a clock running ahead of the frame clock by the
@@ -1668,34 +1793,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean; token?: strin
       // client holds is itself 7-9s old — that is the wrong yardstick). The board read 27.4s
       // with Date.now() keying (~3.3s behind the dots) and 23.2s with the frame clock (~0.9s
       // ahead, inside the 0-3s the board is stale between polls anyway).
-      const now = frameBuffer.at(-1)?.t ?? Date.now();
-      const last = orderHistory[orderHistory.length - 1];
-      if (!last || now - last.t > 250) {
-        const by: (typeof orderHistory)[number]["by"] = {};
-        for (const n of nums) {
-          const r = rows[+n];
-          // `last` and the stint bar ride the same clock as the position beside them. Leaving
-          // them live while the order was rewound split the Tyre Tracker across two instants
-          // ~20s apart — its own lap time describing a lap the dots had not reached.
-          by[+n] = {
-            position: r.position,
-            gap: r.gap_to_leader,
-            interval: r.interval,
-            laps: r.laps,
-            inPit: r.in_pit,
-            last: r.last,
-            tyreLaps: r.tyre_laps,
-            stints: r.stints,
-            // As the car reaches the line on the map, not ~20s before.
-            tookFlag: r.took_flag,
-          };
-        }
-        orderHistory.push({ t: now, order: [...order], currentLap: outLap, trackStatus: outTrack, fastestLap, by });
-        const cutoff = now - BUFFER_MS;
-        if (orderHistory.length > 20 && orderHistory[0].t < cutoff) {
-          orderHistory = orderHistory.filter((h) => h.t >= cutoff);
-        }
-      }
+      recordOrder(rows, order, fastestLap);
       if (asOfMs) {
         // Newest snapshot at or before the requested instant. If the buffer doesn't reach that
         // far back yet (fresh connection), the oldest one is the closest honest answer.
@@ -1709,20 +1807,27 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean; token?: strin
           outOrder = pick.order.filter((n) => rows[n]);
           outLap = pick.currentLap;
           outTrack = pick.trackStatus;
+          outStatus = pick.sessionStatus;
           outFastest = pick.fastestLap;
+          // The whole row, so nothing on the board or the Tyre Tracker runs ahead of the cars:
+          // a best lap before the car finished it, a new compound before it pitted. Sectors have
+          // their own finer log (above); the weekend allocation doesn't move during a session.
           for (const [k, v] of Object.entries(pick.by)) {
             const r = rows[+k];
-            if (!r) continue;
-            r.position = v.position;
-            r.gap_to_leader = v.gap;
-            r.interval = v.interval;
-            r.laps = v.laps;
-            r.in_pit = v.inPit;
-            r.last = v.last;
-            r.tyre_laps = v.tyreLaps;
-            r.stints = v.stints;
-            r.took_flag = v.tookFlag;
+            if (r) Object.assign(r, v, { sectors: r.sectors, weekendTyresLeft: r.weekendTyresLeft });
           }
+        }
+        // The clocks, as of the same instant. A running one has counted down since it was noted.
+        const held = clockHistory.findLast((c) => c.t <= asOfMs) ?? clockHistory[0];
+        if (held) {
+          const gone = sessionClock?.running === false ? 0 : Math.max(0, asOfMs - held.t);
+          outClock = {
+            remainingMs: held.remainingMs != null && !held.segmentEnded ? Math.max(0, held.remainingMs - gone) : held.remainingMs,
+            segmentEnded: held.segmentEnded,
+            nextInMs: held.nextInMs != null ? Math.max(0, held.nextInMs - gone) : null,
+            part: held.part,
+            sessionRemainingMs: held.sessionRemainingMs != null ? Math.max(0, held.sessionRemainingMs - gone) : null,
+          };
         }
       }
     }
@@ -1739,24 +1844,20 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean; token?: strin
       currentLap: outLap,
       fastestLap: outFastest,
       trackStatus: outTrack,
-      sessionStatus: sessionStatus?.Status ?? null,
+      weather,
+      sessionStatus: outStatus,
       suspendedRestartMs: restartAtMs(),
       restartLabel: restartLabel(),
       telFrames: telBuffer.slice(-200), // ~45s at ~4Hz
-      qualifyingPart: qualiClock.part ?? qualifyingPart,
-      qualifyingRemainingMs: qualiClock.remainingMs,
+      qualifyingPart: outClock.part,
+      qualifyingRemainingMs: outClock.remainingMs,
       // From F1's clock, never from EndDate: a scheduled end cannot know about a red flag, so
       // it would have run 18 minutes fast through Madrid FP3 and then sat at zero while the
       // session was still going.
-      sessionRemainingMs: (() => {
-        if (!sessionClock) return null;
-        return sessionClock.running
-          ? Math.max(0, sessionClock.remainingMs - (Date.now() - sessionClock.atMs))
-          : sessionClock.remainingMs;
-      })(),
+      sessionRemainingMs: outClock.sessionRemainingMs,
       sessionClockRunning: sessionClock ? sessionClock.running : null,
-      qualifyingSegmentEnded: qualiClock.segmentEnded,
-      nextQualifyingSegmentInMs: qualiClock.nextInMs,
+      qualifyingSegmentEnded: outClock.segmentEnded,
+      nextQualifyingSegmentInMs: outClock.nextInMs,
       // Two different situations, because the green light is known at different times.
       // REPLAY-style (the whole session already loaded): sessionStartedTs is known up front,
       // so the formation lap is simply "before it".
@@ -1798,16 +1899,18 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean; token?: strin
                 (formationSeenAt ??= fieldMoving() && (startSuspendedAt() == null || trackStatus?.Status !== "5") ? Date.now() : null) !=
                   null))) ||
           restartFormationLap()),
-      // Past the scheduled start, race not started, field not yet out on the formation lap.
-      // Any session: past its scheduled start, not started. Races additionally need the field to
-      // still be on the grid (no formation lap yet, start not suspended).
+      // Not started, and either Race Control has said so or it's well past the scheduled start.
+      // Races additionally need the field to still be on the grid (no formation lap yet, start
+      // not suspended). Never at the scheduled minute itself: the formation lap takes a few
+      // seconds to show in the feed, and São Paulo 2026 flashed START DELAYED at 14:00 while the
+      // field left on time.
       startDelayed:
         !ended &&
         (mode !== "race" || !anonymous) &&
         sessionStartedTs == null &&
         formationSeenAt == null &&
         startSuspendedAt() == null &&
-        (scheduledStartMs() ?? Infinity) < Date.now(),
+        (startDelayAnnounced() || (scheduledStartMs() ?? Infinity) + START_DELAY_GRACE_MS < Date.now()),
       mapAvailable: !anonymous,
       sessionEnded: ended,
       // Only what's still ahead of the dots is useful to the client; anything older has
@@ -1815,6 +1918,7 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean; token?: strin
       segmentEvents: asOfMs ? segmentEvents.filter((e) => e.t > asOfMs) : [],
       lapResets: asOfMs ? lapResets.filter((e) => e.t > asOfMs) : [],
       sectorEvents: asOfMs ? sectorEventsAfter(asOfMs) : [],
+      ahead: asOfMs ? changesAhead(asOfMs) : [],
       // False when the sectors are live rather than at the map's instant (no `asOf` yet): the
       // page then waits for synced ones instead of showing these and jumping back 20 s later.
       sectorsSynced: asOfMs != null,
@@ -1944,6 +2048,14 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean; token?: strin
     return at;
   }
 
+  /** Race Control's own word that the start is late, before it happens: "DELAYED START",
+   *  "START OF SESSION WILL BE DELAYED", or a new time ("FORMATION LAP WILL START AT 14:10",
+   *  "SESSION WILL START AT 12:50"). Wording from every 2026 session's messages. Only read while
+   *  the session hasn't started, so Q2/Q3 notices never count. */
+  function startDelayAnnounced(): boolean {
+    return Object.values(raceControl).some((m) => START_DELAY_WORDS.test(m.Message ?? ""));
+  }
+
   /** The race's scheduled start, epoch ms, or null if F1 hasn't published it. */
   function scheduledStartMs(): number | null {
     if (!sessionInfo?.StartDate) return null;
@@ -2000,9 +2112,10 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean; token?: strin
    * ~20 s behind the feed). Without it, a flag or an incident was listed before the cars on the
    * map had reached it — the board and the map were already rewound; this drawer was not.
    */
-  async function getRaceControl(asOfMs?: number): Promise<{
+  async function getRaceControl(asOfMs?: number, aheadMs = 0): Promise<{
     available: boolean;
     trackStatus?: { Status?: string; Message?: string } | null;
+    statusAhead?: { t: number; status: string | null }[];
     messages?: RcMessage[];
   }> {
     if (!(await ensureConnection())) return { available: false };
@@ -2011,8 +2124,12 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean; token?: strin
     const all = Object.values(raceControl).filter((m) => m.Message);
     if (!all.length) return { available: false };
     const issuedAt = (m: RcMessage) => (m.Utc ? Date.parse(m.Utc.endsWith("Z") ? m.Utc : `${m.Utc}Z`) : NaN);
+    // Everything due in the next few seconds comes too: the feed is ~20 s ahead of the map, so
+    // it's already known, and the page reveals each as the map reaches it rather than on the
+    // next poll.
     const messages = all
-      .filter((m) => !asOfMs || !(issuedAt(m) > asOfMs))
+      .filter((m) => !asOfMs || !(issuedAt(m) > asOfMs + aheadMs))
+      .map((m) => ({ ...m, t: issuedAt(m) }))
       .sort((a, b) => (b.Utc ?? "").localeCompare(a.Utc ?? ""))
       .slice(0, 150);
     let status = trackStatus;
@@ -2023,7 +2140,8 @@ function createLiveSocketSession(opts: { allowAnonymous?: boolean; token?: strin
       for (const e of trackStatusLog) if (e.t <= asOfMs) pick = e;
       status = pick.status === trackStatus?.Status ? trackStatus : { Status: pick.status ?? undefined };
     }
-    return { available: true, trackStatus: status, messages };
+    const statusAhead = asOfMs ? trackStatusLog.filter((e) => e.t > asOfMs && e.t <= asOfMs + aheadMs) : [];
+    return { available: true, trackStatus: status, statusAhead, messages };
   }
 
   /** Lightweight "is a session live and which one" — for the hero + schedule. */

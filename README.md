@@ -81,8 +81,9 @@ through the live view. Click any image for full size.
   RPM** from the car's own data channel. The selected car also leaves a short **heat trail**
   (~8 s of track, orange fading to red) so you can see its line through the corners; it breaks
   off cleanly at pit exit or a gap in the data instead of drawing across the infield.
-- **Pit lane & DNF handling** — cars vanish from the map while in the pits and reappear on
-  exit; retired/crashed drivers get a **DNF** chip and drop off the map instead of sitting
+- **Pit lane & DNF handling** — cars vanish from the map while in the pits and reappear once
+  they're back on the racing line, not at the pit exit line, which can be 20 s up the exit road;
+  retired/crashed drivers get a **DNF** chip and drop off the map instead of sitting
   parked on track.
 - **Corner numbers**, drawn just outside the track line, kept deliberately quiet so the cars
   stay the subject.
@@ -111,6 +112,18 @@ through the live view. Click any image for full size.
 - **Race Control** — a right-side panel that pops the latest messages on anything new
   (flags, Safety Car/VSC, penalties, investigations) and opens into the full timestamped
   history for the session, with a live track-status banner.
+- **Session Analysis** — a card under the running order in races and practice (not qualifying)
+  that puts the session into words as it happens, on the map's clock, so nothing appears before
+  the cars get there. **All** is a ticker of the latest five events, each new one pushing the
+  oldest off; **Incidents** (flags, retirements, penalties and investigations) and **Battles**
+  (overtakes and cars closing in, race only) list everything so far. Each event shows its lap
+  and time: the time of day live, the time into the session in a replay. It's worked out in the
+  browser, so it covers what happened while the page was open; a jump in a replay starts it over.
+- **Replay controls** — pick any session from 2023 on, pause, skip 30 s, play at 1×, 2× or 4×,
+  drag the timeline, and jump to a lap or a qualifying segment. One clock drives the map, board,
+  telemetry, Race Control and analysis, so they all stay on the same instant.
+- **Sector columns and temperatures** — the race board shows S1/S2/S3 when the card is wide
+  enough, and the header shows air and track temperature.
 - **Live championship projection** — instantly updated points right after a Sprint or Race,
   before Jolpica's official standings catch up.
 - **Bring your own F1 TV token** — any visitor can add their own token for real-time tracking
@@ -155,6 +168,7 @@ through the live view. Click any image for full size.
 | **Car positions (the map) + telemetry** | The same socket — `Position.z` and `CarData.z` | **F1 TV token** (the site's, or a visitor's own) |
 | Replay, and the fallback when the socket is closed | F1 **static** archive (`livetiming.formula1.com/static`) — published hours after a session; since ~15 Oct 2026 it requires an F1 TV login, so the site's token is sent with it | **F1 TV token** |
 | Replay without a token | [OpenF1](https://openf1.org) — the same sessions, rebuilt into the archive's format (`lib/archive/openf1Session.ts`); its free tier is closed while any session is live, so replay says so | No |
+| Air and track temperature | The socket's `WeatherData` topic, OpenF1 or the archive in a replay | No |
 | Finished-round classification, kept after the socket closes | Supabase (optional) | Supabase URL + service-role key |
 
 Only **two** topics are actually gated, measured by an A-B subscribe against the same session:
@@ -247,6 +261,7 @@ app/
                               #   round snapshot, then archive; every tier that yields a
                               #   finished result writes it back to the session snapshot
     racecontrol/route.ts      # race control messages + track status
+    replay/sessions/route.ts  # the seasons and sessions the replay picker offers
     championship/route.ts     # live championship projection
     circuit/route.ts          # MultiViewer circuit outline proxy
     f1token/route.ts          # token presence/expiry (never the token itself)
@@ -260,6 +275,8 @@ app/
       LiveSection.tsx         # composes the live section; server-seeded so idle paints instantly
       TrackMap.tsx            # playback, interpolation, tint, driver select
       TimingBoard.tsx         # Driver Live Tracker
+      ReplayControls.tsx      # transport, timeline and session picker for a replay
+      AnalysisPanel.tsx       # Session Analysis: the Updates feed, written by useRaceUpdates.ts
       TyreTracker.tsx         # strategy board (stints, gained/lost, fastest lap)
       TelemetryCard.tsx       # speed/gear/throttle/RPM for the followed driver
       RaceControl.tsx         # toast + drawer, revealed in step with the map

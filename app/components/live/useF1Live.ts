@@ -4,8 +4,21 @@ import { startTransition, useEffect, useState } from "react";
 import { Driver, IntervalRow, LapSummary, StintRow } from "@/lib/timingTypes";
 import { F1_LIVE } from "@/lib/live/liveConfig";
 import { getStoredVisitorToken } from "@/lib/visitorToken";
-import type { LiveState } from "./liveTypes";
-import { getPlaybackT, newestFrameT, pushFrames, pushTel, resetFrames } from "./framesStore";
+import type { LiveState, ReplayInfo } from "./liveTypes";
+import {
+  framesEpoch,
+  getPlaybackT,
+  newestFrameT,
+  pushFrames,
+  pushTel,
+  replayActive,
+  replayNow,
+  replayRate,
+  resetFrames,
+  setReplayClock,
+  stopReplayClock,
+  subscribeReplayClock,
+} from "./framesStore";
 
 interface ApiRow {
   driver_number: number;
@@ -44,6 +57,17 @@ interface ApiDriver {
   team_name: string;
   full_name: string;
 }
+/** One moment's changes to the board, due at `t` on the map's clock. */
+interface BoardChange {
+  t: number;
+  rows?: Record<string, Partial<ApiRow>>;
+  order?: number[];
+  currentLap?: number;
+  trackStatus?: string | null;
+  sessionStatus?: string | null;
+  fastestLap?: ApiFastest | null;
+}
+
 interface ApiResponse {
   // "token_invalid"/"token_busy" never appear as the top-level status — a rejected visitor
   // token still falls through to whatever the site would otherwise show; see `tokenIssue`.
@@ -56,6 +80,8 @@ interface ApiResponse {
   segmentEvents?: { t: number; n: number; s: number; i: number; c: number }[];
   lapResets?: { t: number; n: number }[];
   sectorEvents?: { t: number; n: number; s: { value: string; overallFastest: boolean; personalFastest: boolean; segments: number[] }[] }[];
+  ahead?: BoardChange[];
+  weather?: { air: number; track: number; rain: boolean } | null;
   mode?: LiveState["mode"];
   circuitKey?: number;
   session?: { location: string; session_name: string };
@@ -74,6 +100,7 @@ interface ApiResponse {
   startSuspended?: boolean;
   restartLabel?: string | null;
   telFrames?: { t: number; c: Record<string, [number, number, number, number]> }[];
+  replayInfo?: ReplayInfo;
   qualifyingPart?: number | null;
   qualifyingRemainingMs?: number | null;
   sessionRemainingMs?: number | null;
@@ -195,6 +222,7 @@ function toState(r: ApiResponse): LiveState {
     currentLap: r.currentLap ?? 0,
     fastestLap: r.fastestLap ?? null,
     trackStatus: r.trackStatus ?? null,
+    weather: r.weather ?? null,
     sessionStatus: r.sessionStatus ?? null,
     suspendedRestartMs: r.suspendedRestartMs ?? null,
     formationLap: r.formationLap ?? false,
@@ -238,6 +266,8 @@ export function useF1Live(
   view: "live" | "replay" = "live",
   replayT0?: number,
   serverKnowsNothingLive = false,
+  /** The session picked for a replay (null: the most recent race). */
+  replaySession: { path: string; year: number } | null = null,
 ): LiveState {
   const [state, setState] = useState<LiveState>(
     serverKnowsNothingLive && view === "live" ? { ...empty, status: "idle" } : empty,
@@ -253,12 +283,56 @@ export function useF1Live(
     let timer: ReturnType<typeof setTimeout>;
     // Aborts this effect's request when the view changes or the section unmounts.
     const aborter = new AbortController();
+    // The last poll's answer, and the changes it said are coming. The server is ~20 s ahead of
+    // the map, so each poll brings what's due before the next one; they're applied here as the
+    // map's clock reaches them, keeping every card with the cars rather than up to a poll
+    // behind. The next poll replaces all of it, so nothing here can drift.
+    let shown: ApiResponse | null = null;
+    let shownEpoch = 0;
+    let boardDue: BoardChange[] = [];
+    let sectorsDue: NonNullable<ApiResponse["sectorEvents"]> = [];
+    const applyDue = () => {
+      const base = shown;
+      const pt = getPlaybackT();
+      // A jump in a replay leaves these describing the old position: the next poll replaces them.
+      if (!base || !pt || shownEpoch !== framesEpoch()) return;
+      if (!(boardDue[0]?.t <= pt) && !(sectorsDue[0]?.t <= pt)) return;
+      const next: ApiResponse = { ...base, rows: { ...base.rows } };
+      const rows = next.rows!;
+      while (boardDue[0]?.t <= pt) {
+        const c = boardDue.shift()!;
+        for (const [n, r] of Object.entries(c.rows ?? {})) if (rows[+n]) rows[+n] = { ...rows[+n], ...r };
+        if (c.order) next.order = c.order;
+        if (c.currentLap !== undefined) next.currentLap = c.currentLap;
+        if (c.trackStatus !== undefined) next.trackStatus = c.trackStatus;
+        if (c.sessionStatus !== undefined) next.sessionStatus = c.sessionStatus;
+        if (c.fastestLap !== undefined) next.fastestLap = c.fastestLap;
+      }
+      while (sectorsDue[0]?.t <= pt) {
+        const e = sectorsDue.shift()!;
+        if (rows[e.n]) rows[e.n] = { ...rows[e.n], sectors: e.s };
+      }
+      shown = next;
+      const state = toState(next);
+      startTransition(() =>
+        setState((prev) =>
+          prev.status === "live" ? { ...state, replayInfo: prev.replayInfo, updatedAt: prev.updatedAt, reconnecting: prev.reconnecting, epoch: shownEpoch } : prev,
+        ),
+      );
+    };
+    const dueTimer = setInterval(applyDue, 250);
+    // The session this replay is on. With nothing picked, the server chooses the most recent
+    // one it can load — which can differ from poll to poll if a source hiccups, so the replay
+    // stays on whichever it opened with rather than switching session mid-play.
+    let session = replaySession;
     // Switching view (live <-> replay) is a different data stream/clock entirely — drop
     // any buffered positions and show "loading" instead of a stale frame from the other
     // view while the first poll for the new one is in flight. Deferred to a timer callback,
     // not called synchronously in the effect body (same pattern as elsewhere in this file's
     // sibling components).
     resetFrames();
+    // Every entry into a replay, or a new session, opens at lights out (see `start` below).
+    stopReplayClock();
     const resetId = setTimeout(() => setState(empty), 0);
 
     // Poll fast only while a session is live; back off hard when idle so we're not
@@ -290,6 +364,16 @@ export function useF1Live(
         // saving/removing it in another tab takes effect on the next tick.
         const myToken = getStoredVisitorToken();
         const t0Param = view === "replay" && replayT0 ? `&t0=${replayT0}` : "";
+        // A replay asks for the data its own clock needs: from `start` (lights out) the first
+        // time, then up to the clock plus a lead. The lead covers the 20 s the map interpolates
+        // over and the ground covered before the next poll lands, which grows with the speed.
+        const sessionParam = view === "replay" && session ? `&session=${encodeURIComponent(session.path)}&year=${session.year}` : "";
+        const posParam =
+          view !== "replay"
+            ? ""
+            : replayActive()
+              ? `&pos=${Math.floor(replayNow() + 20_000 + (F1_LIVE.pollMs * 1.5 * Math.max(1, replayRate())))}`
+              : "&start=1";
         // Once the map has real frames, ask for trackStatus/formationLap/currentLap/rows as of
         // the SAME instant the dots are currently rendering (the playback clock, ~20s behind
         // the freshest frame) — not "now" — so a flag/lap change never shows up before the
@@ -297,16 +381,24 @@ export function useF1Live(
         // window regardless, so the buffer keeps enough lead room to interpolate smoothly.
         const pt = getPlaybackT();
         const asOfParam = pt > 0 ? `&asOf=${Math.floor(pt)}` : "";
+        const epochAtRequest = framesEpoch();
         // Bounded: a request that stalls is abandoned, and the error path below releases the
         // in-flight guard and schedules the next poll — rather than one hung request holding
         // the guard and stopping every poll after it.
-        const res = await fetch(`/api/f1live?since=${newestFrameT()}&view=${view}${t0Param}${asOfParam}`, {
+        const res = await fetch(`/api/f1live?since=${newestFrameT()}&view=${view}${t0Param}${sessionParam}${posParam}${asOfParam}`, {
           cache: "no-store",
           headers: myToken ? { "X-F1-Token": myToken } : undefined,
           signal: AbortSignal.any([aborter.signal, AbortSignal.timeout(POLL_TIMEOUT_MS)]),
         });
         const data = (await res.json()) as ApiResponse;
         if (cancelled) return;
+        // A seek landed while this was in flight: what came back is for the old position, and
+        // pushing it would put stale frames in the fresh buffer. Fetch for the new one instead.
+        if (framesEpoch() !== epochAtRequest) {
+          inFlight = false;
+          timer = setTimeout(poll, 0);
+          return;
+        }
         status = data.status;
         if (data.status === "idle" || data.status === "error") {
           setState((s) => ({
@@ -324,8 +416,20 @@ export function useF1Live(
           pushFrames(data.frames);
           pushTel(data.telFrames);
           // Table/tyre data is non-urgent: let React yield to the map animation.
+          // A replay's clock starts at lights out as soon as the timeline is known.
+          if (view === "replay" && data.replayInfo) {
+            session ??= { path: data.replayInfo.path, year: data.replayInfo.year };
+            if (!replayActive()) setReplayClock(data.replayInfo.anchorMs, 1);
+          }
+          shown = data;
+          shownEpoch = epochAtRequest;
+          boardDue = [...(data.ahead ?? [])];
+          sectorsDue = [...(data.sectorEvents ?? [])].sort((a, b) => a.t - b.t);
           const at = Date.now();
-          startTransition(() => setState({ ...toState(data), updatedAt: at, reconnecting: false }));
+          const next = toState(data);
+          startTransition(() =>
+            setState((prev) => ({ ...next, replayInfo: data.replayInfo ?? prev.replayInfo, updatedAt: at, reconnecting: false, epoch: epochAtRequest })),
+          );
         }
       } catch {
         // A failed or timed-out poll while a session is on screen keeps the last good board
@@ -353,14 +457,26 @@ export function useF1Live(
       }
     };
     document.addEventListener("visibilitychange", onVisible);
+    // A seek moves the replay clock to data the buffer doesn't have: fetch it now, not on the
+    // next timer. (Pausing and changing speed land here too; one extra poll is harmless.)
+    const unsubClock = subscribeReplayClock(() => {
+      if (view === "replay" && !inFlight && replayActive()) {
+        clearTimeout(timer);
+        poll();
+      }
+    });
     return () => {
       cancelled = true;
+      clearInterval(dueTimer);
+      unsubClock();
       aborter.abort();
       clearTimeout(timer);
       clearTimeout(resetId);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [view, replayT0]);
+    // The session is compared by value: a new object for the same pick mustn't reset the replay.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, replayT0, replaySession?.path, replaySession?.year]);
 
   return state;
 }

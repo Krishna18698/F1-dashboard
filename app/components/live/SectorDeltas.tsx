@@ -62,10 +62,10 @@ export default function SectorDeltas({
         </span>
         <span className="text-[0.6rem] text-muted">vs best sector</span>
       </div>
-      <div className="overflow-hidden rounded-lg border border-line">
+      <div className="carbon-bg overflow-hidden rounded-lg text-white ring-1 ring-white/10">
         {/* The header uses the SAME nested grid as the rows below — a single merged
             "S1 · S2 · S3" label sat over three separate bars and lined up with none of them. */}
-        <div className="grid grid-cols-[2.6rem_1fr] gap-2 border-b border-line bg-panel px-3 py-1.5 text-[0.6rem] font-bold tracking-wider text-muted">
+        <div className="grid grid-cols-[2.6rem_1fr] gap-2 border-b border-white/10! bg-white/5 px-3 py-1.5 text-[0.6rem] font-bold tracking-wider text-white/50">
           <span>Driver</span>
           <div className="grid grid-cols-3 gap-1">
             {["S1", "S2", "S3"].map((l) => (
@@ -73,7 +73,7 @@ export default function SectorDeltas({
             ))}
           </div>
         </div>
-        <ol className="divide-y divide-line">
+        <ol className="divide-y divide-white/10!">
           {rows.map((n) => {
             const d = drivers.get(n);
             const secs = bestSectors.get(n) ?? [];
@@ -91,13 +91,13 @@ export default function SectorDeltas({
                     const isBest = delta != null && delta < 0.0005;
                     return (
                       <div key={i}>
-                        <div className="h-1 overflow-hidden rounded-sm bg-line">
+                        <div className="h-1 overflow-hidden rounded-sm bg-white/10">
                           <div
-                            className={`h-full rounded-sm ${isBest ? "bg-violet-500" : "bg-red/70"}`}
+                            className={`h-full rounded-sm ${isBest ? "bg-[#d84bff]" : "bg-red/80"}`}
                             style={{ width: delta == null ? "0%" : `${Math.max(isBest ? 100 : 4, Math.min(100, (delta / scale) * 100))}%` }}
                           />
                         </div>
-                        <span className={`tnum block text-center font-timing text-[0.55rem] leading-tight ${isBest ? "text-violet-500" : "text-muted"}`}>
+                        <span className={`tnum block text-center font-timing text-[0.55rem] leading-tight ${isBest ? "text-[#d84bff]" : "text-white/60"}`}>
                           {delta == null ? "–" : isBest ? "BEST" : `+${delta.toFixed(3)}`}
                         </span>
                       </div>

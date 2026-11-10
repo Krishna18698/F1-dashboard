@@ -91,15 +91,68 @@ export function setPlaybackT(t: number): void {
   playbackT = t;
 }
 
+/** The instant everything on screen is showing: the replay clock in a replay, else the map's. */
 export function getPlaybackT(): number {
-  return playbackT;
+  return replay.active ? replayNow() : playbackT;
 }
 
-/** Clear on unmount / session change so the next session starts fresh. */
+/* --------------------------------- replay clock --------------------------------- */
+// In a replay the position is the visitor's to control — pause, speed, seek — so it can't be
+// "the map plays 20 s behind whatever data has arrived" as in a live session. This clock is
+// the replay's position on the session's own timeline (the same stream ms the frames carry):
+// it advances at `rate` × real time, or not at all while paused. The map draws at it, and the
+// board, Race Control and telemetry all ask for it, so one clock drives every panel.
+const replay = { active: false, basePos: 0, baseWall: 0, rate: 1 };
+const clockSubs = new Set<() => void>();
+const wallNow = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
+
+/** Current replay position (stream ms). */
+export function replayNow(): number {
+  return replay.basePos + (wallNow() - replay.baseWall) * replay.rate;
+}
+
+export function replayActive(): boolean {
+  return replay.active;
+}
+
+export function replayRate(): number {
+  return replay.rate;
+}
+
+/** Start (or move) the replay clock: at `pos`, advancing at `rate` (0 = paused). */
+export function setReplayClock(pos: number, rate: number): void {
+  replay.active = true;
+  replay.basePos = pos;
+  replay.baseWall = wallNow();
+  replay.rate = rate;
+  clockSubs.forEach((fn) => fn());
+}
+
+export function stopReplayClock(): void {
+  replay.active = false;
+  replay.rate = 1;
+  clockSubs.forEach((fn) => fn());
+}
+
+export function subscribeReplayClock(fn: () => void): () => void {
+  clockSubs.add(fn);
+  return () => {
+    clockSubs.delete(fn);
+  };
+}
+
+/** Bumped by every reset, so the map knows its own clock no longer applies. */
+let epoch = 0;
+export function framesEpoch(): number {
+  return epoch;
+}
+
+/** Clear on unmount / session change / a replay seek, so what follows starts fresh. */
 export function resetFrames(): void {
   buffer = [];
   telBuffer = [];
   playbackT = 0;
+  epoch++;
   subs.forEach((fn) => fn());
 }
 

@@ -6,7 +6,7 @@ import { useF1Live } from "./useF1Live";
 import { findBattles } from "./findBattles";
 import MyTokenCard from "./MyTokenCard";
 import RaceControl from "./RaceControl";
-import { PLAYBACK_DELAY_MS, useHasFrames } from "./framesStore";
+import { useHasFrames } from "./framesStore";
 import { useCountdown } from "./useCountdown";
 import { getStoredVisitorToken } from "@/lib/visitorToken";
 import { F1_LIVE } from "@/lib/live/liveConfig";
@@ -27,12 +27,15 @@ const TrackMap = dynamic(() => import("./TrackMap"), {
     </div>
   ),
 });
-const TimingBoard = dynamic(() => import("./TimingBoard"), { loading: () => <div className="skeleton min-h-[28rem] flex-1 rounded-lg" /> });
+const TimingBoard = dynamic(() => import("./TimingBoard"), { loading: () => <div className="skeleton-dark min-h-[28rem] flex-1 rounded-lg" /> });
 const TyreTracker = dynamic(() => import("./TyreTracker"), { loading: () => <div className="skeleton-dark h-[32rem] rounded-lg" /> });
 const TyreAllocation = dynamic(() => import("./TyreAllocation"), { loading: () => <div className="skeleton-dark h-64 rounded-lg" /> });
-const SectorDeltas = dynamic(() => import("./SectorDeltas"), { loading: () => <div className="skeleton h-72 rounded-lg" /> });
+const SectorDeltas = dynamic(() => import("./SectorDeltas"), { loading: () => <div className="skeleton-dark h-72 rounded-lg" /> });
 const Battles = dynamic(() => import("./Battles"), { loading: () => <div className="skeleton-dark h-20 rounded-lg" /> });
 const TelemetryCard = dynamic(() => import("./TelemetryCard"), { loading: () => <div className="skeleton-dark mt-3 h-20 rounded-lg" /> });
+const AnalysisPanel = dynamic(() => import("./AnalysisPanel"), { loading: () => <div className="skeleton-dark mt-6 h-64 rounded-lg" /> });
+const ReplayControls = dynamic(() => import("./ReplayControls"), { loading: () => <div className="skeleton-dark mb-3 h-24 rounded-lg" /> });
+const ReplaySessionPicker = dynamic(() => import("./ReplayControls").then((m) => m.ReplaySessionPicker));
 
 type View = "live" | "replay";
 
@@ -58,12 +61,11 @@ function ViewToggle({ view, onChange }: { view: View; onChange: (v: View) => voi
 }
 
 /**
- * How fresh the board is: "Updated 4s ago", or "Reconnecting…" when polls are failing — so a
- * quiet session reads differently from a stalled connection — and the playback delay, which is
- * why the dashboard sits behind a broadcast. Live only: a replay is labelled as one instead.
- * Ticks on its own, so the section isn't re-rendered every second.
+ * Says so when the feed has stalled, so that a quiet session reads differently from a dropped
+ * connection. Nothing at all while it's healthy. Ticks on its own, so the section isn't
+ * re-rendered every second.
  */
-function Freshness({ updatedAt, reconnecting }: { updatedAt?: number; reconnecting?: boolean }) {
+function FeedStalled({ updatedAt, reconnecting }: { updatedAt?: number; reconnecting?: boolean }) {
   const [now, setNow] = useState<number | null>(null);
   useEffect(() => {
     const tick = () => setNow(Date.now());
@@ -77,16 +79,11 @@ function Freshness({ updatedAt, reconnecting }: { updatedAt?: number; reconnecti
   if (!updatedAt || now == null) return null;
   const ago = Math.max(0, Math.round((now - updatedAt) / 1000));
   // Polls land every ~3 s; four missed in a row is worth saying out loud.
-  const stale = reconnecting || ago > 12;
+  if (!reconnecting && ago <= 12) return null;
   return (
-    <span
-      role="status"
-      className={`flex items-center gap-1.5 self-center whitespace-nowrap text-[0.7rem] font-medium ${stale ? "text-amber-700" : "text-ink-soft"}`}
-      title={`The map, timing and Race Control play ${PLAYBACK_DELAY_MS / 1000} s behind F1's live feed, so the cars move smoothly.`}
-    >
-      <span className={`h-1.5 w-1.5 rounded-full ${stale ? "bg-amber-500" : "bg-emerald-500"}`} aria-hidden />
-      {reconnecting ? "Reconnecting…" : stale ? `No update for ${ago}s` : `Updated ${ago}s ago`}
-      <span className="text-muted">· {PLAYBACK_DELAY_MS / 1000}s delay</span>
+    <span role="status" className="flex items-center gap-1.5 self-center whitespace-nowrap text-[0.7rem] font-medium text-amber-700">
+      <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden />
+      {reconnecting ? "Reconnecting…" : `No update for ${ago}s`}
     </span>
   );
 }
@@ -97,12 +94,14 @@ function Header({
   ended,
   updatedAt,
   reconnecting,
+  weather,
 }: {
   live?: boolean;
   label: string;
   ended?: boolean;
   updatedAt?: number;
   reconnecting?: boolean;
+  weather?: { air: number; track: number; rain: boolean } | null;
 }) {
   return (
     <div className="mb-4 flex flex-wrap items-end gap-x-4 gap-y-1 border-b-2 border-ink pb-2">
@@ -125,7 +124,12 @@ function Header({
           </span>
         )}
       </h3>
-      {live && !ended && <Freshness updatedAt={updatedAt} reconnecting={reconnecting} />}
+      {live && !ended && <FeedStalled updatedAt={updatedAt} reconnecting={reconnecting} />}
+      {weather && (
+        <span className="tnum self-center whitespace-nowrap text-[0.7rem] font-medium text-ink-soft">
+          Air {weather.air.toFixed(1)}° · Track {weather.track.toFixed(1)}°{weather.rain && <span className="text-sky-700"> · Rain</span>}
+        </span>
+      )}
       {/* Wraps onto its own line on a phone, where a right-aligned caption reads as detached
           from the heading above it — so it only pulls right once it shares the row. */}
       <span className="eyebrow text-left text-[0.6rem] text-muted sm:ml-auto sm:text-right">{label}</span>
@@ -145,7 +149,9 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
     if (v === "replay") setReplayT0(Date.now());
     setView(v);
   };
-  const s = useF1Live(view, replayT0, serverKnowsNothingLive);
+  // The session picked in the replay controls (null: the most recent race).
+  const [replaySession, setReplaySession] = useState<{ path: string; year: number } | null>(null);
+  const s = useF1Live(view, replayT0, serverKnowsNothingLive, replaySession);
   // Click-to-follow: selected driver is highlighted on the map + gets a telemetry card.
   const [selected, setSelected] = useState<number | null>(null);
   // Same signal TrackMap gates its own reveal on — Race Control was popping in well before
@@ -202,6 +208,12 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
                 </>
               ) : (
                 <p className="font-medium text-ink-soft">No past session is available to replay yet.</p>
+              )}
+              {/* Also the way out if a picked session turns out to have nothing to play. */}
+              {!s.replayLiveBlocked && (
+                <div className="mt-3">
+                  <ReplaySessionPicker current={replaySession?.path ?? null} onPick={setReplaySession} dark={false} />
+                </div>
               )}
             </div>
           ) : (
@@ -268,7 +280,7 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
               </div>
             </div>
           )}
-          <RaceControl ready={false} view={view} replayT0={replayT0} />
+          <RaceControl ready={false} view={view} replayT0={replayT0} replaySession={replaySession} />
         </section>
       </div>
     );
@@ -314,9 +326,10 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
 
   return (
     <section>
-      <Header live={!s.replay} label={label} ended={ended} updatedAt={s.updatedAt} reconnecting={s.reconnecting} />
+      <Header live={!s.replay} label={label} ended={ended} updatedAt={s.updatedAt} reconnecting={s.reconnecting} weather={s.weather} />
       <ViewToggle view={view} onChange={changeView} />
       {!s.replay && <MyTokenCard tokenIssue={s.tokenIssue} ownerHasToken={s.ownerTokenConfigured} />}
+      {s.replay && s.replayInfo && <ReplayControls info={s.replayInfo} picked={replaySession?.path ?? null} onPick={setReplaySession} />}
 
       {/* Track map + clean running order side by side */}
       {/* items-stretch (the grid default) lets the shorter column fill the taller one's
@@ -554,10 +567,13 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
         </div>
       )}
 
+      {/* Not in qualifying: the board and the map already tell it. */}
+      {s.mode !== "quali" && <AnalysisPanel s={s} />}
+
       {/* `trackingReady` normally holds Race Control back until the map has frames, so the
           two don't appear out of order. With no map at all there are no frames to wait for —
           gating on them would hide Race Control permanently. */}
-      <RaceControl ready={trackingReady || mapUnavailable || ended} view={view} replayT0={replayT0} />
+      <RaceControl ready={trackingReady || mapUnavailable || ended} view={view} replayT0={replayT0} replaySession={replaySession} />
     </section>
   );
 }

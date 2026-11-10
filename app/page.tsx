@@ -192,9 +192,6 @@ export default async function Page() {
   let nextRace = rawNext;
 
   const status = liveStatus as LiveStatusData;
-  // The server already knows whether anything is on track; without this the section paints a
-  // spinner until hydration plus its own first poll (~0.5 s) resolve.
-  const liveSection = <LiveSection serverKnowsNothingLive={!status.live} />;
   const endedRound =
     !status.live &&
     (status.type ?? "").toLowerCase() === "race" &&
@@ -252,10 +249,6 @@ export default async function Page() {
       <div className="flex flex-col gap-10">
         <Hero race={nextRace} initialLiveStatus={liveStatus} nowMs={requestNow()} />
 
-        {/* During a session, tracking is what a visitor came for: straight under the hero rather
-            than below the weekend schedule and the season calendar. */}
-        {status.live && liveSection}
-
         {/* This weekend's sessions (local time) — above the season calendar */}
         {nextRace && (
           <WeekendSchedule
@@ -271,7 +264,9 @@ export default async function Page() {
           </Section>
         )}
 
-        {!status.live && liveSection}
+        {/* The server already knows whether anything is on track; without this the section paints
+            a spinner until hydration plus its own first poll (~0.5 s) resolve. */}
+        <LiveSection serverKnowsNothingLive={!status.live} />
 
         {/* Wide 3-column row: standings + paddock intel use the side space */}
         <div className="grid gap-10 lg:grid-cols-3">

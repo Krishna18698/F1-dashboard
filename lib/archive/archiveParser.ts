@@ -13,7 +13,7 @@ import { decodeTokenExpiry } from "../tokenExpiry";
 import { PRE_START_LIVE_MS, QUALI_DURATION_MS, QUALI_LAST_LAP_GRACE_MS, SPRINT_QUALI_DURATION_MS, postEndLiveMs } from "../sessionWindows";
 import zlib from "zlib";
 import { F1_LIVE } from "../live/liveConfig";
-import { OPENF1_PREFIX, loadOpenF1Session, openF1Candidates, openF1NewSetCounts, openF1WeekendSessions } from "./openf1Session";
+import { OPENF1_PREFIX, loadOpenF1Session, openF1Candidates, openF1NewSetCounts, openF1SessionList, openF1WeekendSessions } from "./openf1Session";
 
 const UA = { "User-Agent": "BestHTTP" };
 
@@ -170,8 +170,8 @@ interface FlatSession extends ResolvedSession {
   endMs: number;
 }
 
-export async function flatSessions(): Promise<FlatSession[]> {
-  const res = await fetch(`${F1_LIVE.base}/${new Date().getUTCFullYear()}/Index.json`, {
+export async function flatSessions(year = new Date().getUTCFullYear()): Promise<FlatSession[]> {
+  const res = await fetch(`${F1_LIVE.base}/${year}/Index.json`, {
     headers: archiveHeaders(),
     cache: "no-store",
   });
@@ -240,6 +240,68 @@ export async function resolveLiveSession(): Promise<ResolvedSession | null> {
  * type). The route tries them until one actually has data — so we always land on a
  * session with a real feed even if the newest one hasn't been published yet.
  */
+/** A session a visitor can choose to replay. */
+export interface ReplaySession {
+  path: string;
+  type: string;
+  name: string;
+  location: string;
+  circuitKey?: number;
+  startMs: number;
+}
+
+/**
+ * Every completed session of `year`, newest first — the replay's session picker. F1's own
+ * archive when it answers (it has wanted an F1 TV login since Oct 2026), else OpenF1's copy of
+ * the same sessions (2023 onward). Also what a requested session is checked against, so a
+ * replay can only ever load a session from this list.
+ */
+export async function replaySessions(year: number): Promise<ReplaySession[]> {
+  const now = Date.now();
+  const flat = await flatSessions(year);
+  const list: ReplaySession[] = flat.length
+    ? flat
+        .filter((s) => s.endMs <= now)
+        .map((s) => ({ path: s.path, type: s.type, name: s.name, location: s.location, circuitKey: s.circuitKey, startMs: s.startMs }))
+    : await openF1SessionList(year).catch(() => []);
+  return list
+    .filter((s) => !F1_LIVE.replayExcludePaths.some((bad) => s.path.includes(bad)))
+    .sort((a, b) => b.startMs - a.startMs);
+}
+
+/**
+ * A replay's timeline, for its controls: where the racing starts (the replay's opening point),
+ * how long the session runs, when each lap began (jump to lap) and when each qualifying segment
+ * went green. All on the session's own clock — the stream ms the frames carry.
+ */
+export async function getReplayTimeline(sessionPath: string, type?: string): Promise<{
+  anchorMs: number;
+  durationMs: number;
+  laps: { lap: number; ms: number }[];
+  segments: { part: number; ms: number }[];
+}> {
+  const s = await load(sessionPath, false);
+  const anchorMs = await getReplayAnchorMs(sessionPath, false, type);
+  const laps: { lap: number; ms: number }[] = [];
+  let last = 0;
+  for (const e of s.lap) {
+    const cur = Number((e.data as { CurrentLap?: number }).CurrentLap ?? 0);
+    if (cur > last) {
+      laps.push({ lap: cur, ms: e.ts });
+      last = cur;
+    }
+  }
+  // A segment is announced before it goes green (SQ1 ~14 min early at Zandvoort), so each one
+  // starts at the first "Started" after its announcement.
+  const segments: { part: number; ms: number }[] = [];
+  for (const q of s.qp) {
+    if (segments.some((x) => x.part === q.part)) continue;
+    const green = s.statusHist.find((h) => h.status === "Started" && h.ts >= q.ts);
+    segments.push({ part: q.part, ms: green?.ts ?? q.ts });
+  }
+  return { anchorMs, durationMs: s.durationMs, laps, segments };
+}
+
 export async function fallbackCandidates(): Promise<ResolvedSession[]> {
   if (F1_LIVE.mode === "live") return [];
   const now = Date.now();
@@ -283,6 +345,8 @@ export interface RcMessage {
   Mode?: string;
   RacingNumber?: string;
   Lap?: number;
+  /** When it was issued, on the session's clock — lets the page reveal it as the map gets there. */
+  t?: number;
 }
 export interface SessionCache {
   loadedAt: number;
@@ -305,6 +369,8 @@ export interface SessionCache {
    *  is running: it stops dead for a red flag and is adjusted afterwards, which is how a
    *  60-minute practice can occupy 77 minutes of wall clock. */
   clockHist: { ts: number; remainingMs: number; running: boolean }[];
+  /** Track-side weather through the session (F1 updates it about once a minute). */
+  weather?: { ts: number; air: number; track: number; rain: boolean }[];
   car: { ts: number; raw: string }[]; // CarData.z lines, decoded lazily (window per request)
   posOffset: number | null; // absolute Utc → session-relative ms (shared by Position + CarData)
   frames: PosFrame[];
@@ -339,7 +405,7 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
     return entry;
   }
 
-  const [driverTxt, timingTxt, appTxt, posTxt, lapTxt, trackTxt, carTxt, rcTxt, qpTxt, infoTxt, clockTxt] = await Promise.all([
+  const [driverTxt, timingTxt, appTxt, posTxt, lapTxt, trackTxt, carTxt, rcTxt, qpTxt, infoTxt, clockTxt, weatherTxt] = await Promise.all([
     fetchText(sessionPath, "DriverList.jsonStream", live).catch(() => ""),
     fetchText(sessionPath, "TimingData.jsonStream", live).catch(() => ""),
     fetchText(sessionPath, "TimingAppData.jsonStream", live).catch(() => ""),
@@ -351,6 +417,7 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
     fetchText(sessionPath, "SessionData.jsonStream", live).catch(() => ""),
     fetchText(sessionPath, "SessionInfo.json", live).catch(() => ""),
     fetchText(sessionPath, "ExtrapolatedClock.jsonStream", live).catch(() => ""),
+    fetchText(sessionPath, "WeatherData.jsonStream", live).catch(() => ""),
   ]);
   let gmtOffset: string | null = null;
   try {
@@ -395,6 +462,14 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
   // SessionStatus:"Started" — F1's own explicit signal for lights-out/race-start, a far more
   // reliable "the race has actually begun" marker than inferring it from position/lap data.
   const qp: { ts: number; part: number }[] = [];
+  const weather: NonNullable<SessionCache["weather"]> = [];
+  for (const raw of weatherTxt.replace(/^\uFEFF/, "").split(/\r?\n/)) {
+    if (!raw) continue;
+    try {
+      const w = JSON.parse(raw.slice(TS_LEN)) as { AirTemp?: string; TrackTemp?: string; Rainfall?: string };
+      weather.push({ ts: tsToMs(raw.slice(0, TS_LEN)), air: Number(w.AirTemp), track: Number(w.TrackTemp), rain: Number(w.Rainfall) > 0 });
+    } catch {}
+  }
   const clockHist: { ts: number; remainingMs: number; running: boolean }[] = [];
   for (const raw of clockTxt.replace(/^\ufeff/, "").split(/\r?\n/)) {
     if (!raw) continue;
@@ -504,6 +579,7 @@ async function load(sessionPath: string, live: boolean): Promise<SessionCache> {
     sessionStartedTs,
     statusHist,
     clockHist,
+    weather,
     car,
     posOffset,
     frames,
@@ -527,9 +603,12 @@ const FORMATION_LAP_BUFFER_MS = 3 * 60_000;
  *  began. SessionStatus:"Started" (from SessionData) is F1's own explicit race-start signal;
  *  back off a fixed buffer from it to also cover the formation lap. Falls back to the first
  *  real position sample if a session predates/lacks that topic. */
-export async function getReplayAnchorMs(sessionPath: string, live: boolean): Promise<number> {
+export async function getReplayAnchorMs(sessionPath: string, live: boolean, type?: string): Promise<number> {
   const s = await load(sessionPath, live);
-  if (s.sessionStartedTs != null) return Math.max(0, s.sessionStartedTs - FORMATION_LAP_BUFFER_MS);
+  // Only a race has a formation lap to include: practice and qualifying open at the green
+  // light, rather than on three minutes of empty track.
+  const lead = !type || mode(type) === "race" ? FORMATION_LAP_BUFFER_MS : 0;
+  if (s.sessionStartedTs != null) return Math.max(0, s.sessionStartedTs - lead);
   for (const f of s.frames) {
     if (Object.keys(f.cars).length > 0) return f.ts;
   }
@@ -604,6 +683,8 @@ export interface F1LiveState {
   currentLap: number;
   fastestLap: { driver_number: number; tla: string; time: string; lap: number } | null;
   trackStatus: string | null;
+  /** Air and track temperature (°C) and whether it's raining, at this instant. */
+  weather?: { air: number; track: number; rain: boolean } | null;
   /** F1 SessionStatus at this instant: "Started" | "Aborted" (red flag) | "Finished" | ... */
   sessionStatus: string | null;
   /** Announced restart instant while suspended, as an epoch the client can count down to.
@@ -1231,6 +1312,7 @@ export async function getF1LiveState(
     if (t.ts > infoUptoMs) break;
     trackStatus = t.status;
   }
+  const weatherNow = s.weather?.findLast((w) => w.ts <= infoUptoMs) ?? null;
 
   // Which qualifying segment is live at this instant (1=Q1, 2=Q2, 3=Q3), and when it began
   // (for the live countdown — standard FIA durations: Q1 18min, Q2 15min, Q3 12min).
@@ -1376,6 +1458,7 @@ export async function getF1LiveState(
     currentLap,
     fastestLap,
     trackStatus,
+    weather: weatherNow ? { air: weatherNow.air, track: weatherNow.track, rain: weatherNow.rain } : null,
     telFrames,
     qualifyingPart: effectivePart,
     qualifyingRemainingMs,
@@ -1523,17 +1606,20 @@ export async function getStaticRaceControl(
   sessionPath: string,
   uptoMs: number,
   live: boolean,
+  /** Also include what's due this far past `uptoMs`, for the page to reveal on time. */
+  aheadMs = 0,
 ): Promise<{
   available: boolean;
   trackStatus?: { Status?: string; Message?: string } | null;
+  statusAhead?: { t: number; status: string | null }[];
   messages?: RcMessage[];
 }> {
   const s = await load(sessionPath, live);
 
   const byIdx: Record<string, RcMessage> = {};
   for (const r of s.rc) {
-    if (r.ts > uptoMs) break;
-    byIdx[r.idx] = { ...(byIdx[r.idx] ?? {}), ...r.msg };
+    if (r.ts > uptoMs + aheadMs) break;
+    byIdx[r.idx] = { t: r.ts, ...(byIdx[r.idx] ?? {}), ...r.msg };
   }
   const messages = Object.values(byIdx)
     .filter((m) => m.Message)
@@ -1541,11 +1627,13 @@ export async function getStaticRaceControl(
     .slice(0, 150);
 
   let trackStatus: { Status?: string; Message?: string } | null = null;
+  const statusAhead: { t: number; status: string | null }[] = [];
   for (const t of s.track) {
-    if (t.ts > uptoMs) break;
-    trackStatus = { Status: t.status };
+    if (t.ts > uptoMs + aheadMs) break;
+    if (t.ts > uptoMs) statusAhead.push({ t: t.ts, status: t.status });
+    else trackStatus = { Status: t.status };
   }
 
   if (!messages.length) return { available: false };
-  return { available: true, trackStatus, messages };
+  return { available: true, trackStatus, statusAhead, messages };
 }

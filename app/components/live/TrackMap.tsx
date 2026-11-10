@@ -6,7 +6,7 @@ import { SessionMode } from "./liveTypes";
 import { Bounds, computeBounds, project, rotate, tracePath } from "@/lib/geo";
 import { hex } from "@/lib/format";
 import { trackStatusInfo } from "@/lib/trackStatus";
-import { getFrames, PLAYBACK_DELAY_MS, resetFrames, setPlaybackT, subscribeFrames, useHasFrames } from "./framesStore";
+import { framesEpoch, getFrames, PLAYBACK_DELAY_MS, replayActive, replayNow, replayRate, resetFrames, setPlaybackT, subscribeFrames, useHasFrames } from "./framesStore";
 import { placeCornerLabels } from "./cornerPlacement";
 
 const SIZE = 1000;
@@ -20,6 +20,31 @@ const TRAIL_SEGMENTS = 16;
 const TRAIL_STEP_MS = 500;
 // Same threshold the dots use to decide a move is a snap (pit exit, reappearance), not motion.
 const TRAIL_JUMP_SQ = 3600;
+/* F1's InPit flag clears at the pit exit line, but the road from there back to the track can run
+   on for another 20 s (Interlagos) with the car 15-45 m off the racing line. So a car that has
+   left the pits stays hidden until it is actually on the line. Measured over 586 exits at six
+   circuits: racing cars sit within about 3 m of the outline and no exit road comes inside 15 m
+   before the blend, so 8 m never showed a car early. The cap is for an outline that's wrong:
+   better a car shown on the exit road than one lost from the map. */
+const ON_LINE_METRES = 8;
+const PIT_EXIT_MAX_MS = 60_000;
+
+/** How far a car is from the track line. Both are in the feed's units, tenths of a metre. */
+function metresOffLine(x: number, y: number, line: Circuit): number {
+  let best = Infinity;
+  const n = line.x.length;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    const ax = line.x[i];
+    const ay = line.y[i];
+    const dx = line.x[j] - ax;
+    const dy = line.y[j] - ay;
+    const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy || 1)));
+    best = Math.min(best, Math.hypot(x - ax - t * dx, y - ay - t * dy));
+  }
+  return best / 10;
+}
+
 const trailStyle = Array.from({ length: TRAIL_SEGMENTS }, (_, k) => {
   const f = k / (TRAIL_SEGMENTS - 1);
   const g = Math.round(0x8a + (0x06 - 0x8a) * f);
@@ -388,12 +413,21 @@ export default function TrackMap({
   // (~28% of consecutive samples imply >60% speed jumps), so rendering them faithfully
   // makes dots surge/slow. Entries allocated once per car, then mutated in place.
   const smoothRef = useRef(new Map<number, { x: number; y: number; shown: boolean }>());
+  // Cars on the road from the pit exit back to the track, with when each was last in the pits.
+  const leftPitsRef = useRef(new Map<number, number>());
+  const lineRef = useRef<Circuit | null>(null);
+  useEffect(() => {
+    lineRef.current = circuit;
+  }, [circuit]);
 
   // Positions are updated IMPERATIVELY (no React re-render per frame).
   const dotsGroupRef = useRef<SVGGElement>(null);
   const trailRef = useRef<SVGGElement>(null);
   const ptRef = useRef<number | null>(null);
   const lastNow = useRef(0);
+  // The frame store's reset counter as of the last frame drawn: a change means the buffer was
+  // cleared (a replay seek, a new session), so the clock re-anchors and the dots snap.
+  const epochRef = useRef(framesEpoch());
 
   useEffect(() => {
     let raf = 0;
@@ -406,7 +440,18 @@ export default function TrackMap({
         const now = performance.now();
         const dt = now - lastNow.current;
         lastNow.current = now;
-        if (ptRef.current === null || dt > 1500 || latest - ptRef.current > 40000) {
+        if (epochRef.current !== framesEpoch()) {
+          epochRef.current = framesEpoch();
+          ptRef.current = null;
+          for (const st of smoothRef.current.values()) st.shown = false;
+          leftPitsRef.current.clear();
+        }
+        const inReplay = replayActive();
+        if (inReplay) {
+          // A replay is drawn wherever its own clock is — paused, sped up or just moved — and
+          // waits at the newest frame if the data for that moment hasn't arrived yet.
+          ptRef.current = Math.max(buf[0].t, Math.min(replayNow(), latest));
+        } else if (ptRef.current === null || dt > 1500 || latest - ptRef.current > 40000) {
           // First frame / tab was hidden / fell to the buffer's edge → (re)anchor. Rare.
           // Never before the oldest frame we hold: a server that has only just connected has a
           // few seconds of history, and anchoring the full delay back put the clock in a gap
@@ -447,9 +492,13 @@ export default function TrackMap({
         const outs = retiredRef.current;
         const sel = selRef.current;
         const smooth = smoothRef.current;
+        const leftPits = leftPitsRef.current;
+        const line = lineRef.current;
         // EMA weight for this frame (τ = 300ms): filters the feed's sample-to-sample speed
         // noise so dots hold steady pace instead of surging/slowing with GPS jitter.
-        const ema = 1 - Math.exp(-dt / 300);
+        // At 2× or 4× replay the cars cover that much more ground per frame, so the smoothing
+        // keeps pace in race time rather than trailing them.
+        const ema = 1 - Math.exp(-(dt * (inReplay ? Math.max(1, replayRate()) : 1)) / 300);
 
         const kids = group.children;
         for (let k = 0; k < kids.length; k++) {
@@ -460,6 +509,7 @@ export default function TrackMap({
           if (!pa || pits?.has(num) || outs?.has(num)) {
             el.style.visibility = "hidden";
             if (st) st.shown = false; // snap (not glide) when it reappears
+            if (pits?.has(num)) leftPits.set(num, pt);
             continue;
           }
           const pb = c.c[num] ?? pa;
@@ -469,6 +519,17 @@ export default function TrackMap({
           const q3 = p3f.c[num] ?? pb;
           const x = w0 * q0[0] + w1 * pa[0] + w2 * pb[0] + w3 * q3[0];
           const y = w0 * q0[1] + w1 * pa[1] + w2 * pb[1] + w3 * q3[1];
+
+          const left = leftPits.get(num);
+          if (left !== undefined) {
+            if (line && pt - left < PIT_EXIT_MAX_MS && metresOffLine(x, y, line) > ON_LINE_METRES) {
+              el.style.visibility = "hidden";
+              if (st) st.shown = false;
+              continue;
+            }
+            leftPits.delete(num);
+          }
+
           const rx = x * cos - y * sin;
           const ry = x * sin + y * cos;
           const cx = offX + (rx - minX) * scale;
