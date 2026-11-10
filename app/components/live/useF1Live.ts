@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useEffect, useState } from "react";
+import { startTransition, useEffect, useRef, useState } from "react";
 import { Driver, IntervalRow, LapSummary, StintRow } from "@/lib/timingTypes";
 import { F1_LIVE } from "@/lib/live/liveConfig";
 import { getStoredVisitorToken } from "@/lib/visitorToken";
@@ -18,6 +18,7 @@ import {
   setReplayClock,
   stopReplayClock,
   subscribeReplayClock,
+  telTail,
 } from "./framesStore";
 
 interface ApiRow {
@@ -268,10 +269,17 @@ export function useF1Live(
   serverKnowsNothingLive = false,
   /** The session picked for a replay (null: the most recent race). */
   replaySession: { path: string; year: number } | null = null,
+  /** A driver is being followed, so the telemetry card wants data (see `tel` in the poll). */
+  wantTelemetry = false,
 ): LiveState {
   const [state, setState] = useState<LiveState>(
     serverKnowsNothingLive && view === "live" ? { ...empty, status: "idle" } : empty,
   );
+  // Read by the poll loop, not a dependency of it: following a driver mustn't restart polling.
+  const wantTel = useRef(wantTelemetry);
+  useEffect(() => {
+    wantTel.current = wantTelemetry;
+  }, [wantTelemetry]);
 
   useEffect(() => {
     // Scoped to THIS effect instance, not a shared ref across re-runs — a stale in-flight
@@ -381,11 +389,16 @@ export function useF1Live(
         // window regardless, so the buffer keeps enough lead room to interpolate smoothly.
         const pt = getPlaybackT();
         const asOfParam = pt > 0 ? `&asOf=${Math.floor(pt)}` : "";
+        // A replay from OpenF1 only fetches telemetry for a visitor following a driver. Asked from
+        // the instant on screen (or the newest sample held), not from the newest position frame
+        // ~20 s ahead, so the card fills in seconds after a driver is picked rather than ~20 s.
+        const telParam =
+          view === "replay" && wantTel.current ? `&tel=1&telSince=${Math.floor(Math.max(telTail(), pt - 2_000, 0))}` : "";
         const epochAtRequest = framesEpoch();
         // Bounded: a request that stalls is abandoned, and the error path below releases the
         // in-flight guard and schedules the next poll — rather than one hung request holding
         // the guard and stopping every poll after it.
-        const res = await fetch(`/api/f1live?since=${newestFrameT()}&view=${view}${t0Param}${sessionParam}${posParam}${asOfParam}`, {
+        const res = await fetch(`/api/f1live?since=${newestFrameT()}&view=${view}${t0Param}${sessionParam}${posParam}${asOfParam}${telParam}`, {
           cache: "no-store",
           headers: myToken ? { "X-F1-Token": myToken } : undefined,
           signal: AbortSignal.any([aborter.signal, AbortSignal.timeout(POLL_TIMEOUT_MS)]),

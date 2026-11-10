@@ -377,8 +377,9 @@ export interface SessionCache {
   durationMs: number;
   /** Telemetry already decoded (OpenF1), on the same clock as `frames` — used instead of `car`. */
   tel?: { t: number; c: Record<string, [number, number, number, number]> }[];
-  /** Loads `frames`/`tel` for a window of the session on demand (OpenF1 serves them in chunks). */
-  ensureWindow?: (fromMs: number, toMs: number) => Promise<void>;
+  /** Loads `frames` (and `tel` when asked) for a window of the session on demand (OpenF1 serves
+   *  them in chunks). */
+  ensureWindow?: (fromMs: number, toMs: number, withTelemetry?: boolean) => Promise<void>;
 }
 
 const cache = new Map<string, SessionCache>();
@@ -645,7 +646,8 @@ export interface F1LiveRow {
   took_flag: boolean;
   grid: number;
   stints: { compound: string; laps: number; age: number; isNew: boolean; segment: number | null }[];
-  weekendTyresLeft: { compound: string; left: number }[];
+  /** Absent until the weekend's earlier sessions have been counted (see priorWeekendUsage). */
+  weekendTyresLeft?: { compound: string; left: number }[];
   /** S1/S2/S3 with F1's purple/green flags — same shape the socket emits, so the UI is
    *  identical whether a session is live or being replayed from the archive. */
   sectors: { value: string; overallFastest: boolean; personalFastest: boolean; segments: number[] }[];
@@ -883,22 +885,6 @@ function allocationForWeekend(sessionNames: string[]): Record<string, number> {
 /** Every session of the same event that happened BEFORE this one, plus that weekend's
  *  allocation. All types count — a sprint is typed "Race", and excluding it credited drivers
  *  with tyres they had already used. */
-async function weekendPriorSessions(
-  sessionPath: string,
-): Promise<{ paths: string[]; allocation: Record<string, number> }> {
-  const hit = priorSessionsCache.get(sessionPath);
-  if (hit) return hit;
-  const { found, value } = await findWeekendPriorSessions(sessionPath);
-  if (found) priorSessionsCache.set(sessionPath, value);
-  return value;
-}
-
-// Runs on every poll, and a session's earlier sessions and its weekend's allocation never change
-// once it exists. Uncached, an OpenF1 replay asked for the weekend's session list (three requests)
-// every few seconds until its rate limit held the next poll ~25 s: the map froze once a minute.
-// Only a session that was found is kept, so a lookup that failed is tried again.
-const priorSessionsCache = new Map<string, { paths: string[]; allocation: Record<string, number> }>();
-
 async function findWeekendPriorSessions(
   sessionPath: string,
 ): Promise<{ found: boolean; value: { paths: string[]; allocation: Record<string, number> } }> {
@@ -928,23 +914,52 @@ async function findWeekendPriorSessions(
   };
 }
 
-/** Sets remaining (of the weekend's assumed dry-tyre allocation) per driver, per compound —
- *  weekend total usage (prior sessions, cached, + this session up to `uptoMs`) subtracted
- *  from WEEKEND_ALLOCATION. Always returns all three dry compounds, even at 0 used. */
-async function weekendTyresLeft(
-  sessionPath: string,
-  currentAppState: Record<string, Record<string, unknown>>,
-): Promise<Record<string, { compound: string; left: number }[]>> {
-  const total: Record<string, Record<string, number>> = {};
-  const { paths: priors, allocation } = await weekendPriorSessions(sessionPath).catch(() => ({
-    paths: [] as string[],
-    allocation: WEEKEND_ALLOCATION,
-  }));
-  for (const p of priors) {
-    try {
-      addCounts(total, await newSetCountsForCompletedSession(p));
-    } catch {}
+type PriorUsage = { total: Record<string, Record<string, number>>; allocation: Record<string, number> };
+const priorUsageCache = new Map<string, PriorUsage>();
+const priorUsagePending = new Set<string>();
+const priorUsageTriedAt = new Map<string, number>();
+
+/**
+ * New sets fitted in the weekend's earlier sessions, and its allocation — or null while they're
+ * still being counted, which starts in the background on the first call. They never change once
+ * a session exists, and this runs on every poll:
+ * - Uncached, an OpenF1 replay asked for the weekend's session list (three requests) every few
+ *   seconds until its rate limit (~30 a minute) held the next poll ~25 s: the map froze once a
+ *   minute.
+ * - Awaited, counting every earlier session held up the poll that opens a replay. The cars come
+ *   first now and the Tyre Allocation card fills in a moment later.
+ * Kept only when every session was found and counted. A lookup that failed is tried again half a
+ * minute later, rather than leaving the numbers short for good or retrying on every poll.
+ */
+function priorWeekendUsage(sessionPath: string): PriorUsage | null {
+  const hit = priorUsageCache.get(sessionPath);
+  if (hit) return hit;
+  if (!priorUsagePending.has(sessionPath) && Date.now() - (priorUsageTriedAt.get(sessionPath) ?? 0) > 30_000) {
+    priorUsagePending.add(sessionPath);
+    priorUsageTriedAt.set(sessionPath, Date.now());
+    void (async () => {
+      const { found, value } = await findWeekendPriorSessions(sessionPath);
+      if (!found) return;
+      const total: Record<string, Record<string, number>> = {};
+      for (const p of value.paths) addCounts(total, await newSetCountsForCompletedSession(p));
+      priorUsageCache.set(sessionPath, { total, allocation: value.allocation });
+    })()
+      .catch(() => {})
+      .finally(() => priorUsagePending.delete(sessionPath));
   }
+  return null;
+}
+
+/** Sets remaining (of the weekend's assumed dry-tyre allocation) per driver, per compound —
+ *  weekend total usage (earlier sessions + this one up to `uptoMs`) subtracted from the
+ *  allocation. Always returns all three dry compounds, even at 0 used. */
+function weekendTyresLeft(
+  prior: PriorUsage,
+  currentAppState: Record<string, Record<string, unknown>>,
+): Record<string, { compound: string; left: number }[]> {
+  const { allocation } = prior;
+  const total: Record<string, Record<string, number>> = {};
+  addCounts(total, prior.total);
   addCounts(total, countNewSetsByDriver(currentAppState));
 
   const out: Record<string, { compound: string; left: number }[]> = {};
@@ -1012,10 +1027,12 @@ export async function getF1LiveState(
   // OTHER displayed value (a flag tint, the lap counter, gaps) needs to reflect that SAME
   // delayed instant, or it visibly "knows" things before the dots have caught up to them.
   infoUptoMs: number = uptoMs,
+  // OpenF1 replays: telemetry only for a visitor following a driver (see windowLoader).
+  withTelemetry = true,
 ): Promise<F1LiveState> {
   const s = await load(sessionPath, live);
   // OpenF1 sessions fetch positions/telemetry for the window being played, as it's reached.
-  await s.ensureWindow?.(uptoMs - 50_000, uptoMs + 1_000);
+  await s.ensureWindow?.(uptoMs - 50_000, uptoMs + 1_000, withTelemetry);
   const timing = mergeUpto(s.timing, infoUptoMs);
   // A sector's Value survives the line — F1 only overwrites it when the sector is next
   // completed. Merged state alone therefore can't say which lap a time belongs to. Walk the
@@ -1049,9 +1066,8 @@ export async function getF1LiveState(
   }
   const appState = mergeUpto(s.app, infoUptoMs);
   const stintFirstSeenAt = stintFirstSeenTimes(s.app, infoUptoMs);
-  const weekendMap = await weekendTyresLeft(sessionPath, appState).catch(
-    () => ({}) as Record<string, { compound: string; left: number }[]>,
-  );
+  const prior = priorWeekendUsage(sessionPath);
+  const weekendMap = prior ? weekendTyresLeft(prior, appState) : null;
 
   const drivers: F1LiveDriver[] = Object.values(s.drivers).map((d) => ({
     driver_number: +d.RacingNumber,
@@ -1120,7 +1136,9 @@ export async function getF1LiveState(
       took_flag: (Number(t.Status ?? 0) & 1024) !== 0,
       grid: Number((appState[numStr]?.GridPos as string | number) ?? 0),
       stints,
-      weekendTyresLeft: weekendMap[numStr] ?? DRY_COMPOUNDS.map((c) => ({ compound: c, left: WEEKEND_ALLOCATION[c] })),
+      weekendTyresLeft: weekendMap
+        ? (weekendMap[numStr] ?? DRY_COMPOUNDS.map((c) => ({ compound: c, left: prior!.allocation[c] ?? WEEKEND_ALLOCATION[c] })))
+        : undefined,
       // Read from the merge at `infoUptoMs` — the same instant the car dots are rendering —
       // so a mini-sector lights up exactly as the car reaches it on screen, not 20s early.
       // Normalized to three dense slots so the UI can't receive holes (they serialize null).

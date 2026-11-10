@@ -167,7 +167,7 @@ through the live view. Click any image for full size.
 | **Timing board, tyres, sectors, race control, session status — real-time** | F1 live-timing WebSocket (`livetiming.formula1.com/signalrcore`) | **No.** F1 serves these to an anonymous subscribe |
 | **Car positions (the map) + telemetry** | The same socket — `Position.z` and `CarData.z` | **F1 TV token** (the site's, or a visitor's own) |
 | Replay, and the fallback when the socket is closed | F1 **static** archive (`livetiming.formula1.com/static`) — published hours after a session; since ~15 Oct 2026 it requires an F1 TV login, so the site's token is sent with it | **F1 TV token** |
-| Replay without a token | [OpenF1](https://openf1.org) — the same sessions, rebuilt into the archive's format (`lib/archive/openf1Session.ts`); its free tier is closed while any session is live, so replay says so | No |
+| Replay without a token | [OpenF1](https://openf1.org) — the same sessions, rebuilt into the archive's format (`lib/archive/openf1Session.ts`). Car positions come in two-minute blocks as the replay reaches them, and telemetry only while a driver is followed, to stay inside its free tier (~30 requests a minute). That tier is closed while any session is live, so replay says so | No |
 | Air and track temperature | The socket's `WeatherData` topic, OpenF1 or the archive in a replay | No |
 | Finished-round classification, kept after the socket closes | Supabase (optional) | Supabase URL + service-role key |
 

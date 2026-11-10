@@ -151,9 +151,9 @@ export default function LiveSection({ serverKnowsNothingLive = false }: { server
   };
   // The session picked in the replay controls (null: the most recent race).
   const [replaySession, setReplaySession] = useState<{ path: string; year: number } | null>(null);
-  const s = useF1Live(view, replayT0, serverKnowsNothingLive, replaySession);
   // Click-to-follow: selected driver is highlighted on the map + gets a telemetry card.
   const [selected, setSelected] = useState<number | null>(null);
+  const s = useF1Live(view, replayT0, serverKnowsNothingLive, replaySession, selected != null);
   // Same signal TrackMap gates its own reveal on — Race Control was popping in well before
   // the map/board actually had anything to show, which read as out of order. Called
   // unconditionally (rules of hooks) even though it only matters in the branch below.

@@ -670,73 +670,83 @@ function mergeInto(target: Record<string, unknown>, src: Record<string, unknown>
 
 type TelFrame = { t: number; c: Record<string, [number, number, number, number]> };
 
-/** Loads car positions and telemetry in two-minute chunks as the playback reaches them, keeping
- *  the most recent few. Each chunk is two requests. */
+/** Loads car positions in two-minute chunks as the playback reaches them, keeping the most recent
+ *  few, and each chunk's telemetry only when asked. Telemetry is for the card that follows one
+ *  driver, so a replay nobody is following a driver in doesn't spend half its requests (against
+ *  OpenF1's ~30 a minute) on it — the requests that opening a replay or jumping in it waits on. */
 function windowLoader(entry: SessionCache, key: number, T0: number, durationMs: number) {
-  const chunks = new Map<number, { frames: PosFrame[]; tel: TelFrame[]; used: number }>();
+  const chunks = new Map<number, { frames: PosFrame[]; tel: TelFrame[] | null; used: number }>();
   const pending = new Map<number, Promise<void>>();
+  const telPending = new Map<number, Promise<void>>();
+  const lastChunk = Math.floor(durationMs / CHUNK_MS);
 
   const publish = () => {
     const ordered = [...chunks.entries()].sort((a, b) => a[0] - b[0]);
     entry.frames = ordered.flatMap(([, c]) => c.frames);
-    entry.tel = ordered.flatMap(([, c]) => c.tel);
+    entry.tel = ordered.flatMap(([, c]) => c.tel ?? []);
   };
-
-  // Resolves once the cars can be drawn. Each request takes seconds, so a replay jumping to a new
-  // point shouldn't also wait for telemetry: that follows in the background.
-  const loadChunk = async (idx: number) => {
+  const rangeOf = (idx: number) => {
     const from = new Date(T0 + idx * CHUNK_MS - 2000).toISOString();
     const to = new Date(T0 + (idx + 1) * CHUNK_MS + 2000).toISOString();
-    const range = `session_key=${key}&date>=${from}&date<${to}`;
-    const lo = idx * CHUNK_MS;
-    const hi = (idx + 1) * CHUNK_MS;
+    return { range: `session_key=${key}&date>=${from}&date<${to}`, lo: idx * CHUNK_MS, hi: (idx + 1) * CHUNK_MS };
+  };
+
+  const loadChunk = async (idx: number) => {
+    const { range, lo, hi } = rangeOf(idx);
     const loc = await get<OLocation>(`/location?${range}`);
-    const chunk = { frames: toFrames(loc, T0, lo, hi), tel: [] as TelFrame[], used: Date.now() };
-    chunks.set(idx, chunk);
+    chunks.set(idx, { frames: toFrames(loc, T0, lo, hi), tel: null, used: Date.now() });
     while (chunks.size > MAX_CHUNKS) {
       const oldest = [...chunks.entries()].sort((a, b) => a[1].used - b[1].used)[0];
       chunks.delete(oldest[0]);
     }
     publish();
-    void get<OCarData>(`/car_data?${range}`)
-      .then((car) => {
-        chunk.tel = toTel(car, T0, lo, hi);
-        publish();
-      })
-      .catch(() => {});
+  };
+  const positions = (idx: number) => {
+    if (!pending.has(idx)) pending.set(idx, loadChunk(idx).catch(() => {}).finally(() => pending.delete(idx)));
+    return pending.get(idx)!;
+  };
+  // Never waited for: the cars are drawn without it, and the card fills in when it lands.
+  const telemetry = (idx: number) => {
+    const chunk = chunks.get(idx);
+    if (!chunk || chunk.tel || telPending.has(idx)) return;
+    const { range, lo, hi } = rangeOf(idx);
+    telPending.set(
+      idx,
+      get<OCarData>(`/car_data?${range}`)
+        .then((car) => {
+          const still = chunks.get(idx);
+          if (!still) return;
+          still.tel = toTel(car, T0, lo, hi);
+          publish();
+        })
+        .catch(() => {})
+        .finally(() => telPending.delete(idx)),
+    );
+  };
+  const want = (idx: number, withTelemetry: boolean) => {
+    const have = chunks.get(idx);
+    if (have) {
+      have.used = Date.now();
+      if (withTelemetry) telemetry(idx);
+      return null;
+    }
+    const loading = positions(idx);
+    if (withTelemetry) void loading.then(() => telemetry(idx));
+    return loading;
   };
 
-  return async (fromMs: number, toMs: number) => {
+  return async (fromMs: number, toMs: number, withTelemetry = false) => {
     const first = Math.max(0, Math.floor(fromMs / CHUNK_MS));
-    const last = Math.min(Math.floor(durationMs / CHUNK_MS), Math.floor(toMs / CHUNK_MS));
+    const last = Math.min(lastChunk, Math.floor(toMs / CHUNK_MS));
     const waits: Promise<void>[] = [];
     for (let idx = first; idx <= last; idx++) {
-      const have = chunks.get(idx);
-      if (have) {
-        have.used = Date.now();
-        continue;
-      }
-      if (!pending.has(idx)) {
-        pending.set(
-          idx,
-          loadChunk(idx)
-            .catch(() => {})
-            .finally(() => pending.delete(idx)),
-        );
-      }
-      waits.push(pending.get(idx)!);
+      const loading = want(idx, withTelemetry);
+      if (loading) waits.push(loading);
     }
-    // The next chunk, ahead of need and not waited for, so its positions and telemetry have both
-    // landed before playback reaches them and forward play never stalls on a boundary.
+    // The next chunk, ahead of need and not waited for, so it has landed before playback reaches
+    // it and forward play never stalls on a boundary.
     const next = Math.floor((toMs + 30_000) / CHUNK_MS);
-    if (next <= Math.floor(durationMs / CHUNK_MS) && !chunks.has(next) && !pending.has(next)) {
-      pending.set(
-        next,
-        loadChunk(next)
-          .catch(() => {})
-          .finally(() => pending.delete(next)),
-      );
-    }
+    if (next <= lastChunk) want(next, withTelemetry);
     await Promise.all(waits);
   };
 }

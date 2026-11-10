@@ -82,6 +82,11 @@ export function getTel(): TelFrame[] {
   return telBuffer;
 }
 
+/** The newest telemetry sample held, or 0 for none. */
+export function telTail(): number {
+  return telBuffer.length ? telBuffer[telBuffer.length - 1].t : 0;
+}
+
 /* ----------------------------- shared playback clock ----------------------------- */
 // The map's rAF loop publishes its interpolation time here each frame, so other widgets
 // (the telemetry card) can render data for the SAME instant the dots are showing.

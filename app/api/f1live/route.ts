@@ -217,10 +217,14 @@ export async function GET(req: NextRequest) {
     //                   recent race;
     //   pos             the session time to serve data up to (the replay clock plus a lead for
     //                   interpolation) — pause, speed and seeking are all just where `pos` is;
-    //   start=1         open at lights out with that lead, for a replay just started.
-    // Without either (an older client), the old behaviour: from lights out, looping, at `t0`.
+    //   start=1         open at lights out with that lead, for a replay just started;
+    //   tel=1           a driver is being followed: fetch telemetry (OpenF1 does so only then),
+    //   telSince        and send it from here (the instant on screen), not from `since`.
+    // Without pos or start (an older client), the old behaviour: from lights out, looping, at `t0`.
     const sessionParam = req.nextUrl.searchParams.get("session");
     const posParam = Number(req.nextUrl.searchParams.get("pos"));
+    const withTelemetry = req.nextUrl.searchParams.get("tel") === "1";
+    const telSince = Number(req.nextUrl.searchParams.get("telSince")) || 0;
     const start = req.nextUrl.searchParams.get("start") === "1";
     const candidates = sessionParam
       ? [await replayArchiveChosen(sessionParam, Number(req.nextUrl.searchParams.get("year")))].filter((c) => c !== null)
@@ -237,7 +241,7 @@ export async function GET(req: NextRequest) {
           : start
             ? Math.min(dur, anchor + REPLAY_START_LEAD_MS)
             : anchor + ((Date.now() - replayT0) % span);
-        const state = await replayArchiveState(c.path, c.type, upto, false, asOf ?? upto);
+        const state = await replayArchiveState(c.path, c.type, upto, false, asOf ?? upto, withTelemetry);
         // The timeline rides along whenever the client's buffer is empty (a start, a seek, a
         // new session) — the only times its controls need it.
         const timeline = since === 0 ? await replayArchiveTimeline(c.path, c.type) : undefined;
@@ -256,7 +260,7 @@ export async function GET(req: NextRequest) {
           session: { location: c.location, session_name: c.name },
           ...state,
           frames: newFrames(state.frames, since),
-          telFrames: newTel(state.telFrames, since),
+          telFrames: newTel(state.telFrames, telSince || since),
           replayUpto: result?.upto,
           ...(result?.timeline
             ? { replayInfo: { path: c.path, year: Number(req.nextUrl.searchParams.get("year")) || new Date().getUTCFullYear(), ...result.timeline } }

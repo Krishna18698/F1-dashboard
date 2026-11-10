@@ -71,6 +71,8 @@ export default function TyreAllocation({
                 const pos = positions.get(num) ?? order.indexOf(num) + 1;
                 const byCompound = new Map<string, number>();
                 for (const l of weekendTyresLeft.get(num) ?? []) byCompound.set(l.compound, l.left);
+                // The weekend's earlier sessions are still being counted: say nothing rather than 0.
+                const known = weekendTyresLeft.has(num);
 
                 return (
                   <div key={num} className="flex items-center gap-1.5">
@@ -83,7 +85,7 @@ export default function TyreAllocation({
                       {ORDER.map((c) => {
                         const left = byCompound.get(c) ?? 0;
                         const dark = c === "HARD" || c === "MEDIUM";
-                        const empty = left === 0;
+                        const empty = known && left === 0;
                         return (
                           <span
                             key={c}
@@ -92,10 +94,10 @@ export default function TyreAllocation({
                             // now the same box regardless of the number inside it.
                             className={`tnum inline-flex w-[2.55rem] shrink-0 items-center justify-center gap-1 rounded-full px-1 py-0.5 text-[0.65rem] font-semibold ring-1 ${empty ? "opacity-35" : ""}`}
                             style={{ backgroundColor: `${color(c)}22`, borderColor: color(c), color: dark ? "#e5e5e8" : "#fff" }}
-                            title={`${c}: ${left} new set${left === 1 ? "" : "s"} left this weekend`}
+                            title={known ? `${c}: ${left} new set${left === 1 ? "" : "s"} left this weekend` : "Counting this weekend's earlier sessions…"}
                           >
                             <span className="h-2 w-2 shrink-0 rounded-full ring-1 ring-black/30" style={{ backgroundColor: color(c) }} />
-                            {LETTER[c]} {left}
+                            {LETTER[c]} {known ? left : "–"}
                           </span>
                         );
                       })}
