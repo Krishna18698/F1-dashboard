@@ -307,6 +307,9 @@ lib/
     sessionResults.ts         # last completed session of ANY type — practice and quali
                               #   included, which nothing else retains once the socket shuts
     supabase.ts               # shared REST config for both stores
+  background.ts               # work a request starts but doesn't wait for (the next replay
+                              #   stretch, telemetry, tyre counts); the replay route keeps
+                              #   the Vercel instance running until it's done
   sessionWindows.ts           # every timing constant more than one file needs
   timingTypes.ts              # timing data shapes (pure types, no network)
   jolpica.ts                  # standings / calendar / weekend sessions / winners

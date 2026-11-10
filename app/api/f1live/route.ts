@@ -1,4 +1,5 @@
-import { NextRequest } from "next/server";
+import { NextRequest, after } from "next/server";
+import { backgroundSettled } from "@/lib/background";
 import { liveArchiveSession, liveArchiveState } from "@/lib/live/liveArchive";
 import { replayArchiveAnchorMs, replayArchiveCandidates, replayArchiveChosen, replayArchiveDuration, replayArchiveState, replayArchiveTimeline } from "@/lib/replay/replayArchive";
 import { liveSocketStatus, liveSocketState, liveSocketStateForVisitor } from "@/lib/live/liveSocket";
@@ -51,6 +52,9 @@ function newTel<T extends { t: number }>(frames: T[], since: number): T[] {
 const REPLAY_START_LEAD_MS = 30_000;
 
 export async function GET(req: NextRequest) {
+  // Keeps the instance running until work this request started in the background is done (see
+  // lib/background.ts): otherwise a replay's next stretch and its telemetry crawl in on later polls.
+  after(backgroundSettled);
   const since = Number(req.nextUrl.searchParams.get("since") ?? 0) || 0;
   const view = req.nextUrl.searchParams.get("view") === "replay" ? "replay" : "live";
   // Client-supplied "when this replay view session started" — anchors the virtual clock so

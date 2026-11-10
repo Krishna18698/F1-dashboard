@@ -20,6 +20,7 @@ import "server-only";
 import type { ResolvedSession, SessionCache, Delta, PosFrame, RawDriver, RcMessage } from "./archiveParser";
 import { QUALI_DURATION_MS, SPRINT_QUALI_DURATION_MS } from "../sessionWindows";
 import { F1_LIVE } from "../live/liveConfig";
+import { inBackground } from "../background";
 
 const BASE = "https://api.openf1.org/v1";
 export const OPENF1_PREFIX = "openf1/";
@@ -702,7 +703,7 @@ function windowLoader(entry: SessionCache, key: number, T0: number, durationMs: 
     publish();
   };
   const positions = (idx: number) => {
-    if (!pending.has(idx)) pending.set(idx, loadChunk(idx).catch(() => {}).finally(() => pending.delete(idx)));
+    if (!pending.has(idx)) pending.set(idx, inBackground(loadChunk(idx).catch(() => {}).finally(() => pending.delete(idx))));
     return pending.get(idx)!;
   };
   // Never waited for: the cars are drawn without it, and the card fills in when it lands.
@@ -712,15 +713,17 @@ function windowLoader(entry: SessionCache, key: number, T0: number, durationMs: 
     const { range, lo, hi } = rangeOf(idx);
     telPending.set(
       idx,
-      get<OCarData>(`/car_data?${range}`)
-        .then((car) => {
-          const still = chunks.get(idx);
-          if (!still) return;
-          still.tel = toTel(car, T0, lo, hi);
-          publish();
-        })
-        .catch(() => {})
-        .finally(() => telPending.delete(idx)),
+      inBackground(
+        get<OCarData>(`/car_data?${range}`)
+          .then((car) => {
+            const still = chunks.get(idx);
+            if (!still) return;
+            still.tel = toTel(car, T0, lo, hi);
+            publish();
+          })
+          .catch(() => {})
+          .finally(() => telPending.delete(idx)),
+      ),
     );
   };
   const want = (idx: number, withTelemetry: boolean) => {

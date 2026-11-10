@@ -14,6 +14,7 @@ import { PRE_START_LIVE_MS, QUALI_DURATION_MS, QUALI_LAST_LAP_GRACE_MS, SPRINT_Q
 import zlib from "zlib";
 import { F1_LIVE } from "../live/liveConfig";
 import { OPENF1_PREFIX, loadOpenF1Session, openF1Candidates, openF1NewSetCounts, openF1SessionList, openF1WeekendSessions } from "./openf1Session";
+import { inBackground } from "../background";
 
 const UA = { "User-Agent": "BestHTTP" };
 
@@ -937,15 +938,17 @@ function priorWeekendUsage(sessionPath: string): PriorUsage | null {
   if (!priorUsagePending.has(sessionPath) && Date.now() - (priorUsageTriedAt.get(sessionPath) ?? 0) > 30_000) {
     priorUsagePending.add(sessionPath);
     priorUsageTriedAt.set(sessionPath, Date.now());
-    void (async () => {
-      const { found, value } = await findWeekendPriorSessions(sessionPath);
-      if (!found) return;
-      const total: Record<string, Record<string, number>> = {};
-      for (const p of value.paths) addCounts(total, await newSetCountsForCompletedSession(p));
-      priorUsageCache.set(sessionPath, { total, allocation: value.allocation });
-    })()
-      .catch(() => {})
-      .finally(() => priorUsagePending.delete(sessionPath));
+    void inBackground(
+      (async () => {
+        const { found, value } = await findWeekendPriorSessions(sessionPath);
+        if (!found) return;
+        const total: Record<string, Record<string, number>> = {};
+        for (const p of value.paths) addCounts(total, await newSetCountsForCompletedSession(p));
+        priorUsageCache.set(sessionPath, { total, allocation: value.allocation });
+      })()
+        .catch(() => {})
+        .finally(() => priorUsagePending.delete(sessionPath)),
+    );
   }
   return null;
 }
