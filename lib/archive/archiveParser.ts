@@ -886,23 +886,45 @@ function allocationForWeekend(sessionNames: string[]): Record<string, number> {
 async function weekendPriorSessions(
   sessionPath: string,
 ): Promise<{ paths: string[]; allocation: Record<string, number> }> {
+  const hit = priorSessionsCache.get(sessionPath);
+  if (hit) return hit;
+  const { found, value } = await findWeekendPriorSessions(sessionPath);
+  if (found) priorSessionsCache.set(sessionPath, value);
+  return value;
+}
+
+// Runs on every poll, and a session's earlier sessions and its weekend's allocation never change
+// once it exists. Uncached, an OpenF1 replay asked for the weekend's session list (three requests)
+// every few seconds until its rate limit held the next poll ~25 s: the map froze once a minute.
+// Only a session that was found is kept, so a lookup that failed is tried again.
+const priorSessionsCache = new Map<string, { paths: string[]; allocation: Record<string, number> }>();
+
+async function findWeekendPriorSessions(
+  sessionPath: string,
+): Promise<{ found: boolean; value: { paths: string[]; allocation: Record<string, number> } }> {
   const prefix = sessionPath.split("/").slice(0, 2).join("/") + "/";
   if (sessionPath.startsWith(OPENF1_PREFIX)) {
     const weekend = await openF1WeekendSessions(sessionPath);
     const mine = weekend.find((s) => s.path === sessionPath);
     return {
-      paths: mine ? weekend.filter((s) => s.startMs < mine.startMs).map((s) => s.path) : [],
-      allocation: allocationForWeekend(weekend.map((s) => s.name)),
+      found: !!mine,
+      value: {
+        paths: mine ? weekend.filter((s) => s.startMs < mine.startMs).map((s) => s.path) : [],
+        allocation: allocationForWeekend(weekend.map((s) => s.name)),
+      },
     };
   }
   const all = await flatSessions();
   const mine = all.find((s) => s.path === sessionPath);
   const weekend = all.filter((s) => s.path.startsWith(prefix));
   const allocation = allocationForWeekend(weekend.map((s) => s.name));
-  if (!mine) return { paths: [], allocation };
+  if (!mine) return { found: false, value: { paths: [], allocation } };
   return {
-    paths: weekend.filter((s) => s.path !== sessionPath && s.startMs < mine.startMs).map((s) => s.path),
-    allocation,
+    found: true,
+    value: {
+      paths: weekend.filter((s) => s.path !== sessionPath && s.startMs < mine.startMs).map((s) => s.path),
+      allocation,
+    },
   };
 }
 

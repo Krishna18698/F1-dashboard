@@ -168,6 +168,7 @@ interface OInterval {
 interface OResult {
   driver_number: number;
   dnf?: boolean;
+  dns?: boolean;
   duration?: number | (number | null)[] | null;
 }
 interface OLocation {
@@ -501,9 +502,15 @@ export async function loadOpenF1Session(path: string): Promise<SessionCache> {
       if (ran < 3 && finishedAt[ran - 1] != null) push(finishedAt[ran - 1], r.driver_number, { KnockedOut: true });
     }
   }
-  // Retired from a race: from the end of the last lap they completed.
+  // Retired from a race: from the end of the last lap they completed. A car that never started is
+  // out from the start: São Paulo 2026's BOT (DNS, not DNF) otherwise sat on the map in the pit
+  // lane all race.
   if (isRace) {
     for (const r of results) {
+      if (r.dns) {
+        push(0, r.driver_number, { Retired: true });
+        continue;
+      }
       if (!r.dnf) continue;
       const last = lapEnds.filter((e) => e.num === String(r.driver_number)).at(-1);
       if (last) push(last.ts + 5_000, r.driver_number, { Retired: true });
