@@ -9,6 +9,9 @@ import { useLiveStatus, LiveStatus } from "./useLiveStatus";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
+/** How often a page stuck on a finished weekend asks the server again. */
+const STALE_RETRY_MS = 5 * 60_000;
+
 function delta(ms: number) {
   ms = Math.max(0, ms);
   return {
@@ -56,18 +59,29 @@ export default function SessionSchedule({
   const nextIdx = ready ? sessions.findIndex((s) => Date.parse(s.iso) > now!) : -1;
   const next = nextIdx >= 0 ? sessions[nextIdx] : null;
 
-  // Just after the race: show "Race ended" (no timer) for 5 min, then refresh so the
+  // Just after the race: show "Race ended" (no timer) for WEEKEND_FLIP_MS, then refresh so the
   // server advances the hero/schedule/calendar to the next round.
   const isRace = (type ?? "").toLowerCase() === "race";
   const raceEnded = ready && !live && !!endedAt && isRace && now! < endedAt + WEEKEND_FLIP_MS;
+  // Nothing left to count down to and nothing on track: this page is holding a weekend that is
+  // over. The race-end signal above only exists for a short while after the flag (days later
+  // /api/livestatus is just `{ live: false }`), so a tab that slept through it never moved on:
+  // a phone bringing back a tab from the Las Vegas weekend sat on "Weekend complete" with a
+  // blank timer until reloaded. The server picks the round on every request, so ask it again.
+  const weekendOver = ready && !live && !raceEnded && !next;
   const flipped = useRef<number | null>(null);
+  const lastRefresh = useRef<number | null>(null);
   useEffect(() => {
-    if (!ready || !endedAt || !isRace) return;
-    if (now! >= endedAt + WEEKEND_FLIP_MS && flipped.current !== endedAt) {
-      flipped.current = endedAt; // fire once per race end — no refresh loop
-      router.refresh();
-    }
-  }, [ready, now, endedAt, isRace, router]);
+    if (!ready) return;
+    const raceFlipDue = !!endedAt && isRace && now! >= endedAt + WEEKEND_FLIP_MS && flipped.current !== endedAt;
+    // Retried rather than fired once: the server can rightly answer with the same weekend (the
+    // season's last round, until it becomes "season complete"), and that must not loop.
+    const overDue = weekendOver && (lastRefresh.current == null || now! - lastRefresh.current >= STALE_RETRY_MS);
+    if (!raceFlipDue && !overDue) return;
+    if (raceFlipDue) flipped.current = endedAt ?? null; // once per race end
+    lastRefresh.current = now!;
+    router.refresh();
+  }, [ready, now, endedAt, isRace, weekendOver, router]);
 
   const t = ready && !liveSession && !raceEnded && next ? delta(Date.parse(next.iso) - now!) : null;
 

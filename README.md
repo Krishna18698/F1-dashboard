@@ -143,7 +143,8 @@ through the live view. Click any image for full size.
   rounds.
 - **Weekend schedule** — every session of the current round in your local time, ticked off as
   they finish.
-- **Next-session countdown** on the hero card, with the circuit's lap record.
+- **Next-session countdown** on the hero card, with the circuit's lap record. A page left open
+  moves on to the next round by itself, including a tab that was asleep when the race ended.
 - **Rolling results ticker** — the latest session's classification scrolls across the hero
   card, and auto-hides 24h after the session ends.
 
