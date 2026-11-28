@@ -94,17 +94,24 @@ async function capture(
 
 export async function GET() {
   try {
-    // The hero must use the independent classification when it is available. F1's live hub
-    // can expose a completed qualifying snapshot from an intermediate segment, so it cannot
-    // outrank OpenF1 for the finished-result ticker.
+    // A session on track outranks every finished result. OpenF1 used to be asked first, and
+    // anything it had won — but its free tier is locked out while a session runs, so what it
+    // serves then is its cached answer from before the session: all through Qatar FP3 the hero
+    // read "Practice 2 · RESULT" under "Practice 3 · Live". `live` is liveNow(), the same check
+    // that puts "On track now" on the hero, so the two can no longer disagree.
+    const socket = await liveSocketResults();
+    const result = socket && !finishedInFuture(socket) ? socket : null;
+    if (result?.live) return Response.json({ status: "ok", ...result });
+
+    // Finished results: the hero must use the independent classification when it is
+    // available. F1's live hub can expose a completed qualifying snapshot from an
+    // intermediate segment, so it cannot outrank OpenF1 for the finished-result ticker.
     const openF1 = await openF1LatestResult();
     if (openF1) {
       await capture(openF1, true);
       return Response.json({ status: "ok", ...openF1, live: false, complete: true });
     }
 
-    const socket = await liveSocketResults();
-    const result = socket && !finishedInFuture(socket) ? socket : null;
     if (result) {
       // A completed qualifying snapshot from the live hub can still contain the last
       // qualifying segment's intermediate order. Prefer a completed independent

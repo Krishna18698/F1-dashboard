@@ -146,7 +146,8 @@ through the live view. Click any image for full size.
 - **Next-session countdown** on the hero card, with the circuit's lap record. A page left open
   moves on to the next round by itself, including a tab that was asleep when the race ended.
 - **Rolling results ticker** — the latest session's classification scrolls across the hero
-  card, and auto-hides 24h after the session ends.
+  card, and auto-hides 24h after the session ends. While a session is on track it shows that
+  session's running order instead, badged **LIVE**.
 
 ### Everything else
 - **Paddock Intel** — latest F1 news pulled from public RSS.
@@ -258,9 +259,10 @@ app/
   loading.tsx                 # route-level shimmer skeleton
   api/
     f1live/route.ts           # live map + timing; the mode priority chain lives here
-    f1results/route.ts        # latest classification — socket, session snapshot, OpenF1,
-                              #   round snapshot, then archive; every tier that yields a
-                              #   finished result writes it back to the session snapshot
+    f1results/route.ts        # the session on track, else the latest finished classification
+                              #   — OpenF1, socket, session snapshot, round snapshot, then
+                              #   archive; every tier that yields a finished result writes
+                              #   it back to the session snapshot
     racecontrol/route.ts      # race control messages + track status
     replay/sessions/route.ts  # the seasons and sessions the replay picker offers
     championship/route.ts     # live championship projection
